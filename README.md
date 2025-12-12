@@ -30,6 +30,8 @@ Basic SQLAlchemy driver for [DuckDB](https://duckdb.org/)
 $ pip install duckdb-engine
 ```
 
+`duckdb-engine` requires the DuckDB Python package `>=1.2.0,<2`. Installing via pip will pull a compatible DuckDB version automatically.
+
 DuckDB Engine also has a conda feedstock available, the instructions for the use of which are available in it's [repository](https://github.com/conda-forge/duckdb-engine-feedstock).
 
 ## Usage
@@ -38,7 +40,9 @@ Once you've installed this package, you should be able to just use it, as SQLAlc
 
 ```python
 from sqlalchemy import Column, Integer, Sequence, String, create_engine
-from sqlalchemy.ext.declarative import declarative_base
+# SQLAlchemy 1.4+:
+from sqlalchemy.orm import declarative_base
+# SQLAlchemy 1.3 users can import from sqlalchemy.ext.declarative instead.
 from sqlalchemy.orm.session import Session
 
 Base = declarative_base()
@@ -85,6 +89,86 @@ create_engine(
 
 The supported configuration parameters are listed in the [DuckDB docs](https://duckdb.org/docs/sql/configuration)
 
+## Customer-Facing Analytics (MotherDuck)
+
+For embedded / customer-facing analytics backends (high concurrency, predictable per-tenant isolation), MotherDuck recommends:
+
+- Prefer persistent connections (connection pooling) to avoid per-request connect overhead.
+- Use `attach_mode=single` so each end user is attached only to the database they should see.
+- Use `session_hint=<user_id_or_hash>` on read-scaling tokens to keep an end user pinned to the same duckling for cache reuse and steadier latency.
+
+Example:
+
+```python
+from sqlalchemy import create_engine
+
+engine = create_engine(
+    "duckdb:///md:customer_db?attach_mode=single&session_hint=user-123",
+    connect_args={"config": {"motherduck_token": "..."}},
+)
+```
+
+## SQLAlchemy Engine setup for Customer-Facing Analytics (CFA)
+
+In a typical 3-tier web app (browser → backend → MotherDuck), you want:
+
+- **One long-lived `Engine` per tenant** (or per service-account token) rather than per request.
+- **Connection pooling** so requests reuse existing connections.
+- **Session affinity** (`session_hint`) for steadier latency on read-scaling.
+
+### Recommended `create_engine()` settings
+
+```python
+from sqlalchemy import create_engine
+
+engine = create_engine(
+    # Per-tenant DB; attach only the one DB for isolation/predictability.
+    "duckdb:///md:customer_db?attach_mode=single&session_hint=user-123",
+    connect_args={
+        "config": {
+            "motherduck_token": "...",
+            # Keep the underlying duckling warm briefly between connection churn.
+            # (Useful if your backend has bursts of requests.)
+            "dbinstance_inactivity_ttl": 60,
+        }
+    },
+    # Pooling: reuse connections between requests.
+    pool_pre_ping=True,
+    # Tune these based on your backend concurrency *per tenant*.
+    # Start small and increase if you see pool waits under load.
+    pool_size=5,
+    max_overflow=10,
+)
+```
+
+Notes:
+
+- `pool_size` is the steady-state number of open connections per tenant. Keep it low if you have many tenants.
+- `max_overflow` controls burst capacity; set it based on your expected p95 concurrency bursts per tenant.
+- For serverless / very short-lived runtimes where keeping warm pools is counterproductive, consider `poolclass=NullPool`.
+
+### Per-tenant engine pattern (service-account-per-tenant)
+
+If you follow the MotherDuck CFA recommendation of one service account (and token) per tenant, you generally want one cached `Engine` per tenant:
+
+```python
+from functools import lru_cache
+from sqlalchemy import Engine, create_engine
+
+
+@lru_cache(maxsize=256)
+def engine_for_tenant(tenant_id: str, token: str, db: str) -> Engine:
+    return create_engine(
+        f"duckdb:///md:{db}?attach_mode=single",
+        connect_args={"config": {"motherduck_token": token}},
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=10,
+    )
+```
+
+This keeps connections warm per customer, prevents cross-tenant accidental attachments, and maps cleanly to per-tenant isolation.
+
 ## How to register a pandas DataFrame
 
 ```python
@@ -128,7 +212,7 @@ The following example demonstrates how to create an auto-incrementing ID column 
 
 ### Pandas `read_sql()` chunksize
 
-**NOTE**: this is no longer an issue in versions `>=0.5.0` of `duckdb`
+**NOTE**: this is no longer an issue in DuckDB 1.x (including 1.4+).
 
 The `pandas.read_sql()` method can read tables from `duckdb_engine` into DataFrames, but the `sqlalchemy.engine.result.ResultProxy` trips up when `fetchmany()` is called. Therefore, for now `chunksize=None` (default) is necessary when reading duckdb tables into DataFrames. For example:
 
@@ -163,7 +247,7 @@ After loading this class with your program, Alembic will no longer raise an erro
 
 ## Preloading extensions (experimental)
 
-> DuckDB 0.9.0+ includes builtin support for autoinstalling and autoloading of extensions, see [the extension documentation](http://duckdb.org/docs/archive/0.9.0/extensions/overview#autoloadable-extensions) for more information.
+> DuckDB includes builtin support for autoinstalling and autoloading extensions, see [the extension documentation](https://duckdb.org/docs/stable/extensions/overview#autoloadable-extensions) for more information.
 
 Until the DuckDB python client allows you to natively preload extensions, I've added experimental support via a `connect_args` parameter
 

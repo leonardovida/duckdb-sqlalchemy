@@ -1,5 +1,6 @@
 import re
 import warnings
+from collections import defaultdict
 from functools import lru_cache
 from typing import (
     TYPE_CHECKING,
@@ -16,6 +17,7 @@ from typing import (
 
 import duckdb
 import sqlalchemy
+from packaging.version import Version
 from sqlalchemy import pool, select, sql, text, util
 from sqlalchemy import types as sqltypes
 from sqlalchemy.dialects.postgresql import UUID, insert
@@ -42,8 +44,9 @@ from .datatypes import ISCHEMA_NAMES, register_extension_types
 __version__ = "0.17.0"
 sqlalchemy_version = sqlalchemy.__version__
 duckdb_version: str = duckdb.__version__
-supports_attach: bool = duckdb_version >= "0.7.0"
-supports_user_agent: bool = duckdb_version >= "0.9.2"
+duckdb_version_info = Version(duckdb_version)
+supports_attach: bool = duckdb_version_info >= Version("0.7.0")
+supports_user_agent: bool = duckdb_version_info >= Version("0.9.2")
 
 if TYPE_CHECKING:
     from sqlalchemy.base import Connection
@@ -82,10 +85,7 @@ class DuckDBInspector(PGInspector):
     def get_check_constraints(
         self, table_name: str, schema: Optional[str] = None, **kw: Any
     ) -> List[Dict[str, Any]]:
-        try:
-            return super().get_check_constraints(table_name, schema, **kw)
-        except Exception as e:
-            raise NotImplementedError() from e
+        return super().get_check_constraints(table_name, schema, **kw)
 
 
 class ConnectionWrapper:
@@ -134,9 +134,10 @@ class CursorWrapper:
         context: Optional[Any] = None,
     ) -> None:
         try:
-            if statement.lower() == "commit":  # this is largely for ipython-sql
+            normalized = statement.strip().rstrip(";").lower()
+            if normalized == "commit":  # this is largely for ipython-sql
                 self.__c.commit()
-            elif statement.lower() in (
+            elif normalized in (
                 "register",
                 "register(?, ?)",
                 "register($1, $2)",
@@ -148,13 +149,11 @@ class CursorWrapper:
                 self.__c.execute(statement)
             else:
                 self.__c.execute(statement, parameters)
-        except RuntimeError as e:
-            if e.args[0].startswith("Not implemented Error"):
+        except Exception as e:
+            msg = str(e)
+            if msg.startswith("Not implemented Error"):
                 raise NotImplementedError(*e.args) from e
-            elif (
-                e.args[0]
-                == "TransactionContext Error: cannot commit - no transaction is active"
-            ):
+            elif "cannot commit - no transaction is active" in msg:
                 return
             else:
                 raise e
@@ -247,7 +246,8 @@ class Dialect(PGDialect_psycopg2):
     name = "duckdb"
     driver = "duckdb_engine"
     _has_events = False
-    supports_statement_cache = False
+    # Safe for SQLAlchemy statement caching; improves performance on repeated queries.
+    supports_statement_cache = True
     supports_comments = has_comment_support()
     supports_sane_rowcount = False
     supports_server_side_cursors = False
@@ -288,6 +288,23 @@ class Dialect(PGDialect_psycopg2):
         config = dict(cparams.get("config", {}))
         cparams["config"] = config
         config.update(cparams.pop("url_config", {}))
+
+        database_path = cparams.get("database")
+        is_motherduck = (
+            isinstance(database_path, str)
+            and database_path.lower().startswith("md:")
+        )
+        if is_motherduck:
+            motherduck_keys = {
+                "attach_mode",
+                "saas_mode",
+                "deny_local_access",  # legacy alias for saas_mode
+                "session_hint",
+                "dbinstance_inactivity_ttl",
+            }
+            for k in list(config):
+                if k.startswith("motherduck_") or k in motherduck_keys:
+                    core_keys.add(k)
 
         ext = {k: config.pop(k) for k in list(config) if k not in core_keys}
         if supports_user_agent:
@@ -341,7 +358,9 @@ class Dialect(PGDialect_psycopg2):
                 raise e
 
     def do_begin(self, connection: "Connection") -> None:
-        connection.begin()
+        # DuckDB starts transactions implicitly on first statement.
+        # Explicit BEGIN can fail if a transaction is already active.
+        return
 
     def get_view_names(
         self,
@@ -425,6 +444,79 @@ class Dialect(PGDialect_psycopg2):
             params.update({"database_name": database_name})
 
         return sql, params
+
+    def _format_schema_key(
+        self, database_name: Optional[str], schema_name: Optional[str]
+    ) -> Optional[str]:
+        if schema_name is None:
+            return None
+        if database_name is None:
+            return self.identifier_preparer.quote_schema(schema_name)
+        return self.identifier_preparer.quote_schema(f"{database_name}.{schema_name}")
+
+    def _duckdb_columns_rows(
+        self,
+        connection: "Connection",
+        table_name: Optional[str] = None,
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        s = """
+            SELECT database_name, schema_name, table_name,
+                   column_name AS name,
+                   data_type AS format_type,
+                   column_default AS "default",
+                   NOT is_nullable AS not_null,
+                   comment,
+                   column_index
+            FROM duckdb_columns()
+            WHERE schema_name NOT LIKE 'pg\\_%' ESCAPE '\\'
+            """
+        sql, params = self._build_query_where(
+            table_name=table_name, schema_name=schema
+        )
+        s += sql
+        if filter_names:
+            s += "AND table_name IN :filter_names\n"
+            params["filter_names"] = list(filter_names)
+        s += "ORDER BY database_name, schema_name, table_name, column_index"
+        q = text(s)
+        if filter_names:
+            q = q.bindparams(bindparam("filter_names", expanding=True))
+        return list(connection.execute(q, params).mappings())
+
+    def _duckdb_constraints_rows(
+        self,
+        connection: "Connection",
+        table_name: Optional[str] = None,
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        s = """
+            SELECT database_name, schema_name, table_name,
+                   constraint_index,
+                   constraint_type,
+                   constraint_name,
+                   constraint_text,
+                   expression,
+                   constraint_column_names,
+                   referenced_table,
+                   referenced_column_names
+            FROM duckdb_constraints()
+            WHERE schema_name NOT LIKE 'pg\\_%' ESCAPE '\\'
+            """
+        sql, params = self._build_query_where(
+            table_name=table_name, schema_name=schema
+        )
+        s += sql
+        if filter_names:
+            s += "AND table_name IN :filter_names\n"
+            params["filter_names"] = list(filter_names)
+        s += "ORDER BY database_name, schema_name, table_name, constraint_index"
+        q = text(s)
+        if filter_names:
+            q = q.bindparams(bindparam("filter_names", expanding=True))
+        return list(connection.execute(q, params).mappings())
 
     @cache  # type: ignore[call-arg]
     def get_table_names(self, connection: "Connection", schema=None, **kw: "Any"):  # type: ignore[no-untyped-def]
@@ -519,6 +611,269 @@ class Dialect(PGDialect_psycopg2):
         index_warning()
         return []
 
+    @cache  # type: ignore[call-arg]
+    def get_columns(
+        self,
+        connection: "Connection",
+        table_name: str,
+        schema: Optional[str] = None,
+        **kw: Any,
+    ) -> List[Dict[str, Any]]:
+        schema_filter = None if schema == "*" else schema
+
+        rows_raw = self._duckdb_columns_rows(
+            connection, table_name=table_name, schema=schema_filter
+        )
+        if not rows_raw:
+            raise NoSuchTableError(
+                f"{schema}.{table_name}" if schema else table_name
+            )
+
+        schema_processing: Optional[str]
+        if schema_filter is None:
+            schemas = {r["schema_name"] for r in rows_raw}
+            if len(schemas) > 1:
+                preferred = "main" if "main" in schemas else sorted(schemas)[0]
+                rows_raw = [r for r in rows_raw if r["schema_name"] == preferred]
+            schema_processing = rows_raw[0]["schema_name"]
+        else:
+            _, schema_processing = self.identifier_preparer._separate(schema_filter)
+
+        rows = [
+            {
+                "name": r["name"],
+                "format_type": r["format_type"],
+                "default": r["default"],
+                "not_null": r["not_null"],
+                "table_name": r["table_name"],
+                "comment": r["comment"],
+                "generated": None,
+                "identity_options": None,
+                "collation": None,
+            }
+            for r in rows_raw
+        ]
+        columns = self._get_columns_info(rows, {}, {}, schema_processing)  # type: ignore[attr-defined]
+        return columns.get((schema_processing, table_name), [])
+
+    def get_multi_pk_constraint(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+        scope: Optional[str] = None,
+        kind: Optional[Tuple[str, ...]] = None,
+        **kw: Any,
+    ) -> Iterable[Tuple]:
+        schema_filter = None if schema in (None, "*") else schema
+        rows = self._duckdb_constraints_rows(
+            connection, schema=schema_filter, filter_names=filter_names
+        )
+
+        result: Dict[Tuple[Optional[str], str], Dict[str, Any]] = {}
+        schema_key_default: Optional[str] = schema if schema_filter is not None else None
+        if filter_names:
+            for tn in filter_names:
+                result[(schema_key_default, tn)] = {
+                    "constrained_columns": [],
+                    "name": None,
+                    "comment": None,
+                }
+
+        for r in rows:
+            if r["constraint_type"] != "PRIMARY KEY":
+                continue
+            if schema_filter is not None:
+                schema_key = schema
+            elif schema is None:
+                schema_key = None
+            else:
+                schema_key = self._format_schema_key(
+                    r["database_name"], r["schema_name"]
+                )
+            result[(schema_key, r["table_name"])] = {
+                "constrained_columns": list(r["constraint_column_names"] or []),
+                "name": r["constraint_name"],
+                "comment": None,
+            }
+        return result.items()
+
+    def get_multi_foreign_keys(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+        scope: Optional[str] = None,
+        kind: Optional[Tuple[str, ...]] = None,
+        postgresql_ignore_search_path: bool = False,
+        **kw: Any,
+    ) -> Iterable[Tuple]:
+        schema_filter = None if schema in (None, "*") else schema
+        rows = self._duckdb_constraints_rows(
+            connection, schema=schema_filter, filter_names=filter_names
+        )
+
+        fkeys: Dict[Tuple[Optional[str], str], List[Dict[str, Any]]] = defaultdict(list)
+        schema_key_default: Optional[str] = schema if schema_filter is not None else None
+        if filter_names:
+            for tn in filter_names:
+                fkeys[(schema_key_default, tn)] = []
+
+        for r in rows:
+            if r["constraint_type"] != "FOREIGN KEY":
+                continue
+            if schema_filter is not None:
+                schema_key = schema
+            elif schema is None:
+                schema_key = None
+            else:
+                schema_key = self._format_schema_key(
+                    r["database_name"], r["schema_name"]
+                )
+            fkeys[(schema_key, r["table_name"])].append(
+                {
+                    "name": r["constraint_name"],
+                    "constrained_columns": list(r["constraint_column_names"] or []),
+                    "referred_schema": None,
+                    "referred_table": r["referenced_table"],
+                    "referred_columns": list(r["referenced_column_names"] or []),
+                    "options": {},
+                    "comment": None,
+                }
+            )
+        return fkeys.items()
+
+    def get_multi_unique_constraints(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+        scope: Optional[str] = None,
+        kind: Optional[Tuple[str, ...]] = None,
+        **kw: Any,
+    ) -> Iterable[Tuple]:
+        schema_filter = None if schema in (None, "*") else schema
+        rows = self._duckdb_constraints_rows(
+            connection, schema=schema_filter, filter_names=filter_names
+        )
+
+        uniques: Dict[Tuple[Optional[str], str], List[Dict[str, Any]]] = defaultdict(
+            list
+        )
+        schema_key_default: Optional[str] = schema if schema_filter is not None else None
+        if filter_names:
+            for tn in filter_names:
+                uniques[(schema_key_default, tn)] = []
+
+        for r in rows:
+            if r["constraint_type"] != "UNIQUE":
+                continue
+            if schema_filter is not None:
+                schema_key = schema
+            elif schema is None:
+                schema_key = None
+            else:
+                schema_key = self._format_schema_key(
+                    r["database_name"], r["schema_name"]
+                )
+            uniques[(schema_key, r["table_name"])].append(
+                {
+                    "column_names": list(r["constraint_column_names"] or []),
+                    "name": r["constraint_name"],
+                    "comment": None,
+                }
+            )
+        return uniques.items()
+
+    def get_multi_check_constraints(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+        scope: Optional[str] = None,
+        kind: Optional[Tuple[str, ...]] = None,
+        **kw: Any,
+    ) -> Iterable[Tuple]:
+        schema_filter = None if schema in (None, "*") else schema
+        rows = self._duckdb_constraints_rows(
+            connection, schema=schema_filter, filter_names=filter_names
+        )
+
+        checks: Dict[Tuple[Optional[str], str], List[Dict[str, Any]]] = defaultdict(
+            list
+        )
+        schema_key_default: Optional[str] = schema if schema_filter is not None else None
+        if filter_names:
+            for tn in filter_names:
+                checks[(schema_key_default, tn)] = []
+
+        for r in rows:
+            if r["constraint_type"] != "CHECK":
+                continue
+            if schema_filter is not None:
+                schema_key = schema
+            elif schema is None:
+                schema_key = None
+            else:
+                schema_key = self._format_schema_key(
+                    r["database_name"], r["schema_name"]
+                )
+            sqltext = r["expression"] or r["constraint_text"] or ""
+            checks[(schema_key, r["table_name"])].append(
+                {
+                    "name": r["constraint_name"],
+                    "sqltext": sqltext,
+                    "comment": None,
+                }
+            )
+        return checks.items()
+
+    def get_multi_table_comment(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+        scope: Optional[str] = None,
+        kind: Optional[Tuple[str, ...]] = None,
+        **kw: Any,
+    ) -> Iterable[Tuple]:
+        schema_filter = None if schema in (None, "*") else schema
+        s = """
+            SELECT database_name, schema_name, table_name, comment
+            FROM duckdb_tables()
+            WHERE schema_name NOT LIKE 'pg\\_%' ESCAPE '\\'
+            """
+        sql, params = self._build_query_where(schema_name=schema_filter)
+        s += sql
+        if filter_names:
+            s += "AND table_name IN :filter_names\n"
+            params["filter_names"] = list(filter_names)
+        s += "ORDER BY database_name, schema_name, table_name"
+        q = text(s)
+        if filter_names:
+            q = q.bindparams(bindparam("filter_names", expanding=True))
+        rows = list(connection.execute(q, params).mappings())
+
+        comments: Dict[Tuple[Optional[str], str], Dict[str, Any]] = {}
+        schema_key_default: Optional[str] = schema if schema_filter is not None else None
+        if filter_names:
+            for tn in filter_names:
+                comments[(schema_key_default, tn)] = {"text": None}
+
+        for r in rows:
+            if schema_filter is not None:
+                schema_key = schema
+            elif schema is None:
+                schema_key = None
+            else:
+                schema_key = self._format_schema_key(
+                    r["database_name"], r["schema_name"]
+                )
+            comments[(schema_key, r["table_name"])] = {
+                "text": r["comment"]
+            }
+        return comments.items()
+
     def initialize(self, connection: "Connection") -> None:
         DefaultDialect.initialize(self, connection)
 
@@ -564,8 +919,6 @@ class Dialect(PGDialect_psycopg2):
                 )
             return query
 
-    # FIXME: this method is a hack around the fact that we use a single cursor for all queries inside a connection,
-    #   and this is required to fix get_multi_columns
     def get_multi_columns(
         self,
         connection: "Connection",
@@ -575,61 +928,59 @@ class Dialect(PGDialect_psycopg2):
         kind: Optional[Tuple[str, ...]] = None,
         **kw: Any,
     ) -> List:
-        """
-        Copyright 2005-2023 SQLAlchemy authors and contributors <see AUTHORS file>.
-
-        Permission is hereby granted, free of charge, to any person obtaining a copy of
-        this software and associated documentation files (the "Software"), to deal in
-        the Software without restriction, including without limitation the rights to
-        use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-        of the Software, and to permit persons to whom the Software is furnished to do
-        so, subject to the following conditions:
-
-        The above copyright notice and this permission notice shall be included in all
-        copies or substantial portions of the Software.
-
-        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-        SOFTWARE.
-        """
-
-        has_filter_names, params = self._prepare_filter_names(filter_names)  # type: ignore[attr-defined]
-        query = self._columns_query(schema, has_filter_names, scope, kind)  # type: ignore[attr-defined]
-        rows = list(connection.execute(query, params).mappings())
-
-        # dictionary with (name, ) if default search path or (schema, name)
-        # as keys
-        domains: Dict[tuple, dict] = {}
-        """
-        TODO: fix these pg_collation errors in SQLA2
-        domains = {
-            ((d["schema"], d["name"]) if not d["visible"] else (d["name"],)): d
-            for d in self._load_domains(  # type: ignore[attr-defined]
-                connection, schema="*", info_cache=kw.get("info_cache")
-            )
-        }
-        """
-
-        # dictionary with (name, ) if default search path or (schema, name)
-        # as keys
-        enums = dict(
-            (
-                ((rec["name"],), rec)
-                if rec["visible"]
-                else ((rec["schema"], rec["name"]), rec)
-            )
-            for rec in self._load_enums(  # type: ignore[attr-defined]
-                connection, schema="*", info_cache=kw.get("info_cache")
-            )
+        schema_filter = None if schema in (None, "*") else schema
+        rows_raw = self._duckdb_columns_rows(
+            connection,
+            schema=schema_filter,
+            filter_names=filter_names,
         )
 
-        columns = self._get_columns_info(rows, domains, enums, schema)  # type: ignore[attr-defined]
+        columns_by_key: Dict[Tuple[Optional[str], str], List[Dict[str, Any]]] = {}
+        schema_key_default: Optional[str] = schema if schema_filter is not None else None
+        if filter_names:
+            for tn in filter_names:
+                columns_by_key[(schema_key_default, tn)] = []
 
-        return columns.items()
+        grouped: Dict[Tuple[Optional[str], str], List[Dict[str, Any]]] = defaultdict(
+            list
+        )
+        for r in rows_raw:
+            if schema_filter is not None:
+                schema_key = schema
+            elif schema is None:
+                schema_key = None
+            else:
+                schema_key = self._format_schema_key(
+                    r["database_name"], r["schema_name"]
+                )
+            grouped[(schema_key, r["table_name"])].append(r)
+
+        for (schema_key, table_name), grp in grouped.items():
+            schema_processing = (
+                self.identifier_preparer._separate(schema_filter)[1]
+                if schema_filter is not None
+                else grp[0]["schema_name"]
+            )
+            rows = [
+                {
+                    "name": r["name"],
+                    "format_type": r["format_type"],
+                    "default": r["default"],
+                    "not_null": r["not_null"],
+                    "table_name": r["table_name"],
+                    "comment": r["comment"],
+                    "generated": None,
+                    "identity_options": None,
+                    "collation": None,
+                }
+                for r in grp
+            ]
+            cols = self._get_columns_info(rows, {}, {}, schema_processing)  # type: ignore[attr-defined]
+            columns_by_key[(schema_key, table_name)] = cols.get(
+                (schema_processing, table_name), []
+            )
+
+        return columns_by_key.items()
 
     # fix for https://github.com/Mause/duckdb_engine/issues/1128
     # (Overrides sqlalchemy method)

@@ -207,6 +207,11 @@ ISCHEMA_NAMES = {
     "timestamptz": sqltypes.TIMESTAMP,
     "float4": sqltypes.FLOAT,
     "float8": sqltypes.FLOAT,
+    # DuckDB 1.4+ canonical type names
+    "double": sqltypes.FLOAT,
+    "decimal": sqltypes.DECIMAL,
+    "bignum": sqltypes.NUMERIC,
+    "blob": sqltypes.LargeBinary,
     "usmallint": USmallInteger,
     "uinteger": UInteger,
     "ubigint": UBigInteger,

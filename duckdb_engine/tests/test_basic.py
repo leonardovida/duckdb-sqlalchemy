@@ -525,6 +525,78 @@ def test_url_config_and_dict_config() -> None:
         assert memory_limit in ("500.0MB", "476.8 MiB")
 
 
+def test_statement_cache_compiled_cache() -> None:
+    importorskip("sqlalchemy", "1.4.0")
+
+    cache: Dict[Any, Any] = {}
+    eng = create_engine(
+        "duckdb:///:memory:",
+        execution_options={"compiled_cache": cache},
+    )
+
+    with eng.connect() as conn:
+        assert conn.execute(text("select 1")).scalar() == 1
+        assert conn.execute(text("select 1")).scalar() == 1
+
+    assert eng.dialect.supports_statement_cache is True
+    assert cache  # should have at least one cached statement
+
+
+def test_motherduck_params_pass_through(monkeypatch) -> None:
+    # Ensure MD-specific params don't get converted to SET statements.
+    from duckdb_engine.config import get_core_config
+
+    get_core_config()  # warm cache before patching duckdb.connect
+
+    received_config: Dict[str, Any] = {}
+
+    class DummyCon:
+        def execute(self, *args: Any, **kwargs: Any) -> "DummyCon":
+            return self
+
+        def executemany(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+        def fetchall(self) -> List[Any]:
+            return []
+
+        def register(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+        def register_filesystem(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    def fake_connect(*args: Any, **kwargs: Any) -> DummyCon:
+        received_config.update(kwargs.get("config", {}))
+        return DummyCon()
+
+    monkeypatch.setattr("duckdb_engine.duckdb.connect", fake_connect)
+
+    dialect = Dialect()
+    dialect.connect(
+        database="md:motherdb",
+        config={
+            "motherduck_token": "token",
+            "attach_mode": "single",
+            "saas_mode": True,
+            "deny_local_access": True,
+            "session_hint": "user-123",
+            "dbinstance_inactivity_ttl": 60,
+            "memory_limit": "500mb",
+        },
+    )
+
+    assert "motherduck_token" in received_config
+    assert "attach_mode" in received_config
+    assert "saas_mode" in received_config or "deny_local_access" in received_config
+    assert "session_hint" in received_config
+    assert "dbinstance_inactivity_ttl" in received_config
+    assert "memory_limit" in received_config
+
+
 user_agent_re = r"duckdb/.*(.*) python(/.*)? duckdb_engine/.*(sqlalchemy/.*)"
 
 
