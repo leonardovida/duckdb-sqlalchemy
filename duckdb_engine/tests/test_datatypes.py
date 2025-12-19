@@ -181,7 +181,10 @@ def test_all_types_reflection(engine: Engine) -> None:
             if "struct" in name or "map" in name or "union" in name:
                 assert col.type == sqltypes.NULLTYPE, name
             elif "array" in name:
-                assert isinstance(col.type, sqltypes.ARRAY) or col.type == sqltypes.NULLTYPE, name
+                assert (
+                    isinstance(col.type, sqltypes.ARRAY)
+                    or col.type == sqltypes.NULLTYPE
+                ), name
             else:
                 assert col.type != sqltypes.NULLTYPE, name
         assert not capture

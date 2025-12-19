@@ -290,10 +290,9 @@ class Dialect(PGDialect_psycopg2):
         config.update(cparams.pop("url_config", {}))
 
         database_path = cparams.get("database")
-        is_motherduck = (
-            isinstance(database_path, str)
-            and database_path.lower().startswith("md:")
-        )
+        is_motherduck = isinstance(
+            database_path, str
+        ) and database_path.lower().startswith("md:")
         if is_motherduck:
             motherduck_keys = {
                 "attach_mode",
@@ -421,9 +420,9 @@ class Dialect(PGDialect_psycopg2):
         table_name: Optional[str] = None,
         schema_name: Optional[str] = None,
         database_name: Optional[str] = None,
-    ) -> Tuple[str, Dict[str, str]]:
+    ) -> Tuple[str, Dict[str, Any]]:
         sql = ""
-        params = {}
+        params: Dict[str, Any] = {}
 
         # If no database name is provided, try to get it from the schema name
         # specified as "<db name>.<schema name>"
@@ -472,9 +471,7 @@ class Dialect(PGDialect_psycopg2):
             FROM duckdb_columns()
             WHERE schema_name NOT LIKE 'pg\\_%' ESCAPE '\\'
             """
-        sql, params = self._build_query_where(
-            table_name=table_name, schema_name=schema
-        )
+        sql, params = self._build_query_where(table_name=table_name, schema_name=schema)
         s += sql
         if filter_names:
             s += "AND table_name IN :filter_names\n"
@@ -505,9 +502,7 @@ class Dialect(PGDialect_psycopg2):
             FROM duckdb_constraints()
             WHERE schema_name NOT LIKE 'pg\\_%' ESCAPE '\\'
             """
-        sql, params = self._build_query_where(
-            table_name=table_name, schema_name=schema
-        )
+        sql, params = self._build_query_where(table_name=table_name, schema_name=schema)
         s += sql
         if filter_names:
             s += "AND table_name IN :filter_names\n"
@@ -625,9 +620,7 @@ class Dialect(PGDialect_psycopg2):
             connection, table_name=table_name, schema=schema_filter
         )
         if not rows_raw:
-            raise NoSuchTableError(
-                f"{schema}.{table_name}" if schema else table_name
-            )
+            raise NoSuchTableError(f"{schema}.{table_name}" if schema else table_name)
 
         schema_processing: Optional[str]
         if schema_filter is None:
@@ -671,7 +664,9 @@ class Dialect(PGDialect_psycopg2):
         )
 
         result: Dict[Tuple[Optional[str], str], Dict[str, Any]] = {}
-        schema_key_default: Optional[str] = schema if schema_filter is not None else None
+        schema_key_default: Optional[str] = (
+            schema if schema_filter is not None else None
+        )
         if filter_names:
             for tn in filter_names:
                 result[(schema_key_default, tn)] = {
@@ -714,7 +709,9 @@ class Dialect(PGDialect_psycopg2):
         )
 
         fkeys: Dict[Tuple[Optional[str], str], List[Dict[str, Any]]] = defaultdict(list)
-        schema_key_default: Optional[str] = schema if schema_filter is not None else None
+        schema_key_default: Optional[str] = (
+            schema if schema_filter is not None else None
+        )
         if filter_names:
             for tn in filter_names:
                 fkeys[(schema_key_default, tn)] = []
@@ -760,7 +757,9 @@ class Dialect(PGDialect_psycopg2):
         uniques: Dict[Tuple[Optional[str], str], List[Dict[str, Any]]] = defaultdict(
             list
         )
-        schema_key_default: Optional[str] = schema if schema_filter is not None else None
+        schema_key_default: Optional[str] = (
+            schema if schema_filter is not None else None
+        )
         if filter_names:
             for tn in filter_names:
                 uniques[(schema_key_default, tn)] = []
@@ -802,7 +801,9 @@ class Dialect(PGDialect_psycopg2):
         checks: Dict[Tuple[Optional[str], str], List[Dict[str, Any]]] = defaultdict(
             list
         )
-        schema_key_default: Optional[str] = schema if schema_filter is not None else None
+        schema_key_default: Optional[str] = (
+            schema if schema_filter is not None else None
+        )
         if filter_names:
             for tn in filter_names:
                 checks[(schema_key_default, tn)] = []
@@ -855,7 +856,9 @@ class Dialect(PGDialect_psycopg2):
         rows = list(connection.execute(q, params).mappings())
 
         comments: Dict[Tuple[Optional[str], str], Dict[str, Any]] = {}
-        schema_key_default: Optional[str] = schema if schema_filter is not None else None
+        schema_key_default: Optional[str] = (
+            schema if schema_filter is not None else None
+        )
         if filter_names:
             for tn in filter_names:
                 comments[(schema_key_default, tn)] = {"text": None}
@@ -869,9 +872,7 @@ class Dialect(PGDialect_psycopg2):
                 schema_key = self._format_schema_key(
                     r["database_name"], r["schema_name"]
                 )
-            comments[(schema_key, r["table_name"])] = {
-                "text": r["comment"]
-            }
+            comments[(schema_key, r["table_name"])] = {"text": r["comment"]}
         return comments.items()
 
     def initialize(self, connection: "Connection") -> None:
@@ -936,7 +937,9 @@ class Dialect(PGDialect_psycopg2):
         )
 
         columns_by_key: Dict[Tuple[Optional[str], str], List[Dict[str, Any]]] = {}
-        schema_key_default: Optional[str] = schema if schema_filter is not None else None
+        schema_key_default: Optional[str] = (
+            schema if schema_filter is not None else None
+        )
         if filter_names:
             for tn in filter_names:
                 columns_by_key[(schema_key_default, tn)] = []
@@ -980,7 +983,7 @@ class Dialect(PGDialect_psycopg2):
                 (schema_processing, table_name), []
             )
 
-        return columns_by_key.items()
+        return list(columns_by_key.items())
 
     # fix for https://github.com/Mause/duckdb_engine/issues/1128
     # (Overrides sqlalchemy method)
@@ -1031,7 +1034,7 @@ class Dialect(PGDialect_psycopg2):
 if sqlalchemy.__version__ >= "2.0.14":
     from sqlalchemy import TryCast  # type: ignore[attr-defined]
 
-    @compiles(TryCast, "duckdb")  # type: ignore[misc]
+    @compiles(TryCast, "duckdb")  # type: ignore[untyped-decorator]
     def visit_try_cast(
         instance: TryCast,
         compiler: PGTypeCompiler,

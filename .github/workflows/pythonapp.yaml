@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: [3.9, "3.10"]
+        python: ["3.10", "3.13"]
 
     env:
       FORCE_COLOR: 1
@@ -25,8 +25,9 @@ jobs:
       - name: List nox envs
         run: nox -l
       - run: nox --pythons '${{ matrix.python }}'
-      - run: uvx poetry build
-      - run: uvx poetry check --strict
+      - run: python -m pip install build twine -U
+      - run: python -m build
+      - run: twine check --strict dist/*
       - name: Publish Unit Test Results
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()

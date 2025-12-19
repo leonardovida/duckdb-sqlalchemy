@@ -14,3 +14,11 @@ coverage.xml
 .vscode
 results.xml
 venv
+.env
+.env.*
+.regression/
+.regressions/
+.perf/
+
+# Don't track repo-local scripts in this workspace
+scripts/

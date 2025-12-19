@@ -4,7 +4,7 @@ import re
 import zlib
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Generic, Optional, TypeVar, cast
+from typing import Any, Dict, Generic, List, Optional, TypeVar, cast
 
 import duckdb
 import fsspec

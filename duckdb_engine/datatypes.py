@@ -27,6 +27,9 @@ from sqlalchemy.types import BigInteger, Integer, SmallInteger, String
 
 duckdb_version = duckdb.__version__
 
+# DuckDB's Python MAP materialization changed around the 1.0→1.x transition.
+# Keep the existing version flag for other feature gates, but prefer shape-based
+# handling for MAP values.
 IS_GT_1 = Version(duckdb_version) > Version("1.0.0")
 
 
@@ -165,12 +168,21 @@ class Map(TypeEngine):
     def result_processor(
         self, dialect: Dialect, coltype: str
     ) -> Optional[Callable[[Optional[dict]], Optional[dict]]]:
-        if IS_GT_1:
-            return lambda value: value
-        else:
-            return (
-                lambda value: dict(zip(value["key"], value["value"])) if value else {}
-            )
+        def process(value: Optional[dict]) -> Optional[dict]:
+            if value is None:
+                return None
+            # Older DuckDB versions return MAP values as {"key": [...], "value": [...]}
+            # (still a Python dict, but not the desired mapping).
+            if (
+                isinstance(value, dict)
+                and set(value.keys()) == {"key", "value"}
+                and isinstance(value.get("key"), list)
+                and isinstance(value.get("value"), list)
+            ):
+                return dict(zip(value["key"], value["value"]))
+            return value
+
+        return process
 
 
 class Union(TypeEngine):
@@ -231,7 +243,7 @@ def register_extension_types() -> None:
         compiles(subclass, "duckdb")(compile_uint)
 
 
-@compiles(Struct, "duckdb")  # type: ignore[misc]
+@compiles(Struct, "duckdb")  # type: ignore[untyped-decorator]
 def visit_struct(
     instance: Struct,
     compiler: PGTypeCompiler,
@@ -241,7 +253,7 @@ def visit_struct(
     return "STRUCT" + struct_or_union(instance, compiler, identifier_preparer, **kw)
 
 
-@compiles(Union, "duckdb")  # type: ignore[misc]
+@compiles(Union, "duckdb")  # type: ignore[untyped-decorator]
 def visit_union(
     instance: Union,
     compiler: PGTypeCompiler,
@@ -281,7 +293,7 @@ def process_type(
     return compiler.process(type_api.to_instance(value), **kw)
 
 
-@compiles(Map, "duckdb")  # type: ignore[misc]
+@compiles(Map, "duckdb")  # type: ignore[untyped-decorator]
 def visit_map(instance: Map, compiler: PGTypeCompiler, **kw: Any) -> str:
     return "MAP({}, {})".format(
         process_type(instance.key_type, compiler, **kw),

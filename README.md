@@ -30,9 +30,17 @@ Basic SQLAlchemy driver for [DuckDB](https://duckdb.org/)
 $ pip install duckdb-engine
 ```
 
-`duckdb-engine` requires the DuckDB Python package `>=1.2.0,<2`. Installing via pip will pull a compatible DuckDB version automatically.
+`duckdb-engine` requires Python 3.10+ (Python 3.9 reached end-of-life in October 2025) and the DuckDB Python package `>=1.0.0,<2` (including DuckDB 1.4.3). Installing via pip will pull a compatible DuckDB version automatically.
 
 DuckDB Engine also has a conda feedstock available, the instructions for the use of which are available in it's [repository](https://github.com/conda-forge/duckdb-engine-feedstock).
+
+## Development (uv)
+
+```sh
+uv sync --all-extras
+uv run pytest
+uv run pre-commit run --all-files
+```
 
 ## Usage
 
