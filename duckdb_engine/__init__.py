@@ -1,3 +1,4 @@
+import os
 import re
 import warnings
 from functools import lru_cache
@@ -29,7 +30,7 @@ from sqlalchemy.dialects.postgresql.psycopg2 import PGDialect_psycopg2
 from sqlalchemy.engine.default import DefaultDialect
 from sqlalchemy.engine.interfaces import Dialect as RootDialect
 from sqlalchemy.engine.reflection import cache
-from sqlalchemy.engine.url import URL
+from sqlalchemy.engine.url import URL as SAURL
 from sqlalchemy.exc import NoSuchTableError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import bindparam
@@ -38,6 +39,8 @@ from sqlalchemy.sql.selectable import Select
 from ._supports import has_comment_support
 from .config import apply_config, get_core_config
 from .datatypes import ISCHEMA_NAMES, register_extension_types
+from .olap import read_csv, read_csv_auto, read_parquet, table_function
+from .url import URL, make_url
 
 __version__ = "0.17.0"
 sqlalchemy_version = sqlalchemy.__version__
@@ -60,6 +63,12 @@ __all__ = [
     "DBAPI",
     "DuckDBEngineWarning",
     "insert",  # reexport of sqlalchemy.dialects.postgresql.insert
+    "URL",
+    "make_url",
+    "table_function",
+    "read_parquet",
+    "read_csv",
+    "read_csv_auto",
 ]
 
 
@@ -166,6 +175,24 @@ class CursorWrapper:
     def close(self) -> None:
         pass  # closing cursors is not supported in duckdb
 
+    @property
+    def description(self) -> Any:
+        desc = self.__c.description
+        if desc is None:
+            return None
+        fixed = []
+        for col in desc:
+            if len(col) >= 2:
+                type_code = col[1]
+                try:
+                    hash(type_code)
+                    fixed.append(col)
+                except TypeError:
+                    fixed.append((col[0], str(type_code), *col[2:]))
+            else:
+                fixed.append(col)
+        return fixed
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self.__c, name)
 
@@ -185,6 +212,45 @@ def index_warning() -> None:
         "duckdb-engine doesn't yet support reflection on indices",
         DuckDBEngineWarning,
     )
+
+
+def _looks_like_motherduck(database: Optional[str], config: Dict[str, Any]) -> bool:
+    if database is not None and (
+        database.startswith("md:") or database.startswith("motherduck:")
+    ):
+        return True
+    motherduck_keys = {
+        "motherduck_token",
+        "attach_mode",
+        "saas_mode",
+        "session_hint",
+        "access_mode",
+        "dbinstance_inactivity_ttl",
+        "motherduck_dbinstance_inactivity_ttl",
+    }
+    return any(k in config for k in motherduck_keys)
+
+
+def _apply_motherduck_defaults(config: Dict[str, Any], database: Optional[str]) -> None:
+    if "motherduck_token" not in config:
+        token = os.getenv("motherduck_token") or os.getenv("MOTHERDUCK_TOKEN")
+        if token and _looks_like_motherduck(database, config):
+            config["motherduck_token"] = token
+
+    if "motherduck_token" in config and not isinstance(
+        config["motherduck_token"], str
+    ):
+        raise TypeError("motherduck_token must be a string")
+
+
+def _normalize_motherduck_config(config: Dict[str, Any]) -> None:
+    if (
+        "dbinstance_inactivity_ttl" in config
+        and "motherduck_dbinstance_inactivity_ttl" not in config
+    ):
+        config["motherduck_dbinstance_inactivity_ttl"] = config[
+            "dbinstance_inactivity_ttl"
+        ]
 
 
 class DuckDBIdentifierPreparer(PGIdentifierPreparer):
@@ -288,6 +354,8 @@ class Dialect(PGDialect_psycopg2):
         config = dict(cparams.get("config", {}))
         cparams["config"] = config
         config.update(cparams.pop("url_config", {}))
+        _apply_motherduck_defaults(config, cparams.get("database"))
+        _normalize_motherduck_config(config)
 
         ext = {k: config.pop(k) for k in list(config) if k not in core_keys}
         if supports_user_agent:
@@ -314,7 +382,7 @@ class Dialect(PGDialect_psycopg2):
         pass
 
     @classmethod
-    def get_pool_class(cls, url: URL) -> Type[pool.Pool]:
+    def get_pool_class(cls, url: SAURL) -> Type[pool.Pool]:
         if url.database == ":memory:":
             return pool.SingletonThreadPool
         else:
@@ -486,6 +554,65 @@ class Dialect(PGDialect_psycopg2):
             raise NoSuchTableError(table_name)
         return table_oid
 
+    def _duckdb_table_exists(
+        self, connection: "Connection", table_name: str, schema: Optional[str]
+    ) -> bool:
+        sql = """
+            SELECT 1
+            FROM duckdb_tables()
+            WHERE table_name = :table_name
+            """
+        params: Dict[str, Any] = {"table_name": table_name}
+        if schema is not None:
+            database_name, schema_name = self.identifier_preparer._separate(schema)
+            sql += "AND schema_name = :schema_name\n"
+            params["schema_name"] = schema_name
+            if database_name is not None:
+                sql += "AND database_name = :database_name\n"
+                params["database_name"] = database_name
+        return connection.execute(text(sql), params).first() is not None
+
+    def _duckdb_columns(
+        self, connection: "Connection", table_name: str, schema: Optional[str]
+    ) -> Optional[List[Dict[str, Any]]]:
+        sql = """
+            SELECT column_name, column_default, is_nullable, data_type, comment, column_index
+            FROM duckdb_columns()
+            WHERE table_name = :table_name
+            """
+        params: Dict[str, Any] = {"table_name": table_name}
+        if schema is not None:
+            database_name, schema_name = self.identifier_preparer._separate(schema)
+            sql += "AND schema_name = :schema_name\n"
+            params["schema_name"] = schema_name
+            if database_name is not None:
+                sql += "AND database_name = :database_name\n"
+                params["database_name"] = database_name
+        sql += "ORDER BY column_index"
+        rows = list(connection.execute(text(sql), params).mappings())
+        if not rows:
+            return None
+        columns: List[Dict[str, Any]] = []
+        for row in rows:
+            coltype = self._reflect_type(  # type: ignore[attr-defined]
+                row["data_type"],
+                {},
+                {},
+                type_description=f"column '{row['column_name']}'",
+                collation=None,
+            )
+            columns.append(
+                {
+                    "name": row["column_name"],
+                    "type": coltype,
+                    "nullable": bool(row["is_nullable"]),
+                    "default": row["column_default"],
+                    "autoincrement": False,
+                    "comment": row["comment"],
+                }
+            )
+        return columns
+
     def has_table(
         self,
         connection: "Connection",
@@ -497,6 +624,55 @@ class Dialect(PGDialect_psycopg2):
             return self.get_table_oid(connection, table_name, schema) is not None
         except NoSuchTableError:
             return False
+
+    @cache  # type: ignore[call-arg]
+    def get_columns(  # type: ignore[no-untyped-def]
+        self, connection: "Connection", table_name: str, schema=None, **kw: Any
+    ):
+        try:
+            return super().get_columns(connection, table_name, schema=schema, **kw)
+        except NoSuchTableError:
+            columns = self._duckdb_columns(connection, table_name, schema)
+            if columns is None:
+                raise
+            return columns
+
+    @cache  # type: ignore[call-arg]
+    def get_foreign_keys(  # type: ignore[no-untyped-def]
+        self, connection: "Connection", table_name: str, schema=None, **kw: Any
+    ):
+        try:
+            return super().get_foreign_keys(connection, table_name, schema=schema, **kw)
+        except NoSuchTableError:
+            if self._duckdb_table_exists(connection, table_name, schema):
+                return []
+            raise
+
+    @cache  # type: ignore[call-arg]
+    def get_unique_constraints(  # type: ignore[no-untyped-def]
+        self, connection: "Connection", table_name: str, schema=None, **kw: Any
+    ):
+        try:
+            return super().get_unique_constraints(
+                connection, table_name, schema=schema, **kw
+            )
+        except NoSuchTableError:
+            if self._duckdb_table_exists(connection, table_name, schema):
+                return []
+            raise
+
+    @cache  # type: ignore[call-arg]
+    def get_check_constraints(  # type: ignore[no-untyped-def]
+        self, connection: "Connection", table_name: str, schema=None, **kw: Any
+    ):
+        try:
+            return super().get_check_constraints(
+                connection, table_name, schema=schema, **kw
+            )
+        except NoSuchTableError:
+            if self._duckdb_table_exists(connection, table_name, schema):
+                return []
+            raise
 
     def get_indexes(
         self,
@@ -522,7 +698,7 @@ class Dialect(PGDialect_psycopg2):
     def initialize(self, connection: "Connection") -> None:
         DefaultDialect.initialize(self, connection)
 
-    def create_connect_args(self, url: URL) -> Tuple[tuple, dict]:
+    def create_connect_args(self, url: SAURL) -> Tuple[tuple, dict]:
         opts = url.translate_connect_args(database="database")
         opts["url_config"] = dict(url.query)
         user = opts["url_config"].pop("user", None)
@@ -548,21 +724,152 @@ class Dialect(PGDialect_psycopg2):
         scope: Any,
         pg_class_table: Any = None,
     ) -> Any:
-        # Don't scope by schema for now
+        # Scope by schema, but strip any database prefix (DuckDB uses db.schema).
+        # This will not work if a schema or table name is not unique!
         if hasattr(super(), "_pg_class_filter_scope_schema"):
-            query = getattr(super(), "_pg_class_filter_scope_schema")(
-                query, schema=None, scope=scope, pg_class_table=pg_class_table
-            )
             if schema is not None:
-                # Now let's scope by schema, but make sure we're not adding in the database name prefix
-                # This will not work if a schema or table name is not unique!
                 _, schema_name = self.identifier_preparer._separate(schema)
-                query = query.where(
-                    text("pg_namespace.nspname = :schema_name").bindparams(
-                        schema_name=schema_name
+                schema = schema_name
+            return getattr(super(), "_pg_class_filter_scope_schema")(
+                query, schema=schema, scope=scope, pg_class_table=pg_class_table
+            )
+
+    @lru_cache()
+    def _columns_query(self, schema, has_filter_names, scope, kind):  # type: ignore[no-untyped-def]
+        if sqlalchemy.__version__ < "2.0.0":
+            return super()._columns_query(schema, has_filter_names, scope, kind)  # type: ignore[misc]
+
+        # DuckDB versions before 1.4 don't expose pg_collation; skip collation
+        # reflection to avoid Catalog Errors during SQLAlchemy 2.x reflection.
+        from sqlalchemy.dialects.postgresql import base as pg_base
+
+        pg_catalog = pg_base.pg_catalog
+        REGCLASS = pg_base.REGCLASS
+        TEXT = pg_base.TEXT
+        OID = pg_base.OID
+
+        generated = (
+            pg_catalog.pg_attribute.c.attgenerated.label("generated")
+            if self.server_version_info >= (12,)
+            else sql.null().label("generated")
+        )
+        if self.server_version_info >= (10,):
+            identity = (
+                select(
+                    sql.func.json_build_object(
+                        "always",
+                        pg_catalog.pg_attribute.c.attidentity == "a",
+                        "start",
+                        pg_catalog.pg_sequence.c.seqstart,
+                        "increment",
+                        pg_catalog.pg_sequence.c.seqincrement,
+                        "minvalue",
+                        pg_catalog.pg_sequence.c.seqmin,
+                        "maxvalue",
+                        pg_catalog.pg_sequence.c.seqmax,
+                        "cache",
+                        pg_catalog.pg_sequence.c.seqcache,
+                        "cycle",
+                        pg_catalog.pg_sequence.c.seqcycle,
+                        type_=sqltypes.JSON(),
                     )
                 )
-            return query
+                .select_from(pg_catalog.pg_sequence)
+                .where(
+                    pg_catalog.pg_attribute.c.attidentity != "",
+                    pg_catalog.pg_sequence.c.seqrelid
+                    == sql.cast(
+                        sql.cast(
+                            pg_catalog.pg_get_serial_sequence(
+                                sql.cast(
+                                    sql.cast(
+                                        pg_catalog.pg_attribute.c.attrelid,
+                                        REGCLASS,
+                                    ),
+                                    TEXT,
+                                ),
+                                pg_catalog.pg_attribute.c.attname,
+                            ),
+                            REGCLASS,
+                        ),
+                        OID,
+                    ),
+                )
+                .correlate(pg_catalog.pg_attribute)
+                .scalar_subquery()
+                .label("identity_options")
+            )
+        else:
+            identity = sql.null().label("identity_options")
+
+        default = (
+            select(
+                pg_catalog.pg_get_expr(
+                    pg_catalog.pg_attrdef.c.adbin,
+                    pg_catalog.pg_attrdef.c.adrelid,
+                )
+            )
+            .select_from(pg_catalog.pg_attrdef)
+            .where(
+                pg_catalog.pg_attrdef.c.adrelid
+                == pg_catalog.pg_attribute.c.attrelid,
+                pg_catalog.pg_attrdef.c.adnum
+                == pg_catalog.pg_attribute.c.attnum,
+                pg_catalog.pg_attribute.c.atthasdef,
+            )
+            .correlate(pg_catalog.pg_attribute)
+            .scalar_subquery()
+            .label("default")
+        )
+
+        collate = sql.null().label("collation")
+
+        relkinds = self._kind_to_relkinds(kind)
+        query = (
+            select(
+                pg_catalog.pg_attribute.c.attname.label("name"),
+                pg_catalog.format_type(
+                    pg_catalog.pg_attribute.c.atttypid,
+                    pg_catalog.pg_attribute.c.atttypmod,
+                ).label("format_type"),
+                default,
+                pg_catalog.pg_attribute.c.attnotnull.label("not_null"),
+                pg_catalog.pg_class.c.relname.label("table_name"),
+                pg_catalog.pg_description.c.description.label("comment"),
+                generated,
+                identity,
+                collate,
+            )
+            .select_from(pg_catalog.pg_class)
+            .outerjoin(
+                pg_catalog.pg_attribute,
+                sql.and_(
+                    pg_catalog.pg_class.c.oid
+                    == pg_catalog.pg_attribute.c.attrelid,
+                    pg_catalog.pg_attribute.c.attnum > 0,
+                    ~pg_catalog.pg_attribute.c.attisdropped,
+                ),
+            )
+            .outerjoin(
+                pg_catalog.pg_description,
+                sql.and_(
+                    pg_catalog.pg_description.c.objoid
+                    == pg_catalog.pg_attribute.c.attrelid,
+                    pg_catalog.pg_description.c.objsubid
+                    == pg_catalog.pg_attribute.c.attnum,
+                ),
+            )
+            .where(self._pg_class_relkind_condition(relkinds))
+            .order_by(
+                pg_catalog.pg_class.c.relname, pg_catalog.pg_attribute.c.attnum
+            )
+        )
+        query = self._pg_class_filter_scope_schema(query, schema, scope=scope)
+        if has_filter_names:
+            query = query.where(
+                pg_catalog.pg_class.c.relname.in_(bindparam("filter_names"))
+            )
+        return query
 
     # FIXME: this method is a hack around the fact that we use a single cursor for all queries inside a connection,
     #   and this is required to fix get_multi_columns
@@ -631,7 +938,7 @@ class Dialect(PGDialect_psycopg2):
 
         return columns.items()
 
-    # fix for https://github.com/Mause/duckdb_engine/issues/1128
+    # fix for https://github.com/leonardovida/duckdb-sqlalchemy/issues/1128
     # (Overrides sqlalchemy method)
     @lru_cache()
     def _comment_query(  # type: ignore[no-untyped-def]

@@ -212,7 +212,7 @@ def test_nested_types(engine: Engine, session: Session) -> None:
 
 
 def test_double_nested_types(engine: Engine, session: Session) -> None:
-    """Test for https://github.com/Mause/duckdb_engine/issues/1138"""
+    """Test for https://github.com/leonardovida/duckdb-sqlalchemy/issues/1138"""
     importorskip("duckdb", "0.5.0")  # nested types require at least duckdb 0.5.0
     base = declarative_base()
 

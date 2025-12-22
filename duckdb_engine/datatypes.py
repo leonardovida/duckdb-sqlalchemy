@@ -196,6 +196,7 @@ class Union(TypeEngine):
 
 
 ISCHEMA_NAMES = {
+    "bignum": sqltypes.Numeric,
     "hugeint": HugeInteger,
     "uhugeint": UHugeInteger,
     "tinyint": TinyInteger,
