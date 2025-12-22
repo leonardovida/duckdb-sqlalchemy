@@ -10,7 +10,6 @@ from typing import (
     Iterable,
     List,
     Optional,
-    Set,
     Tuple,
     Type,
 )
@@ -24,11 +23,9 @@ from sqlalchemy.dialects.postgresql.base import (
     PGDialect,
     PGIdentifierPreparer,
     PGInspector,
-    PGTypeCompiler,
 )
 from sqlalchemy.dialects.postgresql.psycopg2 import PGDialect_psycopg2
 from sqlalchemy.engine.default import DefaultDialect
-from sqlalchemy.engine.interfaces import Dialect as RootDialect
 from sqlalchemy.engine.reflection import cache
 from sqlalchemy.engine.url import URL as SAURL
 from sqlalchemy.exc import NoSuchTableError
@@ -49,9 +46,8 @@ supports_attach: bool = duckdb_version >= "0.7.0"
 supports_user_agent: bool = duckdb_version >= "0.9.2"
 
 if TYPE_CHECKING:
-    from sqlalchemy.base import Connection
-    from sqlalchemy.engine.interfaces import _IndexDict
-    from sqlalchemy.sql.type_api import _ResultProcessor
+    from sqlalchemy.engine import Connection
+    from sqlalchemy.engine.reflection import ReflectedCheckConstraint, ReflectedIndex
 
 register_extension_types()
 
@@ -90,7 +86,7 @@ class DBAPI:
 class DuckDBInspector(PGInspector):
     def get_check_constraints(
         self, table_name: str, schema: Optional[str] = None, **kw: Any
-    ) -> List[Dict[str, Any]]:
+    ) -> List["ReflectedCheckConstraint"]:
         try:
             return super().get_check_constraints(table_name, schema, **kw)
         except Exception as e:
@@ -169,7 +165,7 @@ class CursorWrapper:
                 raise e
 
     @property
-    def connection(self) -> "Connection":
+    def connection(self) -> Any:
         return self.__connection_wrapper
 
     def close(self) -> None:
@@ -237,9 +233,7 @@ def _apply_motherduck_defaults(config: Dict[str, Any], database: Optional[str]) 
         if token and _looks_like_motherduck(database, config):
             config["motherduck_token"] = token
 
-    if "motherduck_token" in config and not isinstance(
-        config["motherduck_token"], str
-    ):
+    if "motherduck_token" in config and not isinstance(config["motherduck_token"], str):
         raise TypeError("motherduck_token must be a string")
 
 
@@ -285,9 +279,9 @@ class DuckDBIdentifierPreparer(PGIdentifierPreparer):
     def format_schema(self, name: str) -> str:
         """Prepare a quoted schema name."""
         database_name, schema_name = self._separate(name)
-        if database_name is None:
+        if database_name is None or schema_name is None:
             return self.quote(name)
-        return ".".join(self.quote(_n) for _n in [database_name, schema_name])
+        return ".".join(self.quote(str(_n)) for _n in [database_name, schema_name])
 
     def quote_schema(self, schema: str, force: Any = None) -> str:
         """
@@ -300,9 +294,7 @@ class DuckDBIdentifierPreparer(PGIdentifierPreparer):
 
 
 class DuckDBNullType(sqltypes.NullType):
-    def result_processor(
-        self, dialect: RootDialect, coltype: sqltypes.TypeEngine
-    ) -> Optional["_ResultProcessor"]:
+    def result_processor(self, dialect: Any, coltype: object) -> Any:
         if coltype == "JSON":
             return sqltypes.JSON().result_processor(dialect, coltype)
         else:
@@ -348,7 +340,7 @@ class Dialect(PGDialect_psycopg2):
 
         return res
 
-    def connect(self, *cargs: Any, **cparams: Any) -> "Connection":
+    def connect(self, *cargs: Any, **cparams: Any) -> Any:
         core_keys = get_core_config()
         preload_extensions = cparams.pop("preload_extensions", [])
         config = dict(cparams.get("config", {}))
@@ -395,12 +387,12 @@ class Dialect(PGDialect_psycopg2):
     def _get_server_version_info(self, connection: "Connection") -> Tuple[int, int]:
         return (8, 0)
 
-    def get_default_isolation_level(self, connection: "Connection") -> None:
-        raise NotImplementedError()
+    def get_default_isolation_level(self, dbapi_conn):
+        return self.get_isolation_level(dbapi_conn)
 
-    def do_rollback(self, connection: "Connection") -> None:
+    def do_rollback(self, dbapi_connection: Any) -> None:
         try:
-            super().do_rollback(connection)
+            super().do_rollback(dbapi_connection)
         except DBAPI.TransactionException as e:
             if (
                 e.args[0]
@@ -408,8 +400,8 @@ class Dialect(PGDialect_psycopg2):
             ):
                 raise e
 
-    def do_begin(self, connection: "Connection") -> None:
-        connection.begin()
+    def do_begin(self, dbapi_connection: Any) -> None:
+        dbapi_connection.begin()
 
     def get_view_names(
         self,
@@ -680,7 +672,7 @@ class Dialect(PGDialect_psycopg2):
         table_name: str,
         schema: Optional[str] = None,
         **kw: Any,
-    ) -> List["_IndexDict"]:
+    ) -> List["ReflectedIndex"]:
         index_warning()
         return []
 
@@ -690,8 +682,10 @@ class Dialect(PGDialect_psycopg2):
         connection: "Connection",
         schema: Optional[str] = None,
         filter_names: Optional[Collection[str]] = None,
+        scope: Any = None,
+        kind: Any = None,
         **kw: Any,
-    ) -> Iterable[Tuple]:
+    ) -> Iterable[Tuple[Any, Any]]:
         index_warning()
         return []
 
@@ -707,7 +701,7 @@ class Dialect(PGDialect_psycopg2):
         return (), opts
 
     @classmethod
-    def import_dbapi(cls: Type["Dialect"]) -> Type[DBAPI]:
+    def import_dbapi(cls) -> Any:
         return cls.dbapi()
 
     def do_executemany(
@@ -720,18 +714,22 @@ class Dialect(PGDialect_psycopg2):
     def _pg_class_filter_scope_schema(
         self,
         query: Select,
-        schema: str,
+        schema: Optional[str],
         scope: Any,
         pg_class_table: Any = None,
     ) -> Any:
         # Scope by schema, but strip any database prefix (DuckDB uses db.schema).
         # This will not work if a schema or table name is not unique!
         if hasattr(super(), "_pg_class_filter_scope_schema"):
+            schema_arg = schema
             if schema is not None:
                 _, schema_name = self.identifier_preparer._separate(schema)
-                schema = schema_name
+                schema_arg = schema_name
             return getattr(super(), "_pg_class_filter_scope_schema")(
-                query, schema=schema, scope=scope, pg_class_table=pg_class_table
+                query,
+                schema=schema_arg,
+                scope=scope,
+                pg_class_table=pg_class_table,
             )
 
     @lru_cache()
@@ -748,12 +746,14 @@ class Dialect(PGDialect_psycopg2):
         TEXT = pg_base.TEXT
         OID = pg_base.OID
 
+        server_version_info = self.server_version_info or (0,)
+
         generated = (
             pg_catalog.pg_attribute.c.attgenerated.label("generated")
-            if self.server_version_info >= (12,)
+            if server_version_info >= (12,)
             else sql.null().label("generated")
         )
-        if self.server_version_info >= (10,):
+        if server_version_info >= (10,):
             identity = (
                 select(
                     sql.func.json_build_object(
@@ -811,10 +811,8 @@ class Dialect(PGDialect_psycopg2):
             )
             .select_from(pg_catalog.pg_attrdef)
             .where(
-                pg_catalog.pg_attrdef.c.adrelid
-                == pg_catalog.pg_attribute.c.attrelid,
-                pg_catalog.pg_attrdef.c.adnum
-                == pg_catalog.pg_attribute.c.attnum,
+                pg_catalog.pg_attrdef.c.adrelid == pg_catalog.pg_attribute.c.attrelid,
+                pg_catalog.pg_attrdef.c.adnum == pg_catalog.pg_attribute.c.attnum,
                 pg_catalog.pg_attribute.c.atthasdef,
             )
             .correlate(pg_catalog.pg_attribute)
@@ -844,8 +842,7 @@ class Dialect(PGDialect_psycopg2):
             .outerjoin(
                 pg_catalog.pg_attribute,
                 sql.and_(
-                    pg_catalog.pg_class.c.oid
-                    == pg_catalog.pg_attribute.c.attrelid,
+                    pg_catalog.pg_class.c.oid == pg_catalog.pg_attribute.c.attrelid,
                     pg_catalog.pg_attribute.c.attnum > 0,
                     ~pg_catalog.pg_attribute.c.attisdropped,
                 ),
@@ -860,9 +857,7 @@ class Dialect(PGDialect_psycopg2):
                 ),
             )
             .where(self._pg_class_relkind_condition(relkinds))
-            .order_by(
-                pg_catalog.pg_class.c.relname, pg_catalog.pg_attribute.c.attnum
-            )
+            .order_by(pg_catalog.pg_class.c.relname, pg_catalog.pg_attribute.c.attnum)
         )
         query = self._pg_class_filter_scope_schema(query, schema, scope=scope)
         if has_filter_names:
@@ -877,11 +872,11 @@ class Dialect(PGDialect_psycopg2):
         self,
         connection: "Connection",
         schema: Optional[str] = None,
-        filter_names: Optional[Set[str]] = None,
-        scope: Optional[str] = None,
-        kind: Optional[Tuple[str, ...]] = None,
+        filter_names: Optional[Collection[str]] = None,
+        scope: Any = None,
+        kind: Any = None,
         **kw: Any,
-    ) -> List:
+    ) -> Any:
         """
         Copyright 2005-2023 SQLAlchemy authors and contributors <see AUTHORS file>.
 
@@ -904,6 +899,8 @@ class Dialect(PGDialect_psycopg2):
         SOFTWARE.
         """
 
+        scope = kw.get("scope", scope)
+        kind = kw.get("kind", kind)
         has_filter_names, params = self._prepare_filter_names(filter_names)  # type: ignore[attr-defined]
         query = self._columns_query(schema, has_filter_names, scope, kind)  # type: ignore[attr-defined]
         rows = list(connection.execute(query, params).mappings())
@@ -990,7 +987,7 @@ if sqlalchemy.__version__ >= "2.0.14":
     @compiles(TryCast, "duckdb")  # type: ignore[misc]
     def visit_try_cast(
         instance: TryCast,
-        compiler: PGTypeCompiler,
+        compiler: Any,
         **kw: Any,
     ) -> str:
         return "TRY_CAST({} AS {})".format(

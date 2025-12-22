@@ -4,7 +4,7 @@ import re
 import zlib
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Generic, Optional, TypeVar, cast
+from typing import Any, Callable, Generic, Optional, Tuple, TypeVar, cast
 
 import duckdb
 import fsspec
@@ -75,7 +75,11 @@ class CompressedString(types.TypeDecorator):
             return None
         return zlib.compress(value.encode("utf-8"), level=9)
 
-    def process_result_value(self, value: bytes, dialect: Any) -> str:
+    def process_result_value(
+        self, value: Optional[bytes], dialect: Any
+    ) -> Optional[str]:
+        if value is None:
+            return None
         return zlib.decompress(value).decode("utf-8")
 
 
@@ -134,7 +138,8 @@ def test_foreign(session: Session) -> None:
 
     owner = session.query(Owner).one()  # act
 
-    assert owner.owned.name == "Walter"
+    owned = cast(FakeModel, owner.owned)
+    assert owned.name == "Walter"
 
 
 def test_disabled_server_side_cursors(engine: Engine) -> None:
@@ -162,7 +167,8 @@ def test_simple_string(s: str) -> None:
 
     owner = session.query(Owner).one()  # act
 
-    assert owner.owned.name == s
+    owned = cast(FakeModel, owner.owned)
+    assert owned.name == s
 
 
 def test_get_tables(inspector: Inspector) -> None:
@@ -346,7 +352,7 @@ def test_get_multi_columns(engine: Engine) -> None:
             schema=None,
             filter_names=set(),
             scope=None,
-            kind=(ObjectKind.TABLE,),
+            kind=cast(Tuple[str, ...], (ObjectKind.TABLE,)),
         )
 
 
@@ -373,6 +379,7 @@ def test_table_reflect(session: Session, engine: Engine) -> None:
     reflect_table = (
         insp.reflecttable if hasattr(insp, "reflecttable") else insp.reflect_table
     )
+    reflect_table = cast(Callable[..., Any], reflect_table)
     reflect_table(user_table, None)
 
 

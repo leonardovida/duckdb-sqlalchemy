@@ -1,7 +1,7 @@
 import decimal
 import json
 import warnings
-from typing import Any, Dict, Type
+from typing import Any, Callable, Dict, Type, cast
 from uuid import uuid4
 
 from packaging.version import Version
@@ -50,8 +50,9 @@ def test_unsigned_integer_type(
     )
     Base.metadata.create_all(engine)
 
-    has_table = (
-        engine.has_table if hasattr(engine, "has_table") else inspect(engine).has_table
+    has_table = cast(
+        Callable[[str], bool],
+        engine.has_table if hasattr(engine, "has_table") else inspect(engine).has_table,
     )
 
     assert has_table(tname)

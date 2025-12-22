@@ -8,7 +8,7 @@ select * from duckdb_types where type_category = 'NUMERIC';
 """
 
 import typing
-from typing import Any, Callable, Dict, Optional, Type
+from typing import Any, Dict, Optional, Type
 
 import duckdb
 from packaging.version import Version
@@ -155,16 +155,12 @@ class Map(TypeEngine):
         self.key_type = key_type
         self.value_type = value_type
 
-    def bind_processor(
-        self, dialect: Dialect
-    ) -> Optional[Callable[[Optional[dict]], Optional[dict]]]:
+    def bind_processor(self, dialect: Dialect) -> Any:
         return lambda value: (
             {"key": list(value), "value": list(value.values())} if value else None
         )
 
-    def result_processor(
-        self, dialect: Dialect, coltype: str
-    ) -> Optional[Callable[[Optional[dict]], Optional[dict]]]:
+    def result_processor(self, dialect: Dialect, coltype: object) -> Any:
         if IS_GT_1:
             return lambda value: value
         else:

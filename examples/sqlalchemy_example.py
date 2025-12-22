@@ -2,7 +2,6 @@ from sqlalchemy import create_engine, select, text
 
 from duckdb_engine import URL, read_parquet
 
-
 engine = create_engine(URL(database=":memory:"))
 
 with engine.begin() as conn:

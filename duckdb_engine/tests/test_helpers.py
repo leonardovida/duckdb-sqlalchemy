@@ -1,9 +1,9 @@
+import sqlalchemy
 from packaging.version import Version
 from pytest import raises
 from sqlalchemy import select
-import sqlalchemy
 
-from duckdb_engine import Dialect, URL, make_url, read_parquet
+from duckdb_engine import URL, Dialect, make_url, read_parquet
 from duckdb_engine.config import get_core_config
 
 

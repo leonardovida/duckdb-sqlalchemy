@@ -81,7 +81,7 @@ def tests_core(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
         )
 
 
-@nox.session(py=["3.9"])
-def mypy(session: nox.Session) -> None:
+@nox.session(py=["3.11"])
+def ty(session: nox.Session) -> None:
     session.install("-e", ".[dev]")
-    session.run("mypy", "duckdb_engine/")
+    session.run("ty", "check", "duckdb_engine/")

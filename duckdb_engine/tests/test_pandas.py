@@ -8,7 +8,7 @@ Test pandas functionality.
 import pathlib
 import random
 from collections import OrderedDict
-from datetime import datetime
+from datetime import datetime, timezone
 from itertools import product
 from typing import Dict, List, Optional, Tuple, Union, cast
 
@@ -57,7 +57,7 @@ sample_rowcount = max(
     if cs is not None
 )
 for i in range(sample_rowcount):
-    sample_data["datetime"].append(datetime.utcnow())
+    sample_data["datetime"].append(datetime.now(timezone.utc))
     sample_data["int"].append(random.randint(0, 100))
     sample_data["float"].append(round(random.random(), 5))
     sample_data["str"].append("foo")
@@ -114,12 +114,14 @@ def run_query(query: str, chunksize: Optional[int]) -> None:
     result = pd.read_sql(query, eng, chunksize=chunksize)
     chunks = [result] if chunksize is None else list(result)
     if chunksize is None:
-        assert len(chunks[0]) == sample_rowcount
+        df = cast(pd.DataFrame, chunks[0])
+        assert len(df) == sample_rowcount
     else:
         importorskip("duckdb", "0.5.0")
 
         # Assert that the chunks are the size specified.
-        assert len(chunks[0]) == chunksize
+        df = cast(pd.DataFrame, chunks[0])
+        assert len(df) == chunksize
         # Assert that the expected number of chunks was returned.
         assert (sample_rowcount / chunksize) == len(chunks)
 

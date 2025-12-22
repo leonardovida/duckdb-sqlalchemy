@@ -29,17 +29,25 @@ def URL(
             return tuple(_stringify(v) for v in value)
         return _stringify(value)
 
-    query_dict: dict[str, Any] = {}
+    query_dict: dict[str, str | tuple[str, ...]] = {}
     if query:
         query_dict.update(
-            {k: v for k, v in ((k, _coerce(v)) for k, v in query.items()) if v is not None}
+            {
+                k: v
+                for k, v in ((k, _coerce(v)) for k, v in query.items())
+                if v is not None
+            }
         )
     if kwargs:
         query_dict.update(
-            {k: v for k, v in ((k, _coerce(v)) for k, v in kwargs.items()) if v is not None}
+            {
+                k: v
+                for k, v in ((k, _coerce(v)) for k, v in kwargs.items())
+                if v is not None
+            }
         )
 
-    return SAURL.create("duckdb", database=database, query=query_dict or None)
+    return SAURL.create("duckdb", database=database, query=query_dict)
 
 
 def make_url(
