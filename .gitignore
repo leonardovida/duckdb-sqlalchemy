@@ -12,6 +12,7 @@ coverage.xml
 .DS_Store
 .hypothesis/
 .kodiak.toml
+.release-please-manifest.json
 kodiak/
 .idea
 .vscode
