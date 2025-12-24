@@ -237,7 +237,7 @@ def test_double_nested_types(engine: Engine, session: Session) -> None:
 
 def test_interval(engine: Engine, snapshot: Snapshot) -> None:
     test_table = Table("test_table", MetaData(), Column("duration", Interval))
-    create_sql = str(schema.CreateTable(test_table).compile(engine)).strip()
+    create_sql = f"{str(schema.CreateTable(test_table).compile(engine)).strip()}\n"
     snapshot.assert_match(create_sql, "schema.sql")
 
 
