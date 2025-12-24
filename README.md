@@ -1,9 +1,29 @@
 # duckdb-sqlalchemy
 
-[![Supported Python Versions](https://img.shields.io/pypi/pyversions/duckdb-sqlalchemy)](https://pypi.org/project/duckdb-sqlalchemy/) [![PyPI version](https://badge.fury.io/py/duckdb-sqlalchemy.svg)](https://pypi.org/project/duckdb-sqlalchemy) [![PyPI Downloads](https://img.shields.io/pypi/dm/duckdb-sqlalchemy.svg)](https://pypi.org/project/duckdb-sqlalchemy/) [![codecov](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy/graph/badge.svg)](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy)
+[![PyPI version](https://badge.fury.io/py/duckdb-sqlalchemy.svg)](https://pypi.org/project/duckdb-sqlalchemy)
+[![Supported Python Versions](https://img.shields.io/pypi/pyversions/duckdb-sqlalchemy)](https://pypi.org/project/duckdb-sqlalchemy/)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/duckdb-sqlalchemy.svg)](https://pypi.org/project/duckdb-sqlalchemy/)
+[![CI](https://github.com/leonardovida/duckdb-sqlalchemy/actions/workflows/pythonapp.yaml/badge.svg)](https://github.com/leonardovida/duckdb-sqlalchemy/actions/workflows/pythonapp.yaml)
+[![codecov](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy/graph/badge.svg)](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy)
+[![License](https://img.shields.io/pypi/l/duckdb-sqlalchemy)](LICENSE.txt)
 
-SQLAlchemy dialect for DuckDB and MotherDuck. Use it to run DuckDB locally or connect to MotherDuck with the standard SQLAlchemy APIs.
-This maintained dialect tracks current DuckDB releases and includes newer functionality and performance improvements compared to legacy forks.
+SQLAlchemy dialect for DuckDB and MotherDuck. Run DuckDB locally or connect to MotherDuck with the standard SQLAlchemy APIs. This maintained fork tracks current DuckDB releases and includes MotherDuck-specific helpers and reliability improvements compared to legacy forks.
+
+## Highlights
+
+- First-class SQLAlchemy dialect (Core + ORM) for DuckDB and MotherDuck.
+- Clean connection URL helpers for MotherDuck routing, attach modes, and read scaling.
+- Practical defaults for pooling, pre-ping, and long-lived app workloads.
+- Optional transient retry for idempotent reads.
+- Actively maintained with a long-term support mindset.
+
+## Compatibility
+
+| Component | Supported versions |
+| --- | --- |
+| Python | 3.9+ |
+| SQLAlchemy | 1.3.22+ (2.x recommended) |
+| DuckDB | 0.5.0+ (latest recommended) |
 
 ## Install
 
@@ -11,9 +31,9 @@ This maintained dialect tracks current DuckDB releases and includes newer functi
 pip install duckdb-sqlalchemy
 ```
 
-Conda packages are available via the conda-forge feedstock: https://github.com/conda-forge/duckdb-sqlalchemy-feedstock.
+Conda packages are available via conda-forge: https://github.com/conda-forge/duckdb-sqlalchemy-feedstock.
 
-## Quick start
+## Quick start (DuckDB)
 
 ```python
 from sqlalchemy import Column, Integer, String, create_engine
@@ -38,18 +58,53 @@ with Session(engine) as session:
     assert session.query(User).one().name == "Ada"
 ```
 
-## What’s new in this dialect
+## Quick start (MotherDuck)
 
-- MotherDuck connection-string correctness for instance caching (routing/affinity params go in the URL path).
-- MotherDuck helpers: `MotherDuckURL`, `stable_session_hint`, `create_motherduck_engine`, `create_engine_from_paths`.
-- Pool overrides via URL/env plus guidance for QueuePool, pre-ping, and daily recycle.
-- Optional transient retry for idempotent reads and disconnect detection.
-- Bulk insert and config handling improvements.
-- New MotherDuck examples (read scaling, multi-instance pools, Arrow reads, attach modes).
+```bash
+export MOTHERDUCK_TOKEN="..."
+```
+
+```python
+from sqlalchemy import create_engine
+
+engine = create_engine("duckdb:///md:my_db")
+```
+
+MotherDuck uses the `md:` database prefix. Tokens are picked up from `MOTHERDUCK_TOKEN` (or `motherduck_token`) automatically. If your token has special characters, URL-escape it or pass it via `connect_args`.
+
+## Connection URLs
+
+DuckDB URLs follow the standard SQLAlchemy shape:
+
+```
+duckdb:///<database>?<config>
+```
+
+Examples:
+
+```
+duckdb:///:memory:
+duckdb:///analytics.db
+duckdb:////absolute/path/to/analytics.db
+duckdb:///md:my_db?attach_mode=single&access_mode=read_only&session_hint=team-a
+```
+
+Use the URL helpers to build connection strings safely:
+
+```python
+from duckdb_sqlalchemy import URL, MotherDuckURL
+
+local_url = URL(database=":memory:", read_only=False)
+md_url = MotherDuckURL(database="md:my_db", attach_mode="single")
+```
+
+## Configuration and pooling
+
+This dialect ships with sensible defaults (NullPool for file/MotherDuck connections, SingletonThreadPool for `:memory:`) and lets you override pooling explicitly. For production services, use the MotherDuck performance helper or configure `QueuePool`, `pool_pre_ping`, and `pool_recycle`.
+
+See `docs/configuration.md` and `docs/motherduck.md` for detailed guidance.
 
 ## Documentation
-
-Start here for focused, task-based docs:
 
 - `docs/README.md` - Docs index
 - `docs/connection-urls.md` - URL formats and helpers
@@ -69,6 +124,22 @@ Start here for focused, task-based docs:
 - `examples/motherduck_arrow_reads.py` - Arrow results + streaming
 - `examples/motherduck_attach_modes.py` - workspace vs single attach mode
 
+## Release and support policy
+
+- Long-term maintenance: this project is intended to remain supported indefinitely.
+- Compatibility: we track current DuckDB and SQLAlchemy releases while preserving SQLAlchemy semantics.
+- Breaking changes: only in major/minor releases with explicit notes in `CHANGELOG.md`.
+- Security: please open an issue with details; we will prioritize fixes.
+
+## Changelog and roadmap
+
+- `CHANGELOG.md` - release notes
+- `ROADMAP.md` - upcoming work and priorities
+
 ## Contributing
 
-See `AGENTS.md` for repo-specific workflow and PR expectations.
+See `AGENTS.md` for repo-specific workflow, tooling, and PR expectations. We welcome issues, bug reports, and high-quality pull requests.
+
+## License
+
+MIT. See `LICENSE.txt`.

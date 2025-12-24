@@ -6,6 +6,22 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [0.19.0](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.18.0...v0.19.0) (2025-12-24)
+
+### Documentation
+
+* overhaul README with long-term support positioning, expanded quick starts, and URL/pooling guidance
+* add CI and license badges plus clearer compatibility and support policy sections
+* reorganize docs/examples pointers for faster onboarding
+
+### Miscellaneous Chores
+
+* bump package version to 0.19.0 for the documentation release
+
+### Notes
+
+* no runtime code changes in this release
+
 ## [0.18.0](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.17.0...v0.18.0) (2025-12-24)
 
 ### ⚠ BREAKING CHANGES
