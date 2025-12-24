@@ -149,6 +149,8 @@ class CursorWrapper:
                 assert parameters and len(parameters) == 2, parameters
                 view_name, df = parameters
                 self.__c.register(view_name, df)
+            elif statement.lower() == "show transaction isolation level":
+                self.__c.execute("select 'read committed' as transaction_isolation")
             elif parameters is None:
                 self.__c.execute(statement)
             else:
