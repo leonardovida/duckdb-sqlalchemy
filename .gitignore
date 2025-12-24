@@ -9,7 +9,9 @@ htmlcov/
 .coverage
 coverage.xml
 .DS_Store
-.hypothesis/*
+.hypothesis/
+.kodiak.toml
+kodiak/
 .idea
 .vscode
 results.xml

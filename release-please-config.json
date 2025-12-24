@@ -1,7 +1,7 @@
 {
   "packages": {
     ".": {
-      "package-name": "duckdb_engine",
+      "package-name": "duckdb-sqlalchemy",
       "release-type": "python",
       "draft": true,
       "prerelease": false,
