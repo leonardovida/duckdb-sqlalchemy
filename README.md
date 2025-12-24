@@ -1,11 +1,11 @@
-# duckdb_engine
+# duckdb-sqlalchemy
 
-[![Supported Python Versions](https://img.shields.io/pypi/pyversions/duckdb-engine)](https://pypi.org/project/duckdb-engine/) [![PyPI version](https://badge.fury.io/py/duckdb-engine.svg)](https://badge.fury.io/py/duckdb-engine) [![PyPI Downloads](https://img.shields.io/pypi/dm/duckdb-engine.svg)](https://pypi.org/project/duckdb-engine/) [![codecov](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy/graph/badge.svg)](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy)
+[![Supported Python Versions](https://img.shields.io/pypi/pyversions/duckdb-sqlalchemy)](https://pypi.org/project/duckdb-sqlalchemy/) [![PyPI version](https://badge.fury.io/py/duckdb-sqlalchemy.svg)](https://badge.fury.io/py/duckdb-sqlalchemy) [![PyPI Downloads](https://img.shields.io/pypi/dm/duckdb-sqlalchemy.svg)](https://pypi.org/project/duckdb-sqlalchemy/) [![codecov](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy/graph/badge.svg)](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy)
 
 SQLAlchemy driver for [DuckDB](https://duckdb.org/) and [MotherDuck](https://motherduck.com/).
 
 <!--ts-->
-- [duckdb\_engine](#duckdb_engine)
+- [duckdb-sqlalchemy](#duckdb-sqlalchemy)
   - [Installation](#installation)
   - [Quickstart](#quickstart)
   - [Connection URLs](#connection-urls)
@@ -27,6 +27,7 @@ SQLAlchemy driver for [DuckDB](https://duckdb.org/) and [MotherDuck](https://mot
   - [Preloading extensions (experimental)](#preloading-extensions-experimental)
   - [Registering Filesystems](#registering-filesystems)
   - [The name](#the-name)
+  - [Fork](#fork)
 
 <!-- Created by https://github.com/ekalinin/github-markdown-toc -->
 <!-- Added by: me, at: Wed 20 Sep 2023 12:44:27 AWST -->
@@ -35,10 +36,10 @@ SQLAlchemy driver for [DuckDB](https://duckdb.org/) and [MotherDuck](https://mot
 
 ## Installation
 ```sh
-$ pip install duckdb-engine
+$ pip install duckdb-sqlalchemy
 ```
 
-DuckDB Engine also has a conda feedstock available, the instructions for the use of which are available in it's [repository](https://github.com/conda-forge/duckdb-engine-feedstock).
+DuckDB SQLAlchemy also has a conda feedstock available, the instructions for the use of which are available in it's [repository](https://github.com/conda-forge/duckdb-sqlalchemy-feedstock).
 
 ## Quickstart
 
@@ -93,7 +94,7 @@ For programmatic construction (and automatic escaping), use the helper:
 ```python
 import os
 from sqlalchemy import create_engine
-from duckdb_engine import URL
+from duckdb_sqlalchemy import URL
 
 url = URL(
     database=":memory:",
@@ -144,12 +145,12 @@ duckdb:///md:my_db?dbinstance_inactivity_ttl=1h
 ### Parquet and CSV scans
 
 DuckDB exposes analytics-friendly table functions like `read_parquet` and
-`read_csv_auto`. The `duckdb_engine.olap` helpers make these easy to use with
+`read_csv_auto`. The `duckdb_sqlalchemy.olap` helpers make these easy to use with
 SQLAlchemy:
 
 ```python
 from sqlalchemy import select
-from duckdb_engine import read_parquet, read_csv_auto
+from duckdb_sqlalchemy import read_parquet, read_csv_auto
 
 parquet = read_parquet("data/events.parquet", columns=["event_id", "ts"])
 stmt = select(parquet.c.event_id, parquet.c.ts)
@@ -172,7 +173,7 @@ conn.execute(text("SELECT * FROM analytics.events LIMIT 10"))
 
 ## Usage in IPython/Jupyter
 
-With IPython-SQL and DuckDB-Engine you can query DuckDB natively in your notebook! Check out [DuckDB's documentation](https://duckdb.org/docs/guides/python/jupyter) or
+With IPython-SQL and DuckDB SQLAlchemy you can query DuckDB natively in your notebook! Check out [DuckDB's documentation](https://duckdb.org/docs/guides/python/jupyter) or
 Alex Monahan's great demo of this on [his blog](https://alex-monahan.github.io/2021/08/22/Python_and_SQL_Better_Together.html#an-example-workflow-with-duckdb).
 
 ## Configuration
@@ -210,7 +211,7 @@ conn.execute("select * from dataframe_name")
 ## Type support
 
 Most SQLAlchemy core types map directly to DuckDB. DuckDB-specific helpers are
-available in `duckdb_engine.datatypes`:
+available in `duckdb_sqlalchemy.datatypes`:
 
 | Type | DuckDB name | Notes |
 | --- | --- | --- |
@@ -237,7 +238,7 @@ For SQLAlchemy 2.x, parameters compile to `$1`, `$2`, ...; SQLAlchemy 1.x uses
 `?` placeholders.
 
 ## Things to keep in mind
-Duckdb's SQL parser is based on the PostgreSQL parser, but not all features in PostgreSQL are supported in duckdb. Because the `duckdb_engine` dialect is derived from the `postgresql` dialect, `SQLAlchemy` may try to use PostgreSQL-only features. Below are some caveats to look out for.
+Duckdb's SQL parser is based on the PostgreSQL parser, but not all features in PostgreSQL are supported in duckdb. Because the `duckdb_sqlalchemy` dialect is derived from the `postgresql` dialect, `SQLAlchemy` may try to use PostgreSQL-only features. Below are some caveats to look out for.
 
 ### Auto-incrementing ID columns
 When defining an Integer column as a primary key, `SQLAlchemy` uses the `SERIAL` datatype for PostgreSQL. Duckdb does not yet support this datatype because it's a non-standard PostgreSQL legacy type, so a workaround is to use the `SQLAlchemy.Sequence()` object to auto-increment the key. For more information on sequences, you can find the [`SQLAlchemy Sequence` documentation here](https://docs.sqlalchemy.org/en/14/core/defaults.html#associating-a-sequence-as-the-server-side-default).
@@ -267,7 +268,7 @@ The following example demonstrates how to create an auto-incrementing ID column 
 
 **NOTE**: this is no longer an issue in versions `>=0.5.0` of `duckdb`
 
-The `pandas.read_sql()` method can read tables from `duckdb_engine` into DataFrames, but the `sqlalchemy.engine.result.ResultProxy` trips up when `fetchmany()` is called. Therefore, for now `chunksize=None` (default) is necessary when reading duckdb tables into DataFrames. For example:
+The `pandas.read_sql()` method can read tables from `duckdb_sqlalchemy` into DataFrames, but the `sqlalchemy.engine.result.ResultProxy` trips up when `fetchmany()` is called. Therefore, for now `chunksize=None` (default) is necessary when reading duckdb tables into DataFrames. For example:
 
 ```python
 >>> import pandas as pd
@@ -279,7 +280,7 @@ The `pandas.read_sql()` method can read tables from `duckdb_engine` into DataFra
 
 ### Unsigned integer support
 
-Unsigned integers are supported by DuckDB, and are available in [`duckdb_engine.datatypes`](duckdb_engine/datatypes.py).
+Unsigned integers are supported by DuckDB, and are available in [`duckdb_sqlalchemy.datatypes`](duckdb_sqlalchemy/datatypes.py).
 
 ## Alembic Integration
 
@@ -338,4 +339,8 @@ create_engine(
 
 ## The name
 
-Yes, I'm aware this package should be named `duckdb-driver` or something. The repository is named `duckdb-sqlalchemy`, but the package remains `duckdb-engine` for compatibility.
+This project is published as `duckdb-sqlalchemy` (imported as `duckdb_sqlalchemy`) to match the repository and package name.
+
+## Fork
+
+This repository is a fork of the original DuckDB SQLAlchemy driver by Elliana May (https://github.com/Mause/duckdb_engine). We keep the fork history and attribution intact.

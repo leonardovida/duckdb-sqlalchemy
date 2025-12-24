@@ -22,7 +22,7 @@ FuncT = TypeVar("FuncT", bound=Callable[..., Any])
 
 @fixture
 def engine() -> Engine:
-    registry.register("duckdb", "duckdb_engine", "Dialect")
+    registry.register("duckdb", "duckdb_sqlalchemy", "Dialect")
 
     return create_engine("duckdb:///:memory:")
 

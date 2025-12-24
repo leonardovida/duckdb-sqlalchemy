@@ -205,7 +205,7 @@
 
 ### Miscellaneous Chores
 
-* Add duckdb_engine/sqlalchemy version info to DuckDB user_agent
+* Add duckdb-sqlalchemy/sqlalchemy version info to DuckDB user_agent
 
 ## [0.11.0](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.10.0...v0.11.0) (2024-02-04)
 

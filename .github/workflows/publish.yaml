@@ -37,7 +37,7 @@ jobs:
     needs: build
     environment:
       name: pypi
-      url: https://pypi.org/p/duckdb_engine
+      url: https://pypi.org/p/duckdb-sqlalchemy
     permissions:
       id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
     steps:
@@ -57,7 +57,7 @@ jobs:
 
     environment:
       name: testpypi
-      url: https://test.pypi.org/p/duckdb_engine
+      url: https://test.pypi.org/p/duckdb-sqlalchemy
 
     permissions:
       id-token: write  # IMPORTANT: mandatory for trusted publishing

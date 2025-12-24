@@ -1,9 +1,9 @@
 [project]
-name = "duckdb_engine"
+name = "duckdb-sqlalchemy"
 version = "0.17.0"
 description = "SQLAlchemy driver for duckdb"
 authors = [
-    {name = "Elliana May", email = "me@mause.me"},
+    {name = "Leonardo Vida", email = "leonardo@motherduck.com"},
 ]
 license = "MIT"
 license-files = ["LICENSE.txt"]
@@ -19,6 +19,7 @@ dependencies = [
 "Bug Tracker" = "https://github.com/leonardovida/duckdb-sqlalchemy/issues"
 Changelog = "https://github.com/leonardovida/duckdb-sqlalchemy/releases"
 repository = "https://github.com/leonardovida/duckdb-sqlalchemy"
+Upstream = "https://github.com/Mause/duckdb_engine"
 
 [project.optional-dependencies]
 dev = [
@@ -45,7 +46,7 @@ devtools = [
 ]
 
 [project.entry-points."sqlalchemy.dialects"]
-duckdb = "duckdb_engine:Dialect"
+duckdb = "duckdb_sqlalchemy:Dialect"
 
 [tool.pytest.ini_options]
 addopts = "--hypothesis-show-statistics --strict --strict-markers"

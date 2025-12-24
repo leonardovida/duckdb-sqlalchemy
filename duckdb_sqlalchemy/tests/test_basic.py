@@ -55,7 +55,7 @@ except ImportError:
 
 @fixture
 def engine() -> Engine:
-    registry.register("duckdb", "duckdb_engine", "Dialect")
+    registry.register("duckdb", "duckdb_sqlalchemy", "Dialect")
 
     eng = create_engine("duckdb:///:memory:")
     Base.metadata.create_all(eng)
@@ -532,7 +532,7 @@ def test_url_config_and_dict_config() -> None:
         assert memory_limit in ("500.0MB", "476.8 MiB")
 
 
-user_agent_re = r"duckdb/.*(.*) python(/.*)? duckdb_engine/.*(sqlalchemy/.*)"
+user_agent_re = r"duckdb/.*(.*) python(/.*)? duckdb-sqlalchemy/.*(sqlalchemy/.*)"
 
 
 @mark.skipif(

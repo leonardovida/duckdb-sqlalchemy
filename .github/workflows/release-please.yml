@@ -9,7 +9,7 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      - run: npx release-please debug-config --repo-url https://github.com/Mause/duckdb_engine
+      - run: npx release-please debug-config --repo-url https://github.com/leonardovida/duckdb-sqlalchemy
       - uses: googleapis/release-please-action@v4
         with:
           release-type: python

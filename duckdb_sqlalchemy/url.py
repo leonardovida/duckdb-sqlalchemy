@@ -12,7 +12,7 @@ def URL(
     **kwargs: Any,
 ) -> SAURL:
     """
-    Build a SQLAlchemy URL for duckdb_engine.
+    Build a SQLAlchemy URL for duckdb-sqlalchemy.
 
     All keyword arguments are treated as DuckDB config options (URL query params).
     """

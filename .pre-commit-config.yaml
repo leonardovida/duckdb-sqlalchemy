@@ -19,7 +19,7 @@ repos:
     hooks:
       - id: ty
         name: ty
-        entry: ty check --ignore unresolved-import duckdb_engine/
+        entry: ty check --ignore unresolved-import duckdb_sqlalchemy/
         language: python
         additional_dependencies:
           - "ty"

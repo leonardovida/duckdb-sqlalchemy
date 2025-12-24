@@ -3,8 +3,8 @@ from packaging.version import Version
 from pytest import raises
 from sqlalchemy import select
 
-from duckdb_engine import URL, Dialect, make_url, read_parquet
-from duckdb_engine.config import get_core_config
+from duckdb_sqlalchemy import URL, Dialect, make_url, read_parquet
+from duckdb_sqlalchemy.config import get_core_config
 
 
 def test_url_helper_round_trip() -> None:
@@ -49,11 +49,11 @@ def test_motherduck_config_env_and_ttl(monkeypatch) -> None:
         captured.update(cparams)
         return DummyConn()
 
-    import duckdb_engine
+    import duckdb_sqlalchemy
 
     monkeypatch.setenv("motherduck_token", "token123")
     monkeypatch.delenv("MOTHERDUCK_TOKEN", raising=False)
-    monkeypatch.setattr(duckdb_engine.duckdb, "connect", fake_connect)
+    monkeypatch.setattr(duckdb_sqlalchemy.duckdb, "connect", fake_connect)
 
     dialect = Dialect()
     dialect.connect(

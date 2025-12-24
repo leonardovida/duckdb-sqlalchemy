@@ -114,7 +114,7 @@ class Struct(TypeEngine):
     Represents a STRUCT type in DuckDB
 
     ```python
-    from duckdb_engine.datatypes import Struct
+    from duckdb_sqlalchemy.datatypes import Struct
     from sqlalchemy import Table, Column, String
 
     Table(
@@ -137,7 +137,7 @@ class Map(TypeEngine):
     Represents a MAP type in DuckDB
 
     ```python
-    from duckdb_engine.datatypes import Map
+    from duckdb_sqlalchemy.datatypes import Map
     from sqlalchemy import Table, Column, String
 
     Table(
@@ -174,7 +174,7 @@ class Union(TypeEngine):
     Represents a UNION type in DuckDB
 
     ```python
-    from duckdb_engine.datatypes import Union
+    from duckdb_sqlalchemy.datatypes import Union
     from sqlalchemy import Table, Column, String
 
     Table(

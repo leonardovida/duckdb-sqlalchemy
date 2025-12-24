@@ -473,7 +473,7 @@ wheels = [
 ]
 
 [[package]]
-name = "duckdb-engine"
+name = "duckdb-sqlalchemy"
 version = "0.17.0"
 source = { editable = "." }
 dependencies = [
