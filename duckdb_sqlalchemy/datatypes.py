@@ -8,11 +8,11 @@ select * from duckdb_types where type_category = 'NUMERIC';
 """
 
 import typing
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, Optional, Tuple, Type
 
 import duckdb
 from packaging.version import Version
-from sqlalchemy import exc
+from sqlalchemy import exc, util
 from sqlalchemy.dialects.postgresql.base import PGIdentifierPreparer, PGTypeCompiler
 from sqlalchemy.engine import Dialect
 from sqlalchemy.ext.compiler import compiles
@@ -30,37 +30,41 @@ duckdb_version = duckdb.__version__
 IS_GT_1 = Version(duckdb_version) > Version("1.0.0")
 
 
-class UInt64(Integer):
+class DuckDBInteger(Integer):
+    cache_ok = True
+
+
+class UInt64(DuckDBInteger):
     pass
 
 
-class UInt32(Integer):
+class UInt32(DuckDBInteger):
     pass
 
 
-class UInt16(Integer):
+class UInt16(DuckDBInteger):
     "AKA USMALLINT"
 
 
-class UInt8(Integer):
+class UInt8(DuckDBInteger):
     pass
 
 
-class UTinyInteger(Integer):
+class UTinyInteger(DuckDBInteger):
     "AKA UInt1"
 
     name = "UTinyInt"
     # UTINYINT	-	0	255
 
 
-class TinyInteger(Integer):
+class TinyInteger(DuckDBInteger):
     "AKA Int1"
 
     name = "TinyInt"
     # TINYINT	INT1	-128	127
 
 
-class USmallInteger(Integer):
+class USmallInteger(DuckDBInteger):
     name = "usmallint"
     "AKA UInt2"
     # USMALLINT	-	0	65535
@@ -68,29 +72,29 @@ class USmallInteger(Integer):
     max = 2**15
 
 
-class UBigInteger(Integer):
+class UBigInteger(DuckDBInteger):
     name = "UBigInt"
     min = 0
     max = 18446744073709551615
 
 
-class HugeInteger(Integer):
+class HugeInteger(DuckDBInteger):
     name = "HugeInt"
     # HUGEINT	 	-170141183460469231731687303715884105727*	170141183460469231731687303715884105727
 
 
-class UHugeInteger(Integer):
+class UHugeInteger(DuckDBInteger):
     name = "UHugeInt"
 
 
-class UInteger(Integer):
+class UInteger(DuckDBInteger):
     # UINTEGER	-	0	4294967295
     pass
 
 
 if IS_GT_1:
 
-    class VarInt(Integer):
+    class VarInt(DuckDBInteger):
         pass
 
 
@@ -100,13 +104,39 @@ def compile_uint(element: Integer, compiler: PGTypeCompiler, **kw: Any) -> str:
 
 types = [
     subclass
-    for subclass in Integer.__subclasses__()
+    for subclass in DuckDBInteger.__subclasses__()
     if subclass.__module__ == UInt64.__module__
 ]
 assert types
 
 
 TV = typing.Union[Type[TypeEngine], TypeEngine]
+
+
+def _normalize_fields(
+    fields: Optional[Dict[str, TV]],
+) -> Optional[Tuple[Tuple[str, TypeEngine], ...]]:
+    if fields is None:
+        return None
+    if isinstance(fields, dict):
+        items = fields.items()
+    else:
+        items = fields
+    return tuple(
+        (str(key), type_api.to_instance(value))
+        for key, value in items  # type: ignore[arg-type]
+    )
+
+
+def _normalize_fields_cache_key(
+    fields: Optional[Tuple[Tuple[str, TypeEngine], ...]],
+) -> Optional[Tuple[Tuple[str, Any], ...]]:
+    if fields is None:
+        return None
+    return tuple(
+        (key, value._static_cache_key if isinstance(value, TypeEngine) else value)
+        for key, value in fields
+    )
 
 
 class Struct(TypeEngine):
@@ -127,9 +157,18 @@ class Struct(TypeEngine):
     """
 
     __visit_name__ = "struct"
+    cache_ok = True
 
     def __init__(self, fields: Optional[Dict[str, TV]] = None):
         self.fields = fields
+        self._fields = _normalize_fields(fields)
+        self._fields_cache_key = _normalize_fields_cache_key(self._fields)
+
+    @util.memoized_property
+    def _static_cache_key(self):  # type: ignore[override]
+        if self._fields_cache_key is None:
+            return (self.__class__,)
+        return (self.__class__, ("fields", self._fields_cache_key))
 
 
 class Map(TypeEngine):
@@ -148,12 +187,13 @@ class Map(TypeEngine):
     """
 
     __visit_name__ = "map"
+    cache_ok = True
     key_type: TV
     value_type: TV
 
     def __init__(self, key_type: TV, value_type: TV):
-        self.key_type = key_type
-        self.value_type = value_type
+        self.key_type = type_api.to_instance(key_type)
+        self.value_type = type_api.to_instance(value_type)
 
     def bind_processor(self, dialect: Dialect) -> Any:
         return lambda value: (
@@ -185,10 +225,19 @@ class Union(TypeEngine):
     """
 
     __visit_name__ = "union"
+    cache_ok = True
     fields: Dict[str, TV]
 
     def __init__(self, fields: Dict[str, TV]):
         self.fields = fields
+        self._fields = _normalize_fields(fields)
+        self._fields_cache_key = _normalize_fields_cache_key(self._fields)
+
+    @util.memoized_property
+    def _static_cache_key(self):  # type: ignore[override]
+        if self._fields_cache_key is None:
+            return (self.__class__,)
+        return (self.__class__, ("fields", self._fields_cache_key))
 
 
 ISCHEMA_NAMES = {
@@ -249,7 +298,9 @@ def struct_or_union(
     identifier_preparer: PGIdentifierPreparer,
     **kw: Any,
 ) -> str:
-    fields = instance.fields
+    fields = getattr(instance, "_fields", None)
+    if fields is None:
+        fields = instance.fields
     if fields is None:
         raise exc.CompileError(f"DuckDB {repr(instance)} type requires fields")
     return "({})".format(
@@ -260,7 +311,7 @@ def struct_or_union(
                     value, compiler, identifier_preparer=identifier_preparer, **kw
                 ),
             )
-            for key, value in fields.items()
+            for key, value in (fields.items() if isinstance(fields, dict) else fields)
         )
     )
 

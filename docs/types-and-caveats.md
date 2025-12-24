@@ -24,6 +24,26 @@ stmt = text("SELECT * FROM events WHERE event_id = :event_id")
 conn.execute(stmt, {"event_id": 123})
 ```
 
+## Execution options
+
+DuckDB-specific execution options are available on connections and statements:
+
+```python
+with engine.connect().execution_options(
+    duckdb_arrow=True,
+    duckdb_copy_threshold=10000,
+    duckdb_insertmanyvalues_page_size=1000,
+) as conn:
+    conn.execute(stmt)
+```
+
+- `duckdb_arrow`: return Arrow tables for SELECTs (`result.arrow` or `result.all()`); requires `pyarrow`.
+- `duckdb_copy_threshold`: for large INSERT executemany, register a pandas/Arrow object and run `INSERT INTO ... SELECT ...`.
+- `duckdb_insertmanyvalues_page_size`: batch size for SQLAlchemy 2.x multi-row VALUES inserts.
+- `duckdb_arraysize`: cursor fetch size for `stream_results` / `fetchmany` workloads.
+
+Arrow results consume the cursor; fetch rows or Arrow, not both.
+
 ## Auto-increment columns
 
 DuckDB does not support PostgreSQL `SERIAL`. Use a `Sequence` for auto-incrementing primary keys:

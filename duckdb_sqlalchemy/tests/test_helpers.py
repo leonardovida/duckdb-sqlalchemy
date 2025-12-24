@@ -1,3 +1,5 @@
+from urllib.parse import parse_qs
+
 import sqlalchemy
 from packaging.version import Version
 from pytest import raises
@@ -63,4 +65,7 @@ def test_motherduck_config_env_and_ttl(monkeypatch) -> None:
     )
 
     assert captured["config"]["motherduck_token"] == "token123"
-    assert captured["config"]["motherduck_dbinstance_inactivity_ttl"] == "1h"
+    database, query = captured["database"].split("?", 1)
+    assert database == "md:my_db"
+    assert parse_qs(query)["dbinstance_inactivity_ttl"] == ["1h"]
+    assert "motherduck_dbinstance_inactivity_ttl" not in captured["config"]

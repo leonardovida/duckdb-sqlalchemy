@@ -44,3 +44,18 @@ def test_fetch_arrow() -> None:
         assert res.read_next_batch() == RecordBatch.from_pydict(
             {"label": ["zz"], "value": [6.0]}
         )
+
+
+def test_arrow_execution_option() -> None:
+    engine = create_engine("duckdb:///:memory:")
+    with engine.begin() as con:
+        con.execute(text("CREATE TABLE tbl (label VARCHAR, value DOUBLE)"))
+        con.execute(text("INSERT INTO tbl VALUES ('aa', 1.0), ('bb', 2.0)"))
+
+    with engine.connect().execution_options(duckdb_arrow=True) as con:
+        result = con.execute(text("SELECT * FROM tbl ORDER BY label"))
+        table = result.arrow
+        assert isinstance(table, ArrowTable)
+        assert table == ArrowTable.from_pydict(
+            {"label": ["aa", "bb"], "value": [1.0, 2.0]}
+        )

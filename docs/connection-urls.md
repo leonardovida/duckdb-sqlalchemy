@@ -45,3 +45,7 @@ engine = create_engine(f"duckdb:///md:my_db?motherduck_token={escaped}")
 ```
 
 See `motherduck.md` for MotherDuck-specific examples and options.
+
+## Pool defaults
+
+Pooling behavior is described in `configuration.md` (NullPool for file/MotherDuck, SingletonThreadPool for `:memory:`) and can be overridden with `poolclass`.
