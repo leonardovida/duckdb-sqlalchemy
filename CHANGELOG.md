@@ -1,18 +1,18 @@
 # Changelog
 
-## [Unreleased]
+## [0.18.0](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.17.0...v0.18.0) (2025-12-24)
 
+### ⚠ BREAKING CHANGES
 
-### Features
+* rename package to `duckdb-sqlalchemy` and module to `duckdb_sqlalchemy` ([#2](https://github.com/leonardovida/duckdb-sqlalchemy/pull/2))
 
-* add URL builder and OLAP helper utilities (read_parquet/read_csv/read_csv_auto)
-* expand MotherDuck connection parameter support (session_hint, access_mode, TTL aliases)
-* refresh README with connection and OLAP examples
+### Documentation
+
+* refresh README branding and fork attribution ([#2](https://github.com/leonardovida/duckdb-sqlalchemy/pull/2))
 
 ### Miscellaneous Chores
 
-* switch dev tooling to uv (hatchling build, uv.lock, nox installs)
-* broaden CI test matrix for Python 3.10-3.13 and DuckDB 1.1.3-1.4.3
+* update release/publish tooling and metadata for new package name ([#2](https://github.com/leonardovida/duckdb-sqlalchemy/pull/2))
 
 ## [0.17.0](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.16.0...v0.17.0) (2025-03-29)
 

@@ -39,7 +39,7 @@ from .datatypes import ISCHEMA_NAMES, register_extension_types
 from .olap import read_csv, read_csv_auto, read_parquet, table_function
 from .url import URL, make_url
 
-__version__ = "0.17.0"
+__version__ = "0.18.0"
 sqlalchemy_version = sqlalchemy.__version__
 duckdb_version: str = duckdb.__version__
 supports_attach: bool = duckdb_version >= "0.7.0"
