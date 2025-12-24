@@ -144,6 +144,8 @@ def test_normalize_motherduck_config_alias() -> None:
 def test_has_comment_support_false_on_parser_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _supports.has_comment_support.cache_clear()
+
     class DummyConn:
         def __enter__(self):
             return self
@@ -162,6 +164,8 @@ def test_has_comment_support_false_on_parser_exception(
 def test_has_comment_support_true_when_no_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _supports.has_comment_support.cache_clear()
+
     class DummyConn:
         def __enter__(self):
             return self

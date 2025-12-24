@@ -23,11 +23,8 @@ def get_core_config() -> Set[str]:
         "motherduck_dbinstance_inactivity_ttl",
     }
 
-    rows = (
-        duckdb.connect(":memory:")
-        .execute("SELECT name FROM duckdb_settings()")
-        .fetchall()
-    )
+    with duckdb.connect(":memory:") as conn:
+        rows = conn.execute("SELECT name FROM duckdb_settings()").fetchall()
     return {name for (name,) in rows} | motherduck_config_keys
 
 

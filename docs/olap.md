@@ -13,6 +13,79 @@ csv = read_csv_auto("data/events.csv", columns=["event_id", "ts"])
 stmt = select(csv.c.event_id, csv.c.ts)
 ```
 
+## Arrow results
+
+For large reads, you can request Arrow tables directly:
+
+```python
+from pyarrow import Table as ArrowTable
+from sqlalchemy import select
+
+with engine.connect().execution_options(duckdb_arrow=True) as conn:
+    result = conn.execute(select(parquet.c.event_id, parquet.c.ts))
+    table = result.arrow  # or result.all()
+    assert isinstance(table, ArrowTable)
+```
+
+Notes:
+
+- Arrow results consume the cursor; fetch rows or Arrow, not both.
+- Requires `pyarrow` in your environment.
+
+## Streaming reads
+
+For large result sets, combine `stream_results` with a larger `arraysize`:
+
+```python
+with engine.connect().execution_options(stream_results=True, duckdb_arraysize=10_000) as conn:
+    result = conn.execute(select(parquet.c.event_id, parquet.c.ts))
+    for row in result:
+        ...
+```
+
+`duckdb_arraysize` maps to the DBAPI cursor arraysize that `fetchmany()` uses.
+
+## Bulk writes
+
+For large `INSERT` executemany workloads, the dialect can register a pandas/Arrow
+object and run `INSERT INTO ... SELECT ...` internally. Control the threshold
+with `duckdb_copy_threshold`:
+
+```python
+rows = [{"event_id": 1, "ts": "2024-01-01"}, {"event_id": 2, "ts": "2024-01-02"}]
+with engine.connect().execution_options(duckdb_copy_threshold=10000) as conn:
+    conn.execute(events.insert(), rows)
+```
+
+If `pyarrow`/`pandas` are unavailable, the dialect falls back to regular
+`executemany`. The bulk-register path is skipped when `RETURNING` or
+`ON CONFLICT` is in use.
+
+On SQLAlchemy 2.x you can also tune multi-row INSERT batching with
+`duckdb_insertmanyvalues_page_size` (defaults to 1000).
+
+## COPY helpers
+
+Use COPY to load files directly into DuckDB without row-wise inserts:
+
+```python
+from duckdb_sqlalchemy import copy_from_parquet, copy_from_csv
+
+with engine.begin() as conn:
+    copy_from_parquet(conn, "events", "data/events.parquet")
+    copy_from_csv(conn, "events", "data/events.csv", header=True)
+```
+
+For row iterables, you can stream to a temporary CSV in chunks:
+
+```python
+from duckdb_sqlalchemy import copy_from_rows
+
+rows = ({"id": i, "name": f"user-{i}"} for i in range(1_000_000))
+with engine.begin() as conn:
+    copy_from_rows(conn, "users", rows, columns=["id", "name"], chunk_size=100_000)
+```
+
 ## ATTACH for multi-database analytics
 
 DuckDB can query across multiple databases in a single session:

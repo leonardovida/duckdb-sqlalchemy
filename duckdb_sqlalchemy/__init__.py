@@ -1,5 +1,6 @@
 import os
 import re
+import uuid
 import warnings
 from functools import lru_cache
 from typing import (
@@ -10,12 +11,14 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Sequence,
     Tuple,
     Type,
 )
 
 import duckdb
 import sqlalchemy
+from packaging.version import Version
 from sqlalchemy import pool, select, sql, text, util
 from sqlalchemy import types as sqltypes
 from sqlalchemy.dialects.postgresql import UUID, insert
@@ -25,7 +28,7 @@ from sqlalchemy.dialects.postgresql.base import (
     PGInspector,
 )
 from sqlalchemy.dialects.postgresql.psycopg2 import PGDialect_psycopg2
-from sqlalchemy.engine.default import DefaultDialect
+from sqlalchemy.engine.default import DefaultDialect, DefaultExecutionContext
 from sqlalchemy.engine.reflection import cache
 from sqlalchemy.engine.url import URL as SAURL
 from sqlalchemy.exc import NoSuchTableError
@@ -34,20 +37,32 @@ from sqlalchemy.sql import bindparam
 from sqlalchemy.sql.selectable import Select
 
 from ._supports import has_comment_support
+from .bulk import copy_from_csv, copy_from_parquet, copy_from_rows
+from .capabilities import get_capabilities
 from .config import apply_config, get_core_config
 from .datatypes import ISCHEMA_NAMES, register_extension_types
 from .olap import read_csv, read_csv_auto, read_parquet, table_function
 from .url import URL, make_url
 
+try:
+    from sqlalchemy.dialects.postgresql.base import PGExecutionContext
+except ImportError:  # pragma: no cover - fallback for older SQLAlchemy
+    PGExecutionContext = DefaultExecutionContext
+
 __version__ = "0.18.0"
 sqlalchemy_version = sqlalchemy.__version__
+SQLALCHEMY_VERSION = Version(sqlalchemy_version)
+SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
 duckdb_version: str = duckdb.__version__
-supports_attach: bool = duckdb_version >= "0.7.0"
-supports_user_agent: bool = duckdb_version >= "0.9.2"
+_capabilities = get_capabilities(duckdb_version)
+supports_attach: bool = _capabilities.supports_attach
+supports_user_agent: bool = _capabilities.supports_user_agent
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection
     from sqlalchemy.engine.reflection import ReflectedCheckConstraint, ReflectedIndex
+
+    from .capabilities import DuckDBCapabilities
 
 register_extension_types()
 
@@ -65,11 +80,14 @@ __all__ = [
     "read_parquet",
     "read_csv",
     "read_csv_auto",
+    "copy_from_parquet",
+    "copy_from_csv",
+    "copy_from_rows",
 ]
 
 
 class DBAPI:
-    paramstyle = "numeric_dollar" if sqlalchemy_version >= "2.0.0" else "qmark"
+    paramstyle = "numeric_dollar" if SQLALCHEMY_2 else "qmark"
     apilevel = duckdb.apilevel
     threadsafety = duckdb.threadsafety
 
@@ -141,13 +159,31 @@ class CursorWrapper:
         try:
             if statement.lower() == "commit":  # this is largely for ipython-sql
                 self.__c.commit()
-            elif statement.lower() in (
-                "register",
-                "register(?, ?)",
-                "register($1, $2)",
-            ):
-                assert parameters and len(parameters) == 2, parameters
-                view_name, df = parameters
+            elif statement.strip().lower().rstrip(";").startswith("register"):
+                if not parameters:
+                    raise ValueError("register requires a view name and data")
+                view_name = None
+                df = None
+                if isinstance(parameters, dict):
+                    view_name = (
+                        parameters.get("name")
+                        or parameters.get("view_name")
+                        or parameters.get("table")
+                    )
+                    df = (
+                        parameters.get("df")
+                        or parameters.get("dataframe")
+                        or parameters.get("relation")
+                        or parameters.get("data")
+                    )
+                    if (view_name is None or df is None) and len(parameters) == 2:
+                        view_name, df = tuple(parameters.values())
+                elif isinstance(parameters, (list, tuple)) and len(parameters) == 2:
+                    view_name, df = parameters
+                if view_name is None or df is None:
+                    raise ValueError(
+                        "register requires a view name and data (tuple or dict)"
+                    )
                 self.__c.register(view_name, df)
             elif statement.lower() == "show transaction isolation level":
                 self.__c.execute("select 'read committed' as transaction_isolation")
@@ -210,6 +246,112 @@ def index_warning() -> None:
         "duckdb-sqlalchemy doesn't yet support reflection on indices",
         DuckDBEngineWarning,
     )
+
+
+def _normalize_execution_options(execution_options: Dict[str, Any]) -> Dict[str, Any]:
+    if (
+        "duckdb_insertmanyvalues_page_size" in execution_options
+        and "insertmanyvalues_page_size" not in execution_options
+    ):
+        execution_options = dict(execution_options)
+        execution_options["insertmanyvalues_page_size"] = execution_options[
+            "duckdb_insertmanyvalues_page_size"
+        ]
+    return execution_options
+
+
+class DuckDBArrowResult:
+    def __init__(self, result: Any) -> None:
+        self._result = result
+        self._arrow = None
+
+    def _fetch_arrow(self) -> Any:
+        if self._arrow is not None:
+            return self._arrow
+        cursor = getattr(self._result, "cursor", None)
+        if cursor is None:
+            cursor = getattr(self._result, "_cursor", None)
+        if cursor is None or not hasattr(cursor, "fetch_arrow_table"):
+            raise NotImplementedError("Arrow results are not available on this cursor")
+        self._arrow = cursor.fetch_arrow_table()
+        return self._arrow
+
+    @property
+    def arrow(self) -> Any:
+        return self._fetch_arrow()
+
+    def all(self) -> Any:
+        return self._fetch_arrow()
+
+    def fetchall(self) -> Any:
+        return self._fetch_arrow()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._result, name)
+
+    def __iter__(self) -> Any:
+        return iter(self._result)
+
+
+class DuckDBExecutionContext(PGExecutionContext):
+    @classmethod
+    def _init_compiled(
+        cls,
+        dialect: "Dialect",
+        connection: Any,
+        dbapi_connection: Any,
+        execution_options: Dict[str, Any],
+        compiled: Any,
+        parameters: Any,
+        invoked_statement: Any,
+        extracted_parameters: Any,
+        cache_hit: Any = None,
+    ) -> Any:
+        execution_options = _normalize_execution_options(execution_options)
+        return super()._init_compiled(
+            dialect,
+            connection,
+            dbapi_connection,
+            execution_options,
+            compiled,
+            parameters,
+            invoked_statement,
+            extracted_parameters,
+            cache_hit,
+        )
+
+    @classmethod
+    def _init_statement(
+        cls,
+        dialect: "Dialect",
+        connection: Any,
+        dbapi_connection: Any,
+        execution_options: Dict[str, Any],
+        statement: str,
+        parameters: Any,
+    ) -> Any:
+        execution_options = _normalize_execution_options(execution_options)
+        return super()._init_statement(
+            dialect,
+            connection,
+            dbapi_connection,
+            execution_options,
+            statement,
+            parameters,
+        )
+
+    def _setup_result_proxy(self) -> Any:
+        arraysize = self.execution_options.get("duckdb_arraysize")
+        if arraysize is None:
+            arraysize = self.execution_options.get("arraysize")
+        if arraysize is not None and hasattr(self.cursor, "arraysize"):
+            self.cursor.arraysize = arraysize
+        result = super()._setup_result_proxy()
+        if self.execution_options.get("duckdb_arrow") and getattr(
+            result, "returns_rows", False
+        ):
+            return DuckDBArrowResult(result)
+        return result
 
 
 def _looks_like_motherduck(database: Optional[str], config: Dict[str, Any]) -> bool:
@@ -307,12 +449,18 @@ class Dialect(PGDialect_psycopg2):
     name = "duckdb"
     driver = "duckdb_sqlalchemy"
     _has_events = False
-    supports_statement_cache = False
-    supports_comments = has_comment_support()
+    supports_statement_cache = True
+    supports_comments = False
     supports_sane_rowcount = False
     supports_server_side_cursors = False
+    execution_ctx_cls = DuckDBExecutionContext
     div_is_floordiv = False  # TODO: tweak this to be based on DuckDB version
     inspector = DuckDBInspector
+    insertmanyvalues_page_size = 1000
+    use_insertmanyvalues = SQLALCHEMY_2
+    use_insertmanyvalues_wo_returning = SQLALCHEMY_2
+    duckdb_copy_threshold = 10000
+    _capabilities: "DuckDBCapabilities"
     colspecs = util.update_copy(
         PGDialect.colspecs,
         {
@@ -333,6 +481,16 @@ class Dialect(PGDialect_psycopg2):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         kwargs["use_native_hstore"] = False
         super().__init__(*args, **kwargs)
+        self._capabilities = get_capabilities(duckdb.__version__)
+
+    def initialize(self, connection: "Connection") -> None:
+        DefaultDialect.initialize(self, connection)
+        self._capabilities = get_capabilities(duckdb.__version__)
+        self.supports_comments = has_comment_support()
+
+    @property
+    def capabilities(self) -> "DuckDBCapabilities":
+        return self._capabilities
 
     def type_descriptor(self, typeobj: Type[sqltypes.TypeEngine]) -> Any:  # type: ignore[override]
         res = super().type_descriptor(typeobj)
@@ -381,8 +539,9 @@ class Dialect(PGDialect_psycopg2):
     def get_pool_class(cls, url: SAURL) -> Type[pool.Pool]:
         if url.database == ":memory:":
             return pool.SingletonThreadPool
-        else:
-            return pool.QueuePool
+        if _looks_like_motherduck(url.database, dict(url.query)):
+            return pool.NullPool
+        return pool.NullPool
 
     @staticmethod
     def dbapi(**kwargs: Any) -> Type[DBAPI]:
@@ -693,9 +852,6 @@ class Dialect(PGDialect_psycopg2):
         index_warning()
         return []
 
-    def initialize(self, connection: "Connection") -> None:
-        DefaultDialect.initialize(self, connection)
-
     def create_connect_args(self, url: SAURL) -> Tuple[tuple, dict]:
         opts = url.translate_connect_args(database="database")
         opts["url_config"] = dict(url.query)
@@ -708,9 +864,116 @@ class Dialect(PGDialect_psycopg2):
     def import_dbapi(cls) -> Any:
         return cls.dbapi()
 
+    def _get_execution_options(self, context: Optional[Any]) -> Dict[str, Any]:
+        if context is None:
+            return {}
+        return getattr(context, "execution_options", {}) or {}
+
+    def _bulk_insert_via_register(
+        self,
+        cursor: Any,
+        context: Any,
+        parameters: Sequence[Any],
+    ) -> bool:
+        if not parameters:
+            return False
+        compiled = getattr(context, "compiled", None)
+        if compiled is None:
+            return False
+        if getattr(compiled, "effective_returning", None):
+            return False
+        stmt = getattr(compiled, "statement", None)
+        table = getattr(stmt, "table", None)
+        if table is None:
+            return False
+        if getattr(stmt, "_post_values_clause", None) is not None:
+            return False
+
+        column_keys = getattr(compiled, "column_keys", None)
+        if not column_keys:
+            column_keys = getattr(compiled, "positiontup", None)
+        if not column_keys and isinstance(parameters[0], dict):
+            column_keys = list(parameters[0].keys())
+        if not column_keys:
+            return False
+
+        column_names = [
+            getattr(column_key, "key", column_key) for column_key in column_keys
+        ]
+
+        data = None
+        if isinstance(parameters[0], dict):
+            try:
+                import pandas as pd  # type: ignore[import-not-found]
+
+                rows = [{col: row[col] for col in column_names} for row in parameters]
+                data = pd.DataFrame.from_records(rows, columns=column_names)
+            except Exception:
+                data = None
+            if data is None:
+                try:
+                    import pyarrow as pa  # type: ignore[import-not-found]
+
+                    rows = [
+                        {col: row[col] for col in column_names} for row in parameters
+                    ]
+                    data = pa.Table.from_pylist(rows)
+                except Exception:
+                    return False
+        else:
+            try:
+                import pandas as pd  # type: ignore[import-not-found]
+
+                data = pd.DataFrame(list(parameters), columns=column_names)
+            except Exception:
+                data = None
+            if data is None:
+                try:
+                    import pyarrow as pa  # type: ignore[import-not-found]
+
+                    rows = list(parameters)
+                    if rows:
+                        cols = list(zip(*rows))
+                    else:
+                        cols = [[] for _ in column_names]
+                    data = pa.Table.from_arrays(cols, names=column_names)
+                except Exception:
+                    return False
+
+        view_name = f"__duckdb_sa_bulk_{uuid.uuid4().hex}"
+        dbapi_conn = cursor.connection
+        dbapi_conn.register(view_name, data)
+        preparer = getattr(context, "identifier_preparer", self.identifier_preparer)
+        target = preparer.format_table(table)
+        columns = ", ".join(preparer.quote(col) for col in column_names)
+        insert_sql = (
+            f"INSERT INTO {target} ({columns}) SELECT {columns} FROM {view_name}"
+        )
+        try:
+            cursor.execute(insert_sql)
+        finally:
+            try:
+                dbapi_conn.unregister(view_name)
+            except Exception:
+                pass
+        return True
+
     def do_executemany(
         self, cursor: Any, statement: Any, parameters: Any, context: Optional[Any] = ...
     ) -> None:
+        if (
+            context is not None
+            and getattr(context, "isinsert", False)
+            and parameters
+            and isinstance(parameters, (list, tuple))
+        ):
+            options = self._get_execution_options(context)
+            copy_threshold = options.get(
+                "duckdb_copy_threshold", self.duckdb_copy_threshold
+            )
+            if copy_threshold and len(parameters) >= copy_threshold:
+                if self._bulk_insert_via_register(cursor, context, parameters):
+                    return None
         return DefaultDialect.do_executemany(
             self, cursor, statement, parameters, context
         )

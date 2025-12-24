@@ -569,7 +569,10 @@ def test_user_agent_with_custom_user_agent() -> None:
 
 def test_do_ping(tmp_path: Path, caplog: LogCaptureFixture) -> None:
     engine = create_engine(
-        "duckdb:///" + str(tmp_path / "db"), pool_pre_ping=True, pool_size=1
+        "duckdb:///" + str(tmp_path / "db"),
+        pool_pre_ping=True,
+        pool_size=1,
+        poolclass=sqlalchemy.pool.QueuePool,
     )
 
     logger = cast(logging.Logger, engine.pool.logger)  # type: ignore

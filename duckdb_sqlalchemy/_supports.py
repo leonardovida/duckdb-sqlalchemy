@@ -1,12 +1,15 @@
+from functools import lru_cache
+
 import duckdb
-from packaging.version import Version
 
-duckdb_version = Version(duckdb.__version__)
+from .capabilities import get_capabilities
+
+_capabilities = get_capabilities(duckdb.__version__)
+duckdb_version = _capabilities.version
+has_uhugeint_support = _capabilities.supports_uhugeint
 
 
-has_uhugeint_support = duckdb_version >= Version("0.10.0")
-
-
+@lru_cache()
 def has_comment_support() -> bool:
     """
     See https://github.com/duckdb/duckdb/pull/10372

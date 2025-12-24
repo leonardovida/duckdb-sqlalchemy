@@ -50,3 +50,17 @@ engine = create_engine(
     },
 )
 ```
+
+## Pool defaults and concurrency
+
+- `:memory:` uses `SingletonThreadPool` so connections share the same in-memory database per thread.
+- File paths and MotherDuck default to `NullPool` to avoid multi-writer contention.
+
+Override with `poolclass` if you need a different pooling strategy:
+
+```python
+from sqlalchemy import create_engine
+from sqlalchemy.pool import QueuePool
+
+engine = create_engine("duckdb:///analytics.db", poolclass=QueuePool, pool_size=5)
+```

@@ -36,6 +36,28 @@ pd.DataFrame({"a": [1, 2]}).to_sql("t", engine, index=False, if_exists="replace"
 result = pd.read_sql("select * from t", engine)
 ```
 
+## Bulk writes from DataFrames
+
+For large DataFrame writes, register the DataFrame and insert from it directly:
+
+```python
+from sqlalchemy import text
+
+with engine.begin() as conn:
+    conn.execute(text("register(:name, :df)"), {"name": "people_df", "df": df})
+    conn.execute(text("INSERT INTO people SELECT * FROM people_df"))
+```
+
+If you already have rows in Python (dicts or tuples), you can enable the bulk
+insert fast path via execution options:
+
+```python
+rows = df.to_dict(orient="records")
+with engine.begin() as conn:
+    conn = conn.execution_options(duckdb_copy_threshold=10000)
+    conn.execute(people.insert(), rows)
+```
+
 ## Jupyter (IPython SQL)
 
 DuckDB works with `jupysql`/`ipython-sql`. Configure the SQLAlchemy engine and use the notebook extension to run SQL directly against DuckDB.
