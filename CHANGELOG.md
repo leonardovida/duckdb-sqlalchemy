@@ -1,5 +1,11 @@
 # Changelog
 
+This repository is a fork of https://github.com/Mause/duckdb_engine.
+Entries from v0.18.0 onward are maintained in this fork; earlier entries are
+preserved from the upstream project for historical context.
+
+## Maintained in this fork
+
 ## [0.18.0](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.17.0...v0.18.0) (2025-12-24)
 
 ### ⚠ BREAKING CHANGES
@@ -13,6 +19,8 @@
 ### Miscellaneous Chores
 
 * update release/publish tooling and metadata for new package name ([#2](https://github.com/leonardovida/duckdb-sqlalchemy/pull/2))
+
+## Upstream history (from Mause/duckdb_engine)
 
 ## [0.17.0](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.16.0...v0.17.0) (2025-03-29)
 
