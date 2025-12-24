@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import uuid
 import warnings
 from functools import lru_cache
@@ -41,6 +42,16 @@ from .bulk import copy_from_csv, copy_from_parquet, copy_from_rows
 from .capabilities import get_capabilities
 from .config import apply_config, get_core_config
 from .datatypes import ISCHEMA_NAMES, register_extension_types
+from .motherduck import (
+    DIALECT_QUERY_KEYS,
+    MotherDuckURL,
+    append_query_to_database,
+    create_engine_from_paths,
+    create_motherduck_engine,
+    extract_path_query_from_config,
+    split_url_query,
+    stable_session_hint,
+)
 from .olap import read_csv, read_csv_auto, read_parquet, table_function
 from .url import URL, make_url
 
@@ -74,8 +85,12 @@ __all__ = [
     "DBAPI",
     "DuckDBEngineWarning",
     "insert",  # reexport of sqlalchemy.dialects.postgresql.insert
+    "MotherDuckURL",
     "URL",
+    "create_engine_from_paths",
+    "create_motherduck_engine",
     "make_url",
+    "stable_session_hint",
     "table_function",
     "read_parquet",
     "read_csv",
@@ -132,6 +147,32 @@ class ConnectionWrapper:
         self.closed = True
 
 
+_REGISTER_NAME_KEYS = ("name", "view_name", "table")
+_REGISTER_DATA_KEYS = ("df", "dataframe", "relation", "data")
+
+
+def _parse_register_params(parameters: Optional[Any]) -> Tuple[str, Any]:
+    if parameters is None:
+        raise ValueError("register requires a view name and data")
+    if isinstance(parameters, dict):
+        view_name = None
+        for key in _REGISTER_NAME_KEYS:
+            if key in parameters:
+                view_name = parameters[key]
+                break
+        df = None
+        for key in _REGISTER_DATA_KEYS:
+            if key in parameters:
+                df = parameters[key]
+                break
+        if view_name is None or df is None:
+            raise ValueError("register requires a view name and data (tuple or dict)")
+        return view_name, df
+    if isinstance(parameters, (list, tuple)) and len(parameters) == 2:
+        return parameters[0], parameters[1]
+    raise ValueError("register requires a view name and data (tuple or dict)")
+
+
 class CursorWrapper:
     __c: duckdb.DuckDBPyConnection
     __connection_wrapper: "ConnectionWrapper"
@@ -148,7 +189,13 @@ class CursorWrapper:
         parameters: Optional[List[Dict]] = None,
         context: Optional[Any] = None,
     ) -> None:
-        self.__c.executemany(statement, list(parameters) if parameters else [])
+        if not parameters:
+            params = []
+        elif isinstance(parameters, list):
+            params = parameters
+        else:
+            params = list(parameters)
+        self.__c.executemany(statement, params)
 
     def execute(
         self,
@@ -157,35 +204,13 @@ class CursorWrapper:
         context: Optional[Any] = None,
     ) -> None:
         try:
-            if statement.lower() == "commit":  # this is largely for ipython-sql
+            norm = statement.strip().lower().rstrip(";")
+            if norm == "commit":  # this is largely for ipython-sql
                 self.__c.commit()
-            elif statement.strip().lower().rstrip(";").startswith("register"):
-                if not parameters:
-                    raise ValueError("register requires a view name and data")
-                view_name = None
-                df = None
-                if isinstance(parameters, dict):
-                    view_name = (
-                        parameters.get("name")
-                        or parameters.get("view_name")
-                        or parameters.get("table")
-                    )
-                    df = (
-                        parameters.get("df")
-                        or parameters.get("dataframe")
-                        or parameters.get("relation")
-                        or parameters.get("data")
-                    )
-                    if (view_name is None or df is None) and len(parameters) == 2:
-                        view_name, df = tuple(parameters.values())
-                elif isinstance(parameters, (list, tuple)) and len(parameters) == 2:
-                    view_name, df = parameters
-                if view_name is None or df is None:
-                    raise ValueError(
-                        "register requires a view name and data (tuple or dict)"
-                    )
+            elif norm.startswith("register"):
+                view_name, df = _parse_register_params(parameters)
                 self.__c.register(view_name, df)
-            elif statement.lower() == "show transaction isolation level":
+            elif norm == "show transaction isolation level":
                 self.__c.execute("select 'read committed' as transaction_isolation")
             elif parameters is None:
                 self.__c.execute(statement)
@@ -371,6 +396,56 @@ def _looks_like_motherduck(database: Optional[str], config: Dict[str, Any]) -> b
     return any(k in config for k in motherduck_keys)
 
 
+DISCONNECT_ERROR_PATTERNS = (
+    "connection closed",
+    "connection reset",
+    "connection refused",
+    "broken pipe",
+    "socket",
+    "network is unreachable",
+    "timed out",
+    "timeout",
+    "could not connect",
+    "failed to connect",
+)
+
+TRANSIENT_ERROR_PATTERNS = (
+    "temporarily unavailable",
+    "service unavailable",
+    "http error: 429",
+    "http error: 503",
+    "http error: 504",
+    "rate limit",
+)
+
+
+def _is_idempotent_statement(statement: str) -> bool:
+    normalized = statement.strip().lower()
+    return normalized.startswith(("select", "show", "describe", "pragma", "explain"))
+
+
+def _is_transient_error(error: BaseException) -> bool:
+    message = str(error).lower()
+    if any(pattern in message for pattern in DISCONNECT_ERROR_PATTERNS):
+        return False
+    return any(pattern in message for pattern in TRANSIENT_ERROR_PATTERNS)
+
+
+def _pool_override_from_url(url: SAURL) -> Optional[str]:
+    value = None
+    if "duckdb_sqlalchemy_pool" in url.query:
+        value = url.query.get("duckdb_sqlalchemy_pool")
+    elif "pool" in url.query:
+        value = url.query.get("pool")
+    if value is None:
+        value = os.getenv("DUCKDB_SQLALCHEMY_POOL")
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+    if value is None:
+        return None
+    return str(value).lower()
+
+
 def _apply_motherduck_defaults(config: Dict[str, Any], database: Optional[str]) -> None:
     if "motherduck_token" not in config:
         token = os.getenv("motherduck_token") or os.getenv("MOTHERDUCK_TOKEN")
@@ -506,7 +581,14 @@ class Dialect(PGDialect_psycopg2):
         config = dict(cparams.get("config", {}))
         cparams["config"] = config
         config.update(cparams.pop("url_config", {}))
+        for key in DIALECT_QUERY_KEYS:
+            config.pop(key, None)
         _apply_motherduck_defaults(config, cparams.get("database"))
+        path_query = extract_path_query_from_config(config)
+        if path_query:
+            cparams["database"] = append_query_to_database(
+                cparams.get("database"), path_query
+            )
         _normalize_motherduck_config(config)
 
         ext = {k: config.pop(k) for k in list(config) if k not in core_keys}
@@ -537,7 +619,14 @@ class Dialect(PGDialect_psycopg2):
 
     @classmethod
     def get_pool_class(cls, url: SAURL) -> Type[pool.Pool]:
-        if url.database == ":memory:":
+        pool_override = _pool_override_from_url(url)
+        if pool_override == "queue":
+            return pool.QueuePool
+        if pool_override in {"singleton", "singletonthreadpool"}:
+            return pool.SingletonThreadPool
+        if pool_override in {"null", "nullpool"}:
+            return pool.NullPool
+        if url.database and url.database.startswith(":memory:"):
             return pool.SingletonThreadPool
         if _looks_like_motherduck(url.database, dict(url.query)):
             return pool.NullPool
@@ -854,10 +943,9 @@ class Dialect(PGDialect_psycopg2):
 
     def create_connect_args(self, url: SAURL) -> Tuple[tuple, dict]:
         opts = url.translate_connect_args(database="database")
-        opts["url_config"] = dict(url.query)
-        user = opts["url_config"].pop("user", None)
-        if user is not None:
-            opts["database"] += f"?user={user}"
+        path_query, url_config = split_url_query(dict(url.query))
+        opts["url_config"] = url_config
+        opts["database"] = append_query_to_database(opts.get("database"), path_query)
         return (), opts
 
     @classmethod
@@ -906,7 +994,7 @@ class Dialect(PGDialect_psycopg2):
             try:
                 import pandas as pd  # type: ignore[import-not-found]
 
-                rows = [{col: row[col] for col in column_names} for row in parameters]
+                rows = parameters if isinstance(parameters, list) else list(parameters)
                 data = pd.DataFrame.from_records(rows, columns=column_names)
             except Exception:
                 data = None
@@ -914,24 +1002,29 @@ class Dialect(PGDialect_psycopg2):
                 try:
                     import pyarrow as pa  # type: ignore[import-not-found]
 
-                    rows = [
-                        {col: row[col] for col in column_names} for row in parameters
-                    ]
+                    rows = (
+                        parameters if isinstance(parameters, list) else list(parameters)
+                    )
                     data = pa.Table.from_pylist(rows)
+                    if column_names:
+                        data = data.select(column_names)
                 except Exception:
                     return False
         else:
             try:
                 import pandas as pd  # type: ignore[import-not-found]
 
-                data = pd.DataFrame(list(parameters), columns=column_names)
+                rows = parameters if isinstance(parameters, list) else list(parameters)
+                data = pd.DataFrame(rows, columns=column_names)
             except Exception:
                 data = None
             if data is None:
                 try:
                     import pyarrow as pa  # type: ignore[import-not-found]
 
-                    rows = list(parameters)
+                    rows = (
+                        parameters if isinstance(parameters, list) else list(parameters)
+                    )
                     if rows:
                         cols = list(zip(*rows))
                     else:
@@ -978,6 +1071,61 @@ class Dialect(PGDialect_psycopg2):
             self, cursor, statement, parameters, context
         )
 
+    def is_disconnect(self, e: Exception, connection: Any, cursor: Any) -> bool:
+        message = str(e).lower()
+        return any(pattern in message for pattern in DISCONNECT_ERROR_PATTERNS)
+
+    def _execute_with_retry(
+        self,
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Optional[Any],
+        executor: Any,
+    ) -> Any:
+        options = self._get_execution_options(context)
+        retry_count = int(options.get("duckdb_retry_count", 0) or 0)
+        if options.get("duckdb_retry_on_transient") and retry_count == 0:
+            retry_count = 1
+        if retry_count <= 0 or not _is_idempotent_statement(statement):
+            return executor()
+        backoff = options.get("duckdb_retry_backoff")
+        attempt = 0
+        while True:
+            try:
+                return executor()
+            except Exception as exc:
+                if attempt >= retry_count or not _is_transient_error(exc):
+                    raise
+                attempt += 1
+                if backoff:
+                    time.sleep(float(backoff))
+
+    def do_execute(
+        self,
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Optional[Any] = None,
+    ) -> None:
+        def executor() -> Any:
+            return DefaultDialect.do_execute(
+                self, cursor, statement, parameters, context
+            )
+
+        self._execute_with_retry(cursor, statement, parameters, context, executor)
+
+    def do_execute_no_params(
+        self,
+        cursor: Any,
+        statement: str,
+        context: Optional[Any] = None,
+    ) -> None:
+        def executor() -> Any:
+            return DefaultDialect.do_execute_no_params(self, cursor, statement, context)
+
+        self._execute_with_retry(cursor, statement, None, context, executor)
+
     def _pg_class_filter_scope_schema(
         self,
         query: Select,
@@ -1001,7 +1149,7 @@ class Dialect(PGDialect_psycopg2):
 
     @lru_cache()
     def _columns_query(self, schema, has_filter_names, scope, kind):  # type: ignore[no-untyped-def]
-        if sqlalchemy.__version__ < "2.0.0":
+        if not SQLALCHEMY_2:
             return super()._columns_query(schema, has_filter_names, scope, kind)  # type: ignore[misc]
 
         # DuckDB versions before 1.4 don't expose pg_collation; skip collation
@@ -1208,7 +1356,7 @@ class Dialect(PGDialect_psycopg2):
     def _comment_query(  # type: ignore[no-untyped-def]
         self, schema: str, has_filter_names: bool, scope: Any, kind: Any
     ):
-        if sqlalchemy.__version__ >= "2.0.36":
+        if SQLALCHEMY_VERSION >= Version("2.0.36"):
             from sqlalchemy.dialects.postgresql import (  # type: ignore[attr-defined]
                 pg_catalog,
             )
@@ -1248,7 +1396,7 @@ class Dialect(PGDialect_psycopg2):
                 )
 
 
-if sqlalchemy.__version__ >= "2.0.14":
+if SQLALCHEMY_VERSION >= Version("2.0.14"):
     from sqlalchemy import TryCast  # type: ignore[attr-defined]
 
     @compiles(TryCast, "duckdb")  # type: ignore[misc]

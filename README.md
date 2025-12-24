@@ -53,6 +53,11 @@ Start here for focused, task-based docs:
 ## Examples
 
 - `examples/sqlalchemy_example.py` - end-to-end example
+- `examples/motherduck_read_scaling_per_user.py` - per-user read scaling pattern
+- `examples/motherduck_queuepool_high_concurrency.py` - QueuePool tuning
+- `examples/motherduck_multi_instance_pool.py` - multi-instance pool rotation
+- `examples/motherduck_arrow_reads.py` - Arrow results + streaming
+- `examples/motherduck_attach_modes.py` - workspace vs single attach mode
 
 ## Contributing
 

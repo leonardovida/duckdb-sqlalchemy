@@ -64,3 +64,11 @@ from sqlalchemy.pool import QueuePool
 
 engine = create_engine("duckdb:///analytics.db", poolclass=QueuePool, pool_size=5)
 ```
+
+You can also switch the dialect default pool class via URL or env var:
+
+- URL: `duckdb_sqlalchemy_pool=queue` (alias: `pool=queue`)
+- Env: `DUCKDB_SQLALCHEMY_POOL=queue`
+
+For long-lived MotherDuck pools, set `pool_pre_ping=True` and consider
+`pool_recycle=23*3600` to pick up backend upgrades.

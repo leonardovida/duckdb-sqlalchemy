@@ -11,8 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.13", "3.14"]
-        duckdb: ["1.4.0", "1.4.1", "1.4.2", "1.4.3"]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     env:
       FORCE_COLOR: 1
@@ -31,7 +30,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
           python -m pip install --upgrade SQLAlchemy
-          python -m pip install "duckdb==${{ matrix.duckdb }}"
+          python -m pip install --upgrade duckdb
       - name: Run tests
         run: |
           pytest \
@@ -49,14 +48,13 @@ jobs:
         with:
           files: results.xml
           comment_mode: off
-          check_name:  "Test Results - ${{ join(matrix.*, ', ') }}"
+          check_name:  "Test Results - python=${{ matrix.python }}"
       - uses: codecov/codecov-action@v5.5.1
         env:
           PYTHON: ${{matrix.python}}
-          DUCKDB: ${{matrix.duckdb}}
         with:
           files: ./coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
-          env_vars: PYTHON,DUCKDB
+          env_vars: PYTHON
           fail_ci_if_error: true
           verbose: true

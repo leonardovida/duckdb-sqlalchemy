@@ -1,8 +1,9 @@
 from typing import cast
+from urllib.parse import parse_qs
 
 import duckdb
 import pytest
-from sqlalchemy import Integer, String
+from sqlalchemy import Integer, String, pool
 from sqlalchemy import exc as sa_exc
 
 from duckdb_sqlalchemy import (
@@ -10,11 +11,14 @@ from duckdb_sqlalchemy import (
     ConnectionWrapper,
     CursorWrapper,
     Dialect,
+    MotherDuckURL,
     _apply_motherduck_defaults,
     _looks_like_motherduck,
     _normalize_motherduck_config,
     _supports,
+    create_engine_from_paths,
     olap,
+    stable_session_hint,
 )
 from duckdb_sqlalchemy import datatypes as dt
 from duckdb_sqlalchemy.config import TYPES, apply_config, get_core_config
@@ -47,13 +51,109 @@ def test_url_coerces_types_and_overrides() -> None:
 
 def test_create_connect_args_moves_user_query_param() -> None:
     dialect = Dialect()
-    url = URL(database=":memory:", query={"user": "alice", "memory_limit": "1GB"})
+    url = URL(
+        database="md:my_db",
+        query={
+            "user": "alice",
+            "session_hint": "hint",
+            "attach_mode": "single",
+            "cache_buster": "123",
+            "motherduck_dbinstance_inactivity_ttl": "15m",
+            "memory_limit": "1GB",
+        },
+    )
 
     args, kwargs = dialect.create_connect_args(url)
 
     assert args == ()
-    assert kwargs["database"] == ":memory:?user=alice"
+    database, query = kwargs["database"].split("?", 1)
+    assert database == "md:my_db"
+    assert parse_qs(query) == {
+        "user": ["alice"],
+        "session_hint": ["hint"],
+        "attach_mode": ["single"],
+        "cache_buster": ["123"],
+        "dbinstance_inactivity_ttl": ["15m"],
+    }
     assert kwargs["url_config"] == {"memory_limit": "1GB"}
+
+
+def test_create_connect_args_strips_pool_override() -> None:
+    dialect = Dialect()
+    url = URL(
+        database=":memory:",
+        query={"duckdb_sqlalchemy_pool": "queue", "threads": "4"},
+    )
+
+    _, kwargs = dialect.create_connect_args(url)
+
+    assert kwargs["url_config"] == {"threads": "4"}
+
+
+def test_pool_override_from_url() -> None:
+    url = URL(database="md:my_db", query={"duckdb_sqlalchemy_pool": "queue"})
+    assert Dialect.get_pool_class(url) is pool.QueuePool
+
+
+def test_create_engine_from_paths_requires_paths() -> None:
+    with pytest.raises(ValueError):
+        create_engine_from_paths([])
+
+
+def test_is_disconnect_matches_patterns() -> None:
+    dialect = Dialect()
+    assert dialect.is_disconnect(RuntimeError("connection closed"), None, None)
+    assert not dialect.is_disconnect(RuntimeError("syntax error"), None, None)
+
+
+def test_retry_on_transient_select() -> None:
+    dialect = Dialect()
+
+    class DummyCursor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, statement, parameters=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("HTTP Error: 503 Service Unavailable")
+            return None
+
+    class DummyContext:
+        execution_options = {
+            "duckdb_retry_on_transient": True,
+            "duckdb_retry_count": 1,
+        }
+
+    cursor = DummyCursor()
+    dialect.do_execute(cursor, "select 1", (), context=DummyContext())
+    assert cursor.calls == 2
+
+
+def test_motherduck_url_builder_moves_path_params() -> None:
+    url = MotherDuckURL(
+        database="md:my_db",
+        session_hint="team-a",
+        attach_mode="single",
+        motherduck_dbinstance_inactivity_ttl="15m",
+        query={"memory_limit": "1GB"},
+    )
+
+    database, query = url.database.split("?", 1)
+    assert database == "md:my_db"
+    assert parse_qs(query) == {
+        "session_hint": ["team-a"],
+        "attach_mode": ["single"],
+        "dbinstance_inactivity_ttl": ["15m"],
+    }
+    assert url.query == {"memory_limit": "1GB"}
+
+
+def test_stable_session_hint_is_deterministic() -> None:
+    hint1 = stable_session_hint("user-123", salt="salt", length=8)
+    hint2 = stable_session_hint("user-123", salt="salt", length=8)
+    assert hint1 == hint2
+    assert len(hint1) == 8
 
 
 def test_apply_config_uses_literal_processors() -> None:
