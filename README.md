@@ -3,6 +3,7 @@
 [![Supported Python Versions](https://img.shields.io/pypi/pyversions/duckdb-sqlalchemy)](https://pypi.org/project/duckdb-sqlalchemy/) [![PyPI version](https://badge.fury.io/py/duckdb-sqlalchemy.svg)](https://pypi.org/project/duckdb-sqlalchemy) [![PyPI Downloads](https://img.shields.io/pypi/dm/duckdb-sqlalchemy.svg)](https://pypi.org/project/duckdb-sqlalchemy/) [![codecov](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy/graph/badge.svg)](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy)
 
 SQLAlchemy dialect for DuckDB and MotherDuck. Use it to run DuckDB locally or connect to MotherDuck with the standard SQLAlchemy APIs.
+This maintained dialect tracks current DuckDB releases and includes newer functionality and performance improvements compared to legacy forks.
 
 ## Install
 
@@ -36,6 +37,15 @@ with Session(engine) as session:
     session.commit()
     assert session.query(User).one().name == "Ada"
 ```
+
+## What’s new in this dialect
+
+- MotherDuck connection-string correctness for instance caching (routing/affinity params go in the URL path).
+- MotherDuck helpers: `MotherDuckURL`, `stable_session_hint`, `create_motherduck_engine`, `create_engine_from_paths`.
+- Pool overrides via URL/env plus guidance for QueuePool, pre-ping, and daily recycle.
+- Optional transient retry for idempotent reads and disconnect detection.
+- Bulk insert and config handling improvements.
+- New MotherDuck examples (read scaling, multi-instance pools, Arrow reads, attach modes).
 
 ## Documentation
 
