@@ -11,7 +11,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: [3.9, "3.10"]
+        python: ["3.13", "3.14"]
+        duckdb: ["1.4.0", "1.4.1", "1.4.2", "1.4.3"]
 
     env:
       FORCE_COLOR: 1
@@ -20,13 +21,28 @@ jobs:
       - uses: actions/checkout@v5
       - name: Remove cached duckdb extensions
         run: rm -rf ~/.duckdb
-      - uses: fjwillemsen/setup-nox2@v3.0.0
-      - run: python -m pip install github-action-utils uv -U
-      - name: List nox envs
-        run: nox -l
-      - run: nox --pythons '${{ matrix.python }}'
-      - run: uvx poetry build
-      - run: uvx poetry check --strict
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          allow-prereleases: true
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install --upgrade SQLAlchemy
+          python -m pip install "duckdb==${{ matrix.duckdb }}"
+      - name: Run tests
+        run: |
+          pytest \
+            --junitxml=results.xml \
+            --cov \
+            --cov-report xml:coverage.xml \
+            --verbose \
+            -rs \
+            --remote-data
+        env:
+          SQLALCHEMY_WARN_20: "true"
       - name: Publish Unit Test Results
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
@@ -37,10 +53,10 @@ jobs:
       - uses: codecov/codecov-action@v5.5.1
         env:
           PYTHON: ${{matrix.python}}
-          BLEEDING_EDGE: ${{matrix.bleeding_edge}}
+          DUCKDB: ${{matrix.duckdb}}
         with:
           files: ./coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
-          env_vars: PYTHON # ,BLEEDING_EDGE  # set from matrix
+          env_vars: PYTHON,DUCKDB
           fail_ci_if_error: true
           verbose: true

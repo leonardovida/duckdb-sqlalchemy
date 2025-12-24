@@ -1,46 +1,79 @@
 name: Bug Report
-description: File a bug report
+description: Report a defect in duckdb-sqlalchemy
 title: "[Bug]: "
 labels: ["bug", "triage"]
-assignees:
-  - Mause
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to fill out this bug report!
+        Thanks for taking the time to fill out this bug report! Please include a minimal repro so we can move quickly.
   - type: textarea
-    id: what-happened
+    id: summary
     attributes:
-      label: What happened?
-      description: Also tell us, what did you expect to happen?
-      placeholder: Tell us what you see!
-      value: "A bug happened!"
+      label: Summary
+      description: What happened, and what did you expect to happen?
+      placeholder: Tell us what you observed and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Provide the smallest code sample and steps needed to reproduce the issue.
+      placeholder: |
+        1. Install ...
+        2. Run ...
+        3. Observe ...
+      render: python
     validations:
       required: true
   - type: input
-    id: duckdb_engine_version
+    id: duckdb_sqlalchemy_version
     attributes:
-      label: DuckDB Engine Version
-      description: What version of our software are you running?
+      label: duckdb-sqlalchemy version
+      description: e.g. 0.18.0
     validations:
       required: true
   - type: input
     id: duckdb_version
     attributes:
-      label: DuckDB Version
-      description: What version of duckdb are you running?
+      label: DuckDB version
+      description: e.g. 1.4.3
     validations:
       required: true
   - type: input
+    id: sqlalchemy_version
     attributes:
-      label: SQLAlchemy Version
+      label: SQLAlchemy version
+      description: e.g. 2.0.45
+    validations:
+      required: true
+  - type: input
+    id: python_version
+    attributes:
+      label: Python version
+      description: e.g. 3.13.1
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and architecture
+      description: e.g. macOS 15.2 (arm64), Ubuntu 24.04 (x86_64)
+    validations:
+      required: true
   - type: textarea
     id: logs
     attributes:
       label: Relevant log output
       description: Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks.
       render: shell
+  - type: checkboxes
+    id: regression
+    attributes:
+      label: Regression?
+      options:
+        - label: This worked in a previous version
   - type: checkboxes
     id: terms
     attributes:
