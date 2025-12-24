@@ -1,0 +1,44 @@
+# Types and Caveats
+
+## Type support
+
+Most SQLAlchemy core types map directly to DuckDB. DuckDB-specific helpers live in `duckdb_sqlalchemy.datatypes`.
+
+| Type | DuckDB name | Notes |
+| --- | --- | --- |
+| `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UTinyInteger`, `USmallInteger`, `UInteger`, `UBigInteger` | UTINYINT, USMALLINT, UINTEGER, UBIGINT | Unsigned integers |
+| `TinyInteger` | TINYINT | Signed 1-byte integer |
+| `HugeInteger`, `UHugeInteger`, `VarInt` | HUGEINT, UHUGEINT, VARINT | 128-bit and variable-length integers (VarInt requires DuckDB >= 1.0) |
+| `Struct` | STRUCT | Nested fields via dict of SQLAlchemy types |
+| `Map` | MAP | Key/value mapping |
+| `Union` | UNION | Union types via dict of SQLAlchemy types |
+
+## Parameter binding
+
+Use named parameters in SQLAlchemy expressions and let the dialect pick the placeholder style:
+
+```python
+from sqlalchemy import text
+
+stmt = text("SELECT * FROM events WHERE event_id = :event_id")
+conn.execute(stmt, {"event_id": 123})
+```
+
+## Auto-increment columns
+
+DuckDB does not support PostgreSQL `SERIAL`. Use a `Sequence` for auto-incrementing primary keys:
+
+```python
+from sqlalchemy import Column, Integer, Sequence, Table, MetaData
+
+user_id_seq = Sequence("user_id_seq")
+users = Table(
+    "users",
+    MetaData(),
+    Column("id", Integer, user_id_seq, server_default=user_id_seq.next_value(), primary_key=True),
+)
+```
+
+## Pandas chunksize
+
+Older DuckDB versions (< 0.5.0) may have issues with `pandas.read_sql(..., chunksize=...)`. If you hit errors, use `chunksize=None` or upgrade DuckDB.
