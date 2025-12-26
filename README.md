@@ -1,21 +1,19 @@
 # duckdb-sqlalchemy
 
 [![PyPI version](https://badge.fury.io/py/duckdb-sqlalchemy.svg)](https://pypi.org/project/duckdb-sqlalchemy)
-[![Supported Python Versions](https://img.shields.io/pypi/pyversions/duckdb-sqlalchemy)](https://pypi.org/project/duckdb-sqlalchemy/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/duckdb-sqlalchemy.svg)](https://pypi.org/project/duckdb-sqlalchemy/)
-[![CI](https://github.com/leonardovida/duckdb-sqlalchemy/actions/workflows/pythonapp.yaml/badge.svg)](https://github.com/leonardovida/duckdb-sqlalchemy/actions/workflows/pythonapp.yaml)
 [![codecov](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy/graph/badge.svg)](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy)
-[![License](https://img.shields.io/pypi/l/duckdb-sqlalchemy)](LICENSE.txt)
 
-SQLAlchemy dialect for DuckDB and MotherDuck. Run DuckDB locally or connect to MotherDuck with the standard SQLAlchemy APIs. This maintained fork tracks current DuckDB releases and includes MotherDuck-specific helpers and reliability improvements compared to legacy forks.
+The production-grade SQLAlchemy dialect for DuckDB and MotherDuck. Use the full SQLAlchemy Core and ORM APIs with DuckDB's analytical engine, locally or in the cloud via MotherDuck.
 
-## Highlights
+This dialect handles connection pooling, bulk inserts, type mappings, and cloud-specific configuration so you can focus on queries instead of driver quirks.
 
-- First-class SQLAlchemy dialect (Core + ORM) for DuckDB and MotherDuck.
-- Clean connection URL helpers for MotherDuck routing, attach modes, and read scaling.
-- Practical defaults for pooling, pre-ping, and long-lived app workloads.
-- Optional transient retry for idempotent reads.
-- Actively maintained with a long-term support mindset.
+## Why this dialect
+
+- **Full SQLAlchemy compatibility**: Core, ORM, Alembic migrations, and reflection work out of the box.
+- **MotherDuck support**: Automatic token handling, attach modes, session hints, and read scaling helpers.
+- **Production defaults**: Sensible pooling, transient retry for reads, and bulk insert optimization via Arrow/DataFrame registration.
+- **Actively maintained**: Tracks current DuckDB releases with long-term support commitment.
 
 ## Compatibility
 
@@ -23,15 +21,13 @@ SQLAlchemy dialect for DuckDB and MotherDuck. Run DuckDB locally or connect to M
 | --- | --- |
 | Python | 3.9+ |
 | SQLAlchemy | 1.3.22+ (2.x recommended) |
-| DuckDB | 0.5.0+ (latest recommended) |
+| DuckDB | 1.3.0+ (1.4.3 recommended) |
 
 ## Install
 
 ```sh
 pip install duckdb-sqlalchemy
 ```
-
-Conda packages are available via conda-forge: https://github.com/conda-forge/duckdb-sqlalchemy-feedstock.
 
 ## Quick start (DuckDB)
 
