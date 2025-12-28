@@ -10,6 +10,7 @@ Production-ready DuckDB SQLAlchemy dialect for DuckDB and MotherDuck.
 ## Start here
 
 - [Overview](overview)
+- [Getting started](getting-started)
 - [Migration from duckdb_engine](migration-from-duckdb-engine)
 - [Connection URLs](connection-urls)
 - [MotherDuck](motherduck)
@@ -18,6 +19,7 @@ Production-ready DuckDB SQLAlchemy dialect for DuckDB and MotherDuck.
 - [Pandas and Jupyter](pandas-jupyter)
 - [Types and caveats](types-and-caveats)
 - [Alembic integration](alembic)
+- [SEO checklist](seo-checklist)
 
 ## Examples
 

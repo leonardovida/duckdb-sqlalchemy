@@ -105,6 +105,7 @@ See `docs/configuration.md` and `docs/motherduck.md` for detailed guidance.
 - `docs/index.md` - GitHub Pages entrypoint
 - `docs/README.md` - Docs index
 - `docs/overview.md` - Overview and quick start
+- `docs/getting-started.md` - Minimal install + setup walkthrough
 - `docs/migration-from-duckdb-engine.md` - Migration guide from older dialects
 - `docs/connection-urls.md` - URL formats and helpers
 - `docs/motherduck.md` - MotherDuck setup and options
