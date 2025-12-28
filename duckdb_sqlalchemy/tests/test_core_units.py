@@ -5,6 +5,7 @@ import duckdb
 import pytest
 from sqlalchemy import Integer, String, pool
 from sqlalchemy import exc as sa_exc
+from sqlalchemy.engine import URL as SAURL
 
 from duckdb_sqlalchemy import (
     URL,
@@ -13,14 +14,20 @@ from duckdb_sqlalchemy import (
     Dialect,
     MotherDuckURL,
     _apply_motherduck_defaults,
+    _is_idempotent_statement,
+    _is_transient_error,
     _looks_like_motherduck,
+    _normalize_execution_options,
     _normalize_motherduck_config,
+    _parse_register_params,
+    _pool_override_from_url,
     _supports,
     create_engine_from_paths,
     olap,
     stable_session_hint,
 )
 from duckdb_sqlalchemy import datatypes as dt
+from duckdb_sqlalchemy import motherduck as md
 from duckdb_sqlalchemy.config import TYPES, apply_config, get_core_config
 
 
@@ -472,3 +479,141 @@ def test_struct_or_union_requires_fields() -> None:
     assert rendered.startswith("(")
     assert rendered.endswith(")")
     assert '"first name"' in rendered
+
+
+def test_parse_register_params_dict_and_tuple() -> None:
+    view_name, df = _parse_register_params({"view_name": "v", "df": "data"})
+    assert view_name == "v"
+    assert df == "data"
+
+    view_name, df = _parse_register_params(("v2", "data2"))
+    assert view_name == "v2"
+    assert df == "data2"
+
+
+def test_parse_register_params_errors() -> None:
+    with pytest.raises(ValueError):
+        _parse_register_params(None)
+
+    with pytest.raises(ValueError):
+        _parse_register_params({"name": "v"})
+
+    with pytest.raises(ValueError):
+        _parse_register_params(("only-one",))
+
+
+def test_normalize_execution_options_insertmanyvalues() -> None:
+    original = {"duckdb_insertmanyvalues_page_size": 123}
+    normalized = _normalize_execution_options(original)
+    assert normalized["insertmanyvalues_page_size"] == 123
+    assert "insertmanyvalues_page_size" not in original
+
+    already = {
+        "duckdb_insertmanyvalues_page_size": 5,
+        "insertmanyvalues_page_size": 10,
+    }
+    normalized = _normalize_execution_options(already)
+    assert normalized["insertmanyvalues_page_size"] == 10
+
+
+def test_idempotent_statement_detection() -> None:
+    assert _is_idempotent_statement("SELECT 1")
+    assert _is_idempotent_statement("  show tables")
+    assert _is_idempotent_statement("pragma version")
+    assert not _is_idempotent_statement("insert into t values (1)")
+
+
+def test_transient_error_detection() -> None:
+    assert _is_transient_error(RuntimeError("HTTP Error: 503 Service Unavailable"))
+    assert not _is_transient_error(RuntimeError("connection reset by peer"))
+    assert not _is_transient_error(RuntimeError("HTTP Error: 503 connection reset"))
+
+
+def test_pool_override_from_url_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    url = URL(database=":memory:", query={"duckdb_sqlalchemy_pool": ["Queue"]})
+    assert _pool_override_from_url(url) == "queue"
+
+    monkeypatch.setenv("DUCKDB_SQLALCHEMY_POOL", "Null")
+    url = URL(database=":memory:")
+    assert _pool_override_from_url(url) == "null"
+
+
+def test_pool_class_for_empty_database() -> None:
+    url = SAURL.create("duckdb")
+    assert Dialect.get_pool_class(url) is pool.SingletonThreadPool
+
+
+def test_apply_config_handles_none_path_decimal() -> None:
+    import decimal
+    from pathlib import Path
+
+    dialect = Dialect()
+
+    class DummyConn:
+        def __init__(self) -> None:
+            self.executed = []
+
+        def execute(self, statement: str) -> None:
+            self.executed.append(statement)
+
+    conn = DummyConn()
+    ext = {
+        "memory_limit": None,
+        "data_path": Path("/tmp/data"),
+        "ratio": decimal.Decimal("1.5"),
+    }
+
+    apply_config(
+        dialect,
+        conn,
+        cast(dict[str, str | int | bool | float | None], ext),
+    )
+
+    string_processor = String().literal_processor(dialect=dialect)
+    expected = [
+        "SET memory_limit = NULL",
+        f"SET data_path = {string_processor(str(Path('/tmp/data')))}",
+        f"SET ratio = {string_processor(str(decimal.Decimal('1.5')))}",
+    ]
+    assert conn.executed == expected
+
+
+def test_motherduck_helpers() -> None:
+    url = md.MotherDuckURL(
+        database="md:db",
+        query={"memory_limit": "1GB"},
+        path_query={"user": "alice", "session_hint": "team"},
+    )
+    assert url.database.startswith("md:db?")
+    assert url.query == {"memory_limit": "1GB"}
+
+    appended = md.append_query_to_database("md:db?user=alice", {"session_hint": "s"})
+    assert appended == "md:db?user=alice&session_hint=s"
+
+    normalized = md._normalize_path_item("duckdb:///tmp.db")
+    assert normalized.drivername == "duckdb"
+
+    normalized = md._normalize_path_item("md:db")
+    assert normalized.database == "md:db"
+
+
+def test_merge_and_copy_connect_args() -> None:
+    base = {"config": {"threads": 2}, "url_config": {"memory_limit": "1GB"}}
+    extra = {"config": {"threads": 4}, "url_config": {"s3_region": "us-east-1"}}
+    merged = md._merge_connect_args(base, extra)
+
+    assert merged["config"] == {"threads": 4}
+    assert merged["url_config"] == {"memory_limit": "1GB", "s3_region": "us-east-1"}
+
+    copied = md._copy_connect_params(merged)
+    copied["config"]["threads"] = 1
+    copied["url_config"]["memory_limit"] = "2GB"
+    assert merged["config"]["threads"] == 4
+    assert merged["url_config"]["memory_limit"] == "1GB"
+
+
+def test_create_engine_from_paths_driver_mismatch() -> None:
+    url1 = SAURL.create("duckdb", database=":memory:")
+    url2 = SAURL.create("sqlite", database=":memory:")
+    with pytest.raises(ValueError):
+        create_engine_from_paths([url1, url2])
