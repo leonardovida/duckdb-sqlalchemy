@@ -5,6 +5,7 @@ This folder contains focused, task-oriented guides that keep the main README sho
 ## Guides
 
 - `overview.md` - High-level overview and quick start
+- `getting-started.md` - Minimal install + setup walkthrough
 - `migration-from-duckdb-engine.md` - Migration guide from older dialects
 - `connection-urls.md` - URL formats, helpers, and manual escaping
 - `motherduck.md` - Connection patterns and MotherDuck-specific options
@@ -13,6 +14,7 @@ This folder contains focused, task-oriented guides that keep the main README sho
 - `pandas-jupyter.md` - DataFrame registration and notebook usage
 - `types-and-caveats.md` - Supported types, parameter binding, and gotchas
 - `alembic.md` - Alembic integration notes
+- `seo-checklist.md` - Docs indexability checklist
 
 ## Project references
 

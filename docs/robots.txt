@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://leonardovida.github.io/duckdb-sqlalchemy/sitemap.xml
