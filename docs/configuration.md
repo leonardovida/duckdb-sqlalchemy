@@ -1,3 +1,8 @@
+---
+layout: default
+title: Configuration
+---
+
 # Configuration
 
 DuckDB configuration can be supplied via `connect_args` or URL query params.

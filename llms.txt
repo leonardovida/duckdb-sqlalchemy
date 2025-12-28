@@ -1,0 +1,24 @@
+Project: duckdb-sqlalchemy
+Summary: DuckDB SQLAlchemy dialect for DuckDB and MotherDuck. Supports SQLAlchemy Core and ORM APIs with pooling defaults, type mappings, and bulk insert helpers.
+
+Key entry points:
+- sqlalchemy.create_engine("duckdb://...")
+- duckdb_sqlalchemy.URL and duckdb_sqlalchemy.MotherDuckURL
+- duckdb_sqlalchemy.create_motherduck_engine
+- duckdb_sqlalchemy.olap helpers (read_parquet, read_csv_auto, table_function)
+
+Docs:
+- docs/README.md (index)
+- docs/connection-urls.md
+- docs/motherduck.md
+- docs/configuration.md
+- docs/olap.md
+- docs/pandas-jupyter.md
+- docs/types-and-caveats.md
+- docs/alembic.md
+- docs/migration-from-duckdb-engine.md
+
+Compatibility:
+- Python 3.9+
+- SQLAlchemy 1.3.22+ (2.x recommended)
+- DuckDB 1.3.0+ (1.4.3 recommended)

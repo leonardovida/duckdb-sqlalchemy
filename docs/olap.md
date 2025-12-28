@@ -1,3 +1,8 @@
+---
+layout: default
+title: OLAP workflows
+---
+
 # OLAP workflows
 
 DuckDB exposes analytics-friendly table functions like `read_parquet` and `read_csv_auto`. The helpers in `duckdb_sqlalchemy.olap` make these easy to use with SQLAlchemy.

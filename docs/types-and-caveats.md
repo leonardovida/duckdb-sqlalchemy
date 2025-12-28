@@ -1,3 +1,8 @@
+---
+layout: default
+title: Types and Caveats
+---
+
 # Types and Caveats
 
 ## Type support

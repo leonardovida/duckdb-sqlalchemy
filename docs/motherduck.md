@@ -1,3 +1,8 @@
+---
+layout: default
+title: MotherDuck
+---
+
 # MotherDuck
 
 MotherDuck connections use the `md:` database prefix.

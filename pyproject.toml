@@ -1,14 +1,30 @@
 [project]
 name = "duckdb-sqlalchemy"
 version = "0.19.2"
-description = "SQLAlchemy driver for duckdb"
+description = "DuckDB SQLAlchemy dialect for DuckDB and MotherDuck"
 authors = [
-    {name = "Leonardo Vida", email = "leonardo@motherduck.com"},
+    {name = "Leonardo Vida", email = "lleonardovida@gmail.com"},
 ]
 license = "MIT"
 license-files = ["LICENSE.txt"]
 requires-python = ">=3.9,<4"
 readme = "README.md"
+keywords = ["duckdb", "sqlalchemy", "motherduck", "database", "analytics", "olap", "dialect"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database",
+    "Topic :: Database :: Front-Ends",
+]
 dependencies = [
     "duckdb>=0.5.0",
     "sqlalchemy>=1.3.22",
@@ -18,6 +34,7 @@ dependencies = [
 [project.urls]
 "Bug Tracker" = "https://github.com/leonardovida/duckdb-sqlalchemy/issues"
 Changelog = "https://github.com/leonardovida/duckdb-sqlalchemy/releases"
+Documentation = "https://leonardovida.github.io/duckdb-sqlalchemy/"
 repository = "https://github.com/leonardovida/duckdb-sqlalchemy"
 Upstream = "https://github.com/Mause/duckdb_engine"
 

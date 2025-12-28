@@ -4,6 +4,8 @@ This folder contains focused, task-oriented guides that keep the main README sho
 
 ## Guides
 
+- `overview.md` - High-level overview and quick start
+- `migration-from-duckdb-engine.md` - Migration guide from older dialects
 - `connection-urls.md` - URL formats, helpers, and manual escaping
 - `motherduck.md` - Connection patterns and MotherDuck-specific options
 - `configuration.md` - `connect_args`, extension preloads, and filesystem registration
