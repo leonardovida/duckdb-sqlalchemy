@@ -6,6 +6,18 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [0.19.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.19.2...v0.19.3) (2025-12-28)
+
+### Documentation
+
+* publish GitHub Pages docs site with Jekyll config and navigation
+* add overview, getting started, migration guide, and SEO checklist
+* add llms.txt and strengthen README/docs discoverability links
+
+### Metadata
+
+* expand PyPI metadata (keywords, classifiers, documentation URL)
+
 ## [0.19.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.19.0...v0.19.2) (2025-12-28)
 
 ### Documentation
