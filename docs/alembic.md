@@ -1,3 +1,8 @@
+---
+layout: default
+title: Alembic integration
+---
+
 # Alembic integration
 
 SQLAlchemy's migration tool, Alembic, can be used with DuckDB by providing a dialect implementation class.

@@ -4,7 +4,7 @@
 [![PyPI Downloads](https://img.shields.io/pypi/dm/duckdb-sqlalchemy.svg)](https://pypi.org/project/duckdb-sqlalchemy/)
 [![codecov](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy/graph/badge.svg)](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy)
 
-A production-ready SQLAlchemy dialect for DuckDB and MotherDuck. It supports SQLAlchemy Core and ORM APIs against DuckDB locally or in MotherDuck.
+duckdb-sqlalchemy is a DuckDB SQLAlchemy dialect for DuckDB and MotherDuck. It supports SQLAlchemy Core and ORM APIs for local DuckDB and MotherDuck connections.
 
 The dialect handles pooling defaults, bulk inserts, type mappings, and cloud-specific configuration.
 
@@ -90,7 +90,7 @@ Use the URL helpers to build connection strings safely:
 ```python
 from duckdb_sqlalchemy import URL, MotherDuckURL
 
-local_url = URL(database=":memory:", read_only=False)
+local_url = URL(database=":memory:", memory_limit="1GB")
 md_url = MotherDuckURL(database="md:my_db", attach_mode="single")
 ```
 
@@ -102,7 +102,10 @@ See `docs/configuration.md` and `docs/motherduck.md` for detailed guidance.
 
 ## Documentation
 
+- `docs/index.md` - GitHub Pages entrypoint
 - `docs/README.md` - Docs index
+- `docs/overview.md` - Overview and quick start
+- `docs/migration-from-duckdb-engine.md` - Migration guide from older dialects
 - `docs/connection-urls.md` - URL formats and helpers
 - `docs/motherduck.md` - MotherDuck setup and options
 - `docs/configuration.md` - Connection configuration, extensions, filesystems
@@ -110,6 +113,12 @@ See `docs/configuration.md` and `docs/motherduck.md` for detailed guidance.
 - `docs/pandas-jupyter.md` - DataFrame registration and notebook usage
 - `docs/types-and-caveats.md` - Type support and known caveats
 - `docs/alembic.md` - Alembic integration
+
+Docs site (GitHub Pages):
+
+```
+https://leonardovida.github.io/duckdb-sqlalchemy/
+```
 
 ## Examples
 

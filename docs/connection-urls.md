@@ -1,3 +1,8 @@
+---
+layout: default
+title: Connection URLs
+---
+
 # Connection URLs
 
 DuckDB URLs follow the standard SQLAlchemy shape:

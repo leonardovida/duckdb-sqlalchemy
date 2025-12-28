@@ -1,3 +1,8 @@
+---
+layout: default
+title: Pandas and Jupyter
+---
+
 # Pandas and Jupyter
 
 ## Register a DataFrame

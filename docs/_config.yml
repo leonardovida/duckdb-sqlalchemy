@@ -1,0 +1,6 @@
+title: duckdb-sqlalchemy
+description: DuckDB SQLAlchemy dialect for DuckDB and MotherDuck
+theme: jekyll-theme-cayman
+plugins:
+  - jekyll-seo-tag
+  - jekyll-sitemap
