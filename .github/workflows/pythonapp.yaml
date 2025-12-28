@@ -1,6 +1,15 @@
 name: Python application
 
-on: [pull_request, workflow_dispatch]
+on:
+  pull_request:
+    paths:
+      - "duckdb_sqlalchemy/**"
+      - "examples/**"
+      - "pyproject.toml"
+      - "noxfile.py"
+      - "test.cfg"
+      - ".github/workflows/pythonapp.yaml"
+  workflow_dispatch:
 permissions:
   checks: write
 
