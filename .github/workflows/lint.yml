@@ -2,6 +2,13 @@ name: Lint
 
 on:
   pull_request:
+    paths:
+      - "duckdb_sqlalchemy/**"
+      - "examples/**"
+      - "pyproject.toml"
+      - "noxfile.py"
+      - "test.cfg"
+      - ".github/workflows/lint.yml"
 
 jobs:
   pre-commit:
