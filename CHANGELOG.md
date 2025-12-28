@@ -6,6 +6,21 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [0.19.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.19.0...v0.19.2) (2025-12-28)
+
+### Documentation
+
+* expand docs guides with additional examples and configuration notes
+* refine README wording for a more professional tone
+
+### Bug Fixes
+
+* default empty database URLs to `:memory:` for DuckDB connections
+
+### Miscellaneous Chores
+
+* bump package version to 0.19.2
+
 ## [0.19.0](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.18.0...v0.19.0) (2025-12-24)
 
 ### Documentation

@@ -60,7 +60,7 @@ try:
 except ImportError:  # pragma: no cover - fallback for older SQLAlchemy
     PGExecutionContext = DefaultExecutionContext
 
-__version__ = "0.19.1"
+__version__ = "0.19.2"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -583,6 +583,8 @@ class Dialect(PGDialect_psycopg2):
         config.update(cparams.pop("url_config", {}))
         for key in DIALECT_QUERY_KEYS:
             config.pop(key, None)
+        if cparams.get("database") in {None, ""}:
+            cparams["database"] = ":memory:"
         _apply_motherduck_defaults(config, cparams.get("database"))
         path_query = extract_path_query_from_config(config)
         if path_query:
@@ -626,6 +628,8 @@ class Dialect(PGDialect_psycopg2):
             return pool.SingletonThreadPool
         if pool_override in {"null", "nullpool"}:
             return pool.NullPool
+        if not url.database:
+            return pool.SingletonThreadPool
         if url.database and url.database.startswith(":memory:"):
             return pool.SingletonThreadPool
         if _looks_like_motherduck(url.database, dict(url.query)):

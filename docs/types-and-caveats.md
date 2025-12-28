@@ -13,6 +13,26 @@ Most SQLAlchemy core types map directly to DuckDB. DuckDB-specific helpers live 
 | `Map` | MAP | Key/value mapping |
 | `Union` | UNION | Union types via dict of SQLAlchemy types |
 
+### DuckDB-specific type examples
+
+```python
+from sqlalchemy import Column, MetaData, Table
+from sqlalchemy import Integer, String
+from duckdb_sqlalchemy.datatypes import Map, Struct, Union, VarInt
+
+metadata = MetaData()
+
+events = Table(
+    "events",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("payload", Struct({"user": String, "action": String})),
+    Column("tags", Map(String, String)),
+    Column("attributes", Union({"priority": Integer, "label": String})),
+    Column("trace_id", VarInt),  # requires DuckDB >= 1.0
+)
+```
+
 ## Parameter binding
 
 Use named parameters in SQLAlchemy expressions and let the dialect pick the placeholder style:

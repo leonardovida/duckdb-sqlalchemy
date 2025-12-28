@@ -11,7 +11,11 @@ This folder contains focused, task-oriented guides that keep the main README sho
 - `pandas-jupyter.md` - DataFrame registration and notebook usage
 - `types-and-caveats.md` - Supported types, parameter binding, and gotchas
 - `alembic.md` - Alembic integration notes
-- `roadmap.md` - Dialect upgrade roadmap and PR checklists
+
+## Project references
+
+- `../CHANGELOG.md` - Release notes
+- `../ROADMAP.md` - Dialect upgrade roadmap and PR checklists
 
 ## Examples
 

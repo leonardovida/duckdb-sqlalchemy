@@ -4,16 +4,16 @@
 [![PyPI Downloads](https://img.shields.io/pypi/dm/duckdb-sqlalchemy.svg)](https://pypi.org/project/duckdb-sqlalchemy/)
 [![codecov](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy/graph/badge.svg)](https://codecov.io/gh/leonardovida/duckdb-sqlalchemy)
 
-The production-grade SQLAlchemy dialect for DuckDB and MotherDuck. Use the full SQLAlchemy Core and ORM APIs with DuckDB's analytical engine, locally or in the cloud via MotherDuck.
+A production-ready SQLAlchemy dialect for DuckDB and MotherDuck. It supports SQLAlchemy Core and ORM APIs against DuckDB locally or in MotherDuck.
 
-This dialect handles connection pooling, bulk inserts, type mappings, and cloud-specific configuration so you can focus on queries instead of driver quirks.
+The dialect handles pooling defaults, bulk inserts, type mappings, and cloud-specific configuration.
 
 ## Why this dialect
 
-- **Full SQLAlchemy compatibility**: Core, ORM, Alembic migrations, and reflection work out of the box.
-- **MotherDuck support**: Automatic token handling, attach modes, session hints, and read scaling helpers.
-- **Production defaults**: Sensible pooling, transient retry for reads, and bulk insert optimization via Arrow/DataFrame registration.
-- **Actively maintained**: Tracks current DuckDB releases with long-term support commitment.
+- **SQLAlchemy compatibility**: Core, ORM, Alembic, and reflection.
+- **MotherDuck support**: Token handling, attach modes, session hints, and read scaling helpers.
+- **Operational defaults**: Pooling defaults, transient retry for reads, and bulk insert optimization via Arrow/DataFrame registration.
+- **Maintained**: Tracks current DuckDB releases with a long-term support posture.
 
 ## Compatibility
 
@@ -96,7 +96,7 @@ md_url = MotherDuckURL(database="md:my_db", attach_mode="single")
 
 ## Configuration and pooling
 
-This dialect ships with sensible defaults (NullPool for file/MotherDuck connections, SingletonThreadPool for `:memory:`) and lets you override pooling explicitly. For production services, use the MotherDuck performance helper or configure `QueuePool`, `pool_pre_ping`, and `pool_recycle`.
+This dialect defaults to `NullPool` for file/MotherDuck connections and `SingletonThreadPool` for `:memory:`. You can override pooling explicitly. For long-lived MotherDuck pools, use the performance helper or configure `QueuePool`, `pool_pre_ping`, and `pool_recycle`.
 
 See `docs/configuration.md` and `docs/motherduck.md` for detailed guidance.
 
@@ -122,10 +122,10 @@ See `docs/configuration.md` and `docs/motherduck.md` for detailed guidance.
 
 ## Release and support policy
 
-- Long-term maintenance: this project is intended to remain supported indefinitely.
-- Compatibility: we track current DuckDB and SQLAlchemy releases while preserving SQLAlchemy semantics.
+- Long-term maintenance: intended to remain supported.
+- Compatibility: track current DuckDB and SQLAlchemy releases while preserving SQLAlchemy semantics.
 - Breaking changes: only in major/minor releases with explicit notes in `CHANGELOG.md`.
-- Security: please open an issue with details; we will prioritize fixes.
+- Security: open an issue with details; fixes are prioritized.
 
 ## Changelog and roadmap
 

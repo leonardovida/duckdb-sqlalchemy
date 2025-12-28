@@ -19,6 +19,33 @@ Use absolute paths when you need a specific location:
 duckdb:////absolute/path/to/analytics.db
 ```
 
+## Config in the query string
+
+DuckDB settings from `duckdb_settings()` can be passed as URL query params:
+
+```
+duckdb:///analytics.db?threads=4&memory_limit=1GB
+```
+
+The `URL` helper will coerce booleans and sequences for you:
+
+```python
+from duckdb_sqlalchemy import URL
+
+url = URL(database="analytics.db", threads=4, memory_limit="1GB")
+```
+
+## Dialect-only query params (pool overrides)
+
+Override the default pool class in the URL when needed:
+
+```
+duckdb:///analytics.db?duckdb_sqlalchemy_pool=queue
+duckdb:///analytics.db?pool=queue
+```
+
+Supported values: `queue`, `null`, `singleton` (`singletonthreadpool`).
+
 ## URL helper
 
 Use the `URL` helper to build URLs safely (it handles booleans and sequences for you):
@@ -27,7 +54,7 @@ Use the `URL` helper to build URLs safely (it handles booleans and sequences for
 from sqlalchemy import create_engine
 from duckdb_sqlalchemy import URL
 
-url = URL(database=":memory:", read_only=False, memory_limit="1GB")
+url = URL(database=":memory:", memory_limit="1GB")
 engine = create_engine(url)
 ```
 
