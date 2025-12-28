@@ -583,6 +583,8 @@ class Dialect(PGDialect_psycopg2):
         config.update(cparams.pop("url_config", {}))
         for key in DIALECT_QUERY_KEYS:
             config.pop(key, None)
+        if cparams.get("database") in {None, ""}:
+            cparams["database"] = ":memory:"
         _apply_motherduck_defaults(config, cparams.get("database"))
         path_query = extract_path_query_from_config(config)
         if path_query:

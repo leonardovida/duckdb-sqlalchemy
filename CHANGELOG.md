@@ -13,6 +13,10 @@ preserved from the upstream project for historical context.
 * expand docs guides with additional examples and configuration notes
 * refine README wording for a more professional tone
 
+### Bug Fixes
+
+* default empty database URLs to `:memory:` for DuckDB connections
+
 ### Miscellaneous Chores
 
 * bump package version to 0.19.2
