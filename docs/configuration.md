@@ -21,6 +21,23 @@ engine = create_engine(
 
 The supported keys are DuckDB configuration settings. See the DuckDB docs for the authoritative list.
 
+## URL query configuration
+
+You can also pass DuckDB settings in the connection URL:
+
+```python
+engine = create_engine("duckdb:///analytics.db?threads=4&memory_limit=1GB")
+```
+
+If you supply a setting in both the URL and `connect_args["config"]`, the URL value wins.
+
+`read_only` is a top-level connect argument (not a `SET` option), so pass it in
+`connect_args`:
+
+```python
+engine = create_engine("duckdb:///analytics.db", connect_args={"read_only": True})
+```
+
 ## Preload extensions
 
 DuckDB can auto-install and auto-load extensions. You can preload extensions during connection:

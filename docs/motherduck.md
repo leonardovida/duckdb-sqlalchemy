@@ -8,6 +8,17 @@ from sqlalchemy import create_engine
 engine = create_engine("duckdb:///md:my_db")
 ```
 
+## Quick start with config
+
+DuckDB settings (threads, memory limits, etc.) can be passed via `connect_args`:
+
+```python
+engine = create_engine(
+    "duckdb:///md:my_db",
+    connect_args={"config": {"threads": 4, "memory_limit": "1GB"}},
+)
+```
+
 ## Tokens
 
 Set `MOTHERDUCK_TOKEN` (or `motherduck_token`) in the environment and it will be picked up automatically when you connect to `md:` databases.
@@ -50,6 +61,8 @@ Example:
 duckdb:///md:my_db?attach_mode=single&access_mode=read_only&session_hint=team-a
 ```
 
+If you pass these in `connect_args["config"]`, the dialect will move them into the database string automatically.
+
 ### Config parameters
 
 Other DuckDB settings can be passed as URL query params or via `connect_args["config"]`:
@@ -76,6 +89,20 @@ url = MotherDuckURL(
     access_mode="read_only",
     session_hint="team-a",
     query={"memory_limit": "1GB"},
+)
+```
+
+### Explicit read-scaling engine
+
+```python
+from duckdb_sqlalchemy import create_motherduck_engine, stable_session_hint
+
+engine = create_motherduck_engine(
+    database="md:analytics",
+    attach_mode="single",
+    access_mode="read_only",
+    session_hint=stable_session_hint("user-123", salt="org-1"),
+    performance=True,
 )
 ```
 

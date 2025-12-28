@@ -13,6 +13,38 @@ csv = read_csv_auto("data/events.csv", columns=["event_id", "ts"])
 stmt = select(csv.c.event_id, csv.c.ts)
 ```
 
+## Explicit CSV settings
+
+Use `read_csv` when you need to control parsing options:
+
+```python
+from duckdb_sqlalchemy import read_csv
+
+csv = read_csv(
+    "data/events.csv",
+    columns=["event_id", "ts"],
+    header=True,
+    delim="|",
+)
+stmt = select(csv.c.event_id, csv.c.ts)
+```
+
+## Other table functions
+
+Use `table_function` for any DuckDB table function that does not have a helper:
+
+```python
+from duckdb_sqlalchemy import table_function
+
+parquet = table_function(
+    "read_parquet",
+    "data/partitioned/events/*.parquet",
+    columns=["event_id", "ts"],
+    hive_partitioning=True,
+)
+stmt = select(parquet.c.event_id, parquet.c.ts)
+```
+
 ## Arrow results
 
 For large reads, you can request Arrow tables directly:

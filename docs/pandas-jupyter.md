@@ -22,6 +22,16 @@ conn.execute("register", ("people", df))
 rows = conn.execute(text("select * from people")).fetchall()
 ```
 
+For SQLAlchemy 2.x style usage:
+
+```python
+from sqlalchemy import text
+
+with engine.begin() as conn:
+    conn.execute(text("register(:name, :df)"), {"name": "people", "df": df})
+    rows = conn.execute(text("select * from people")).fetchall()
+```
+
 ## read_sql / to_sql
 
 Pandas works with the SQLAlchemy engine:
@@ -34,6 +44,16 @@ engine = create_engine("duckdb:///:memory:")
 
 pd.DataFrame({"a": [1, 2]}).to_sql("t", engine, index=False, if_exists="replace")
 result = pd.read_sql("select * from t", engine)
+```
+
+Parameters are supported:
+
+```python
+result = pd.read_sql_query(
+    "select * from t where a >= :min_a",
+    engine,
+    params={"min_a": 1},
+)
 ```
 
 ## Bulk writes from DataFrames
