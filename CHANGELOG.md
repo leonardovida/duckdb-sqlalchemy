@@ -6,6 +6,13 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.4.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.19.3...v1.4.3) (2026-01-15)
+
+### Versioning
+
+* align package version with supported DuckDB version (1.4.x)
+* this release contains no functional changes from 0.19.3
+
 ## [0.19.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.19.2...v0.19.3) (2025-12-28)
 
 ### Documentation
