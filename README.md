@@ -21,7 +21,7 @@ The dialect handles pooling defaults, bulk inserts, type mappings, and cloud-spe
 | --- | --- |
 | Python | 3.9+ |
 | SQLAlchemy | 1.3.22+ (2.x recommended) |
-| DuckDB | 1.3.0+ (1.4.3 recommended) |
+| DuckDB | 1.3.0+ (1.4.4 recommended) |
 
 ## Install
 

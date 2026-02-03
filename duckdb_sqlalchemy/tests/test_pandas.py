@@ -17,9 +17,9 @@ from pandas.testing import assert_frame_equal
 from pytest import importorskip, mark
 from sqlalchemy import create_engine
 
-from .util import sqlalchemy_1_only
+from .util import pandas_sqlalchemy_compatible
 
-pytestmark = sqlalchemy_1_only
+pytestmark = pandas_sqlalchemy_compatible
 
 _possible_args = OrderedDict(
     {
