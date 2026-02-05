@@ -3,16 +3,14 @@ import sqlalchemy
 from packaging.version import Version
 from pytest import mark
 
-pandas_sql_compatible = not (
-    Version(sqlalchemy.__version__) < Version("2.0.0")
-    and Version(pd.__version__) >= Version("2.2.0")
-    or Version(sqlalchemy.__version__) >= Version("2.0.0")
-    and Version(pd.__version__) < Version("2.0.0")
-)
-pandas_sql_compatible_only = mark.skipif(
-    not pandas_sql_compatible,
-    reason=(
-        "unsupported pandas/SQLAlchemy pair: "
-        "pandas>=2.2 requires SQLAlchemy>=2.0, and pandas<2.0 is incompatible with SQLAlchemy>=2.0"
-    ),
+PANDAS_VERSION = Version(pd.__version__)
+SQLALCHEMY_VERSION = Version(sqlalchemy.__version__)
+
+_PANDAS_SQLALCHEMY_COMPATIBLE = (
+    PANDAS_VERSION < Version("2.0") and SQLALCHEMY_VERSION.major == 1
+) or (PANDAS_VERSION >= Version("2.0") and SQLALCHEMY_VERSION.major >= 2)
+
+pandas_sqlalchemy_compatible = mark.skipif(
+    not _PANDAS_SQLALCHEMY_COMPATIBLE,
+    reason=("pandas>=2.0 requires SQLAlchemy>=2.0; pandas<2.0 expects SQLAlchemy 1.x"),
 )

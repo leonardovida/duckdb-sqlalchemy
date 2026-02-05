@@ -23,6 +23,20 @@ preserved from the upstream project for historical context.
 
 * align SQLAlchemy compatibility shims and test typing to satisfy `ty`
 
+## [1.4.4.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4...v1.4.4.1) (2026-02-05)
+
+### Documentation
+
+* document DuckDB multiprocessing fork-safety caveat and `spawn`/`forkserver` workaround
+
+## [1.4.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.3...v1.4.4) (2026-02-03)
+
+### Versioning
+
+* align package version with supported DuckDB version (1.4.4)
+* update test matrix and lockfile to DuckDB 1.4.4
+* this release contains no functional changes from 1.4.3
+
 ## [1.4.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.19.3...v1.4.3) (2026-01-15)
 
 ### Versioning
