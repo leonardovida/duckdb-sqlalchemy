@@ -6,6 +6,12 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.4.4.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4...v1.4.4.1) (2026-02-05)
+
+### Documentation
+
+* document DuckDB multiprocessing fork-safety caveat and `spawn`/`forkserver` workaround
+
 ## [1.4.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.3...v1.4.4) (2026-02-03)
 
 ### Versioning
