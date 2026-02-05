@@ -6,6 +6,23 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.4.4.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4...v1.4.4.2) (2026-02-05)
+
+### Security
+
+* validate config keys before `SET` statements to block SQL injection payloads
+* validate preload extension names before `LOAD`
+* validate COPY helper table/column/option identifiers and reject SQL fragments
+
+### Testing
+
+* gate pandas tests on supported pandas/SQLAlchemy combinations
+* pin `pandas<2.2` in `nox` SQLAlchemy 1.x sessions for stable matrix runs
+
+### Typing
+
+* align SQLAlchemy compatibility shims and test typing to satisfy `ty`
+
 ## [1.4.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v0.19.3...v1.4.3) (2026-01-15)
 
 ### Versioning

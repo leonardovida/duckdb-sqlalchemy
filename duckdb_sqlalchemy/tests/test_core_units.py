@@ -1,4 +1,5 @@
-from typing import cast
+from pathlib import Path
+from typing import Any, cast
 from urllib.parse import parse_qs
 
 import duckdb
@@ -7,6 +8,7 @@ from sqlalchemy import Integer, String, pool
 from sqlalchemy import exc as sa_exc
 from sqlalchemy.engine import URL as SAURL
 
+import duckdb_sqlalchemy
 from duckdb_sqlalchemy import (
     URL,
     ConnectionWrapper,
@@ -28,6 +30,7 @@ from duckdb_sqlalchemy import (
 )
 from duckdb_sqlalchemy import datatypes as dt
 from duckdb_sqlalchemy import motherduck as md
+from duckdb_sqlalchemy.bulk import copy_from_csv
 from duckdb_sqlalchemy.config import TYPES, apply_config, get_core_config
 
 
@@ -472,13 +475,91 @@ def test_struct_or_union_requires_fields() -> None:
     preparer = dialect.identifier_preparer
 
     with pytest.raises(sa_exc.CompileError):
-        dt.struct_or_union(dt.Struct(), compiler, preparer)
+        dt.struct_or_union(dt.Struct(), cast(Any, compiler), preparer)
 
     struct = dt.Struct({"first name": String, "age": Integer})
-    rendered = dt.struct_or_union(struct, compiler, preparer)
+    rendered = dt.struct_or_union(struct, cast(Any, compiler), preparer)
     assert rendered.startswith("(")
     assert rendered.endswith(")")
     assert '"first name"' in rendered
+
+
+def test_apply_config_rejects_invalid_key_no_side_effect() -> None:
+    conn = duckdb.connect(":memory:")
+    dialect = Dialect()
+    with pytest.raises(ValueError, match="invalid config key"):
+        apply_config(
+            dialect,
+            conn,
+            {"threads = 1; CREATE TABLE pwned_cfg(i INTEGER); --": "x"},
+        )
+
+    found = conn.execute(
+        "SELECT COUNT(*) FROM duckdb_tables() WHERE table_name='pwned_cfg'"
+    ).fetchone()
+    assert found is not None
+    assert found[0] == 0
+
+
+def test_connect_rejects_invalid_extension_before_execute(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    get_core_config()
+
+    class DummyConn:
+        def __init__(self) -> None:
+            self.executed: list[str] = []
+
+        def execute(self, statement: str) -> None:
+            self.executed.append(statement)
+
+        def register_filesystem(self, filesystem: object) -> None:
+            return None
+
+    dummy = DummyConn()
+    monkeypatch.setattr(duckdb_sqlalchemy.duckdb, "connect", lambda *a, **k: dummy)
+
+    with pytest.raises(ValueError, match="invalid extension name"):
+        Dialect().connect(
+            database=":memory:",
+            preload_extensions=["sqlite; CREATE TABLE pwned_ext(i INTEGER); --"],
+            config={},
+        )
+
+    assert dummy.executed == []
+
+
+def test_copy_from_csv_rejects_invalid_table_and_option_key(
+    tmp_path: Path,
+) -> None:
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE safe(i INTEGER)")
+    csv_path = tmp_path / "rows.csv"
+    csv_path.write_text("1\n")
+
+    with pytest.raises(ValueError, match="invalid table identifier"):
+        copy_from_csv(
+            conn,
+            "safe FROM 'x'; CREATE TABLE pwned_bulk(i INTEGER); --",
+            csv_path,
+        )
+
+    with pytest.raises(ValueError, match="invalid COPY option key"):
+        bad_options: dict[str, Any] = {
+            "header); CREATE TABLE pwned_opt(i INTEGER); --": True
+        }
+        copy_from_csv(
+            conn,
+            "safe",
+            csv_path,
+            **bad_options,
+        )
+
+    found = conn.execute(
+        "SELECT COUNT(*) FROM duckdb_tables() WHERE table_name IN ('pwned_bulk', 'pwned_opt')"
+    ).fetchone()
+    assert found is not None
+    assert found[0] == 0
 
 
 def test_parse_register_params_dict_and_tuple() -> None:

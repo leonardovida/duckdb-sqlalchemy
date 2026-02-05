@@ -113,6 +113,10 @@ with engine.begin() as conn:
     copy_from_csv(conn, "events", "data/events.csv", header=True)
 ```
 
+For safety, string table names, column names, and COPY option keys must be
+identifiers. Dotted paths like `schema.events` are supported, but SQL
+fragments are rejected.
+
 For row iterables, you can stream to a temporary CSV in chunks:
 
 ```python
