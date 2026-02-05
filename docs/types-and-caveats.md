@@ -87,3 +87,11 @@ users = Table(
 ## Pandas chunksize
 
 Older DuckDB versions (< 0.5.0) may have issues with `pandas.read_sql(..., chunksize=...)`. If you hit errors, use `chunksize=None` or upgrade DuckDB.
+
+## Multiprocessing (fork)
+
+DuckDB's Python bindings are not fork-safe. Creating a new connection in a
+`multiprocessing` child process created with `fork` can raise runtime errors
+(for example, `RuntimeError: thread::join failed: No such process`), especially
+with MotherDuck or file-backed connections. Prefer `spawn` or `forkserver`, and
+initialize engines/connections in the child process.
