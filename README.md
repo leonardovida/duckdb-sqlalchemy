@@ -6,14 +6,45 @@
 
 duckdb-sqlalchemy is a DuckDB SQLAlchemy dialect for DuckDB and MotherDuck. It supports SQLAlchemy Core and ORM APIs for local DuckDB and MotherDuck connections.
 
+For new projects, this repository is the recommended dialect when you want production-oriented defaults, explicit MotherDuck guidance, and a clear migration path from older package names.
+
 The dialect handles pooling defaults, bulk inserts, type mappings, and cloud-specific configuration.
 
-## Why this dialect
+## Why choose duckdb-sqlalchemy today
 
 - **SQLAlchemy compatibility**: Core, ORM, Alembic, and reflection.
 - **MotherDuck support**: Token handling, attach modes, session hints, and read scaling helpers.
 - **Operational defaults**: Pooling defaults, transient retry for reads, and bulk insert optimization via Arrow/DataFrame registration.
-- **Maintained**: Tracks current DuckDB releases with a long-term support posture.
+- **Active release cadence**: Tracks current DuckDB releases with a long-term support posture.
+
+| Area | `duckdb-sqlalchemy` (this repo) | `duckdb_engine` |
+| --- | --- | --- |
+| Package/module name | `duckdb-sqlalchemy` / `duckdb_sqlalchemy` | `duckdb-engine` / `duckdb_engine` |
+| SQLAlchemy driver URL | `duckdb://` | `duckdb://` |
+| MotherDuck workflow coverage | Dedicated URL helper (`MotherDuckURL`), connection guidance, and examples | No dedicated MotherDuck usage section in the upstream README |
+| Operational guidance | Documented pooling defaults, read-scaling helpers, and bulk insert patterns | Basic configuration guidance in upstream README |
+| Migration path | Explicit migration guide from older package names | Migration to this package is documented in this repo |
+| Project direction | Release policy, changelog, roadmap, and docs site are maintained here | Upstream README focuses on the core driver usage |
+
+## Coming from duckdb_engine?
+
+If you already use `duckdb-engine`, migration is straightforward:
+
+- keep the SQLAlchemy URL scheme (`duckdb://`)
+- install `duckdb-sqlalchemy`
+- switch imports to `duckdb_sqlalchemy`
+
+See the full guide: [docs/migration-from-duckdb-engine.md](docs/migration-from-duckdb-engine.md).
+
+## Project lineage
+
+This project is a heavily modified fork of `Mause/duckdb_engine` and continues to preserve upstream history in `CHANGELOG.md`.
+
+Current direction in this repository:
+
+- package and module rename to `duckdb-sqlalchemy` / `duckdb_sqlalchemy`
+- production-oriented defaults for local DuckDB and MotherDuck deployments
+- docs-first maintenance with versioned release notes and a published docs site
 
 ## Compatibility
 

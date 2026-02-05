@@ -5,7 +5,7 @@ title: Migration from duckdb_engine
 
 # Migration from duckdb_engine
 
-This project is the actively maintained DuckDB SQLAlchemy dialect. If you are coming from the older `duckdb_engine` package, migrate as follows:
+`duckdb-sqlalchemy` is the recommended package name for new work in this repository. If you are coming from `duckdb_engine`, migrate as follows:
 
 ## Package and import rename
 
@@ -28,3 +28,4 @@ SQLAlchemy URLs use the `duckdb://` driver name in both packages. Existing URLs 
 - The package name is now `duckdb-sqlalchemy` and the module is `duckdb_sqlalchemy`.
 - The dialect remains registered as `duckdb` for SQLAlchemy.
 - See `docs/motherduck.md` for MotherDuck-specific behavior.
+- See `README.md` for project lineage, release policy, and roadmap links.

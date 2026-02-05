@@ -22,3 +22,4 @@ Use this list to validate indexability after each docs update or release.
 
 - Project name and description are consistent in README, docs, and PyPI metadata.
 - URLs in `pyproject.toml` match the docs site.
+- README and docs clearly differentiate this fork's scope from upstream `duckdb_engine` content.
