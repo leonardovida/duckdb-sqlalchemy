@@ -37,6 +37,7 @@ from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, relationship, sessionmaker
+from sqlalchemy.pool import QueuePool
 
 from .. import Dialect, insert, supports_attach, supports_user_agent
 from .._supports import has_comment_support
@@ -572,7 +573,7 @@ def test_do_ping(tmp_path: Path, caplog: LogCaptureFixture) -> None:
         "duckdb:///" + str(tmp_path / "db"),
         pool_pre_ping=True,
         pool_size=1,
-        poolclass=sqlalchemy.pool.QueuePool,
+        poolclass=QueuePool,
     )
 
     logger = cast(logging.Logger, engine.pool.logger)  # type: ignore
@@ -615,7 +616,8 @@ def test_361(engine: Engine) -> None:
 
         metadata = MetaData()
         metadata.reflect(bind=conn)
-        test = metadata.tables["test"]
+        tables = cast(dict[str, Table], metadata.tables)
+        test = tables["test"]
         part = "year"
         date_part = func.date_part(part, test.c.dt)
 

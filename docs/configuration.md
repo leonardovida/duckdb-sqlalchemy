@@ -57,6 +57,9 @@ engine = create_engine(
 )
 ```
 
+For safety, extension names must be plain identifiers (`[A-Za-z0-9_]+`).
+Values containing spaces, punctuation, or SQL fragments are rejected.
+
 ## Register filesystems
 
 You can register filesystems via `fsspec`:

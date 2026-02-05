@@ -15,6 +15,7 @@ from typing import (
     Sequence,
     Tuple,
     Type,
+    cast,
 )
 
 import duckdb
@@ -38,6 +39,7 @@ from sqlalchemy.sql import bindparam
 from sqlalchemy.sql.selectable import Select
 
 from ._supports import has_comment_support
+from ._validation import validate_extension_name
 from .bulk import copy_from_csv, copy_from_parquet, copy_from_rows
 from .capabilities import get_capabilities
 from .config import apply_config, get_core_config
@@ -56,11 +58,15 @@ from .olap import read_csv, read_csv_auto, read_parquet, table_function
 from .url import URL, make_url
 
 try:
-    from sqlalchemy.dialects.postgresql.base import PGExecutionContext
+    from sqlalchemy.dialects.postgresql import base as _pg_base
 except ImportError:  # pragma: no cover - fallback for older SQLAlchemy
-    PGExecutionContext = DefaultExecutionContext
+    _PGExecutionContext = DefaultExecutionContext
+else:
+    _PGExecutionContext = getattr(
+        _pg_base, "PGExecutionContext", DefaultExecutionContext
+    )
 
-__version__ = "1.4.4.1"
+__version__ = "1.4.4.2"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -71,7 +77,9 @@ supports_user_agent: bool = _capabilities.supports_user_agent
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection
-    from sqlalchemy.engine.reflection import ReflectedCheckConstraint, ReflectedIndex
+
+    ReflectedCheckConstraint = Dict[str, Any]
+    ReflectedIndex = Dict[str, Any]
 
     from .capabilities import DuckDBCapabilities
 
@@ -318,7 +326,7 @@ class DuckDBArrowResult:
         return iter(self._result)
 
 
-class DuckDBExecutionContext(PGExecutionContext):
+class DuckDBExecutionContext(_PGExecutionContext):
     @classmethod
     def _init_compiled(
         cls,
@@ -369,8 +377,9 @@ class DuckDBExecutionContext(PGExecutionContext):
         arraysize = self.execution_options.get("duckdb_arraysize")
         if arraysize is None:
             arraysize = self.execution_options.get("arraysize")
-        if arraysize is not None and hasattr(self.cursor, "arraysize"):
-            self.cursor.arraysize = arraysize
+        cursor = getattr(self, "cursor", None)
+        if arraysize is not None and hasattr(cursor, "arraysize"):
+            cursor.arraysize = arraysize
         result = super()._setup_result_proxy()
         if self.execution_options.get("duckdb_arrow") and getattr(
             result, "returns_rows", False
@@ -607,7 +616,7 @@ class Dialect(PGDialect_psycopg2):
         conn = duckdb.connect(*cargs, **cparams)
 
         for extension in preload_extensions:
-            conn.execute(f"LOAD {extension}")
+            conn.execute(f"LOAD {validate_extension_name(extension)}")
 
         for filesystem in filesystems:
             conn.register_filesystem(filesystem)
@@ -875,7 +884,7 @@ class Dialect(PGDialect_psycopg2):
 
     @cache  # type: ignore[call-arg]
     def get_columns(  # type: ignore[no-untyped-def]
-        self, connection: "Connection", table_name: str, schema=None, **kw: Any
+        self, connection: "Connection", table_name: str, schema=None, **kw: "Any"
     ):
         try:
             return super().get_columns(connection, table_name, schema=schema, **kw)
@@ -887,7 +896,7 @@ class Dialect(PGDialect_psycopg2):
 
     @cache  # type: ignore[call-arg]
     def get_foreign_keys(  # type: ignore[no-untyped-def]
-        self, connection: "Connection", table_name: str, schema=None, **kw: Any
+        self, connection: "Connection", table_name: str, schema=None, **kw: "Any"
     ):
         try:
             return super().get_foreign_keys(connection, table_name, schema=schema, **kw)
@@ -898,7 +907,7 @@ class Dialect(PGDialect_psycopg2):
 
     @cache  # type: ignore[call-arg]
     def get_unique_constraints(  # type: ignore[no-untyped-def]
-        self, connection: "Connection", table_name: str, schema=None, **kw: Any
+        self, connection: "Connection", table_name: str, schema=None, **kw: "Any"
     ):
         try:
             return super().get_unique_constraints(
@@ -911,7 +920,7 @@ class Dialect(PGDialect_psycopg2):
 
     @cache  # type: ignore[call-arg]
     def get_check_constraints(  # type: ignore[no-untyped-def]
-        self, connection: "Connection", table_name: str, schema=None, **kw: Any
+        self, connection: "Connection", table_name: str, schema=None, **kw: "Any"
     ):
         try:
             return super().get_check_constraints(
@@ -1019,7 +1028,7 @@ class Dialect(PGDialect_psycopg2):
                 import pandas as pd  # type: ignore[import-not-found]
 
                 rows = parameters if isinstance(parameters, list) else list(parameters)
-                data = pd.DataFrame(rows, columns=column_names)
+                data = pd.DataFrame(rows, columns=cast(Any, column_names))
             except Exception:
                 data = None
             if data is None:
@@ -1119,16 +1128,25 @@ class Dialect(PGDialect_psycopg2):
 
         self._execute_with_retry(cursor, statement, parameters, context, executor)
 
-    def do_execute_no_params(
-        self,
-        cursor: Any,
-        statement: str,
-        context: Optional[Any] = None,
-    ) -> None:
-        def executor() -> Any:
-            return DefaultDialect.do_execute_no_params(self, cursor, statement, context)
+    def do_execute_no_params(self, cursor: Any, statement: str, *args: Any) -> None:
+        parameters: Any = None
+        context: Optional[Any] = None
+        if len(args) == 1:
+            context = cast(Optional[Any], args[0])
+        elif len(args) >= 2:
+            parameters = args[0]
+            context = cast(Optional[Any], args[1])
 
-        self._execute_with_retry(cursor, statement, None, context, executor)
+        def executor() -> Any:
+            if parameters is None:
+                return DefaultDialect.do_execute_no_params(
+                    self, cursor, statement, context
+                )
+            return DefaultDialect.do_execute(
+                self, cursor, statement, parameters, context
+            )
+
+        self._execute_with_retry(cursor, statement, parameters, context, executor)
 
     def _pg_class_filter_scope_schema(
         self,
@@ -1160,10 +1178,10 @@ class Dialect(PGDialect_psycopg2):
         # reflection to avoid Catalog Errors during SQLAlchemy 2.x reflection.
         from sqlalchemy.dialects.postgresql import base as pg_base
 
-        pg_catalog = pg_base.pg_catalog
-        REGCLASS = pg_base.REGCLASS
-        TEXT = pg_base.TEXT
-        OID = pg_base.OID
+        pg_catalog = getattr(pg_base, "pg_catalog")
+        REGCLASS = getattr(pg_base, "REGCLASS")
+        TEXT = getattr(pg_base, "TEXT")
+        OID = getattr(pg_base, "OID")
 
         server_version_info = self.server_version_info or (0,)
 
@@ -1241,7 +1259,7 @@ class Dialect(PGDialect_psycopg2):
 
         collate = sql.null().label("collation")
 
-        relkinds = self._kind_to_relkinds(kind)
+        relkinds = getattr(super(), "_kind_to_relkinds")(kind)
         query = (
             select(
                 pg_catalog.pg_attribute.c.attname.label("name"),
@@ -1275,7 +1293,7 @@ class Dialect(PGDialect_psycopg2):
                     == pg_catalog.pg_attribute.c.attnum,
                 ),
             )
-            .where(self._pg_class_relkind_condition(relkinds))
+            .where(getattr(super(), "_pg_class_relkind_condition")(relkinds))
             .order_by(pg_catalog.pg_class.c.relname, pg_catalog.pg_attribute.c.attnum)
         )
         query = self._pg_class_filter_scope_schema(query, schema, scope=scope)
@@ -1339,15 +1357,20 @@ class Dialect(PGDialect_psycopg2):
 
         # dictionary with (name, ) if default search path or (schema, name)
         # as keys
+        load_enums = getattr(self, "_load_enums")
+        try:
+            enum_records = load_enums(
+                connection, schema="*", info_cache=kw.get("info_cache")
+            )
+        except TypeError:
+            enum_records = load_enums(connection, schema="*")
         enums = dict(
             (
                 ((rec["name"],), rec)
                 if rec["visible"]
                 else ((rec["schema"], rec["name"]), rec)
             )
-            for rec in self._load_enums(  # type: ignore[attr-defined]
-                connection, schema="*", info_cache=kw.get("info_cache")
-            )
+            for rec in enum_records
         )
 
         columns = self._get_columns_info(rows, domains, enums, schema)  # type: ignore[attr-defined]
@@ -1361,9 +1384,9 @@ class Dialect(PGDialect_psycopg2):
         self, schema: str, has_filter_names: bool, scope: Any, kind: Any
     ):
         if SQLALCHEMY_VERSION >= Version("2.0.36"):
-            from sqlalchemy.dialects.postgresql import (  # type: ignore[attr-defined]
-                pg_catalog,
-            )
+            from sqlalchemy.dialects.postgresql import base as pg_base
+
+            pg_catalog = getattr(pg_base, "pg_catalog")
 
             if (
                 hasattr(super(), "_kind_to_relkinds")

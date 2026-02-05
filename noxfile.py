@@ -3,6 +3,7 @@ from typing import Generator
 
 import github_action_utils as gha
 import nox
+from packaging.version import Version
 
 nox.options.default_venv_backend = "uv"
 nox.options.error_on_external_run = True
@@ -61,6 +62,8 @@ def tests_core(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
         session.install("-e", ".[dev]")
         operator = "==" if sqlalchemy.count(".") == 2 else "~="
         session.install(f"sqlalchemy{operator}{sqlalchemy}")
+        if Version(sqlalchemy) < Version("2.0"):
+            session.install("pandas<2.2")
         if duckdb == "master":
             session.install("duckdb", "--pre", "-U")
         else:

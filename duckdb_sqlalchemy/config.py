@@ -1,12 +1,14 @@
 import os
 from decimal import Decimal
 from functools import lru_cache
-from typing import Dict, Set, Type, Union
+from typing import Any, Dict, Set, Type, Union
 
 import duckdb
 from sqlalchemy import Boolean, Float, Integer, String
 from sqlalchemy.engine import Dialect
 from sqlalchemy.sql.type_api import TypeEngine
+
+from ._validation import validate_identifier
 
 TYPES: Dict[Type, TypeEngine] = {
     bool: Boolean(),
@@ -37,7 +39,7 @@ def get_core_config() -> Set[str]:
 
 def apply_config(
     dialect: Dialect,
-    conn: duckdb.DuckDBPyConnection,
+    conn: Any,
     ext: Dict[str, Union[str, int, bool, float, None]],
 ) -> None:
     # TODO: does sqlalchemy have something that could do this for us?
@@ -48,8 +50,9 @@ def apply_config(
     string_processor = String().literal_processor(dialect=dialect)
 
     for k, v in ext.items():
+        key = validate_identifier(k, kind="config key")
         if v is None:
-            conn.execute(f"SET {k} = NULL")
+            conn.execute(f"SET {key} = NULL")
             continue
         if isinstance(v, os.PathLike):
             v = os.fspath(v)
@@ -67,4 +70,4 @@ def apply_config(
                 v = str(v)
                 process = string_processor
         assert process, f"Not able to configure {k} with {v}"
-        conn.execute(f"SET {k} = {process(v)}")
+        conn.execute(f"SET {key} = {process(v)}")

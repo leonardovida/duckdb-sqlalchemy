@@ -3,6 +3,12 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple, Union
 
+from ._validation import (
+    validate_dotted_identifier,
+    validate_identifier,
+    validate_identifier_list,
+)
+
 TableLike = Union[str, Any]
 
 
@@ -25,7 +31,7 @@ def _format_copy_options(options: Mapping[str, Any]) -> str:
     for key, value in options.items():
         if value is None:
             continue
-        opt_key = str(key).upper()
+        opt_key = validate_identifier(str(key), kind="COPY option key").upper()
         if isinstance(value, (list, tuple)):
             inner = ", ".join(_quote_literal(v) for v in value)
             parts.append(f"{opt_key} ({inner})")
@@ -46,21 +52,28 @@ def _format_table(connection: Any, table: TableLike) -> str:
         schema = getattr(table, "schema", None)
         name = getattr(table, "name", None)
         if schema:
-            return f"{schema}.{name}"
-        return str(name)
-    return str(table)
+            schema_name = validate_dotted_identifier(
+                str(schema), kind="table schema identifier"
+            )
+            table_name = validate_identifier(str(name), kind="table identifier")
+            return f"{schema_name}.{table_name}"
+        return validate_identifier(str(name), kind="table identifier")
+    table_name = str(table)
+    validate_dotted_identifier(table_name, kind="table identifier")
+    return table_name
 
 
 def _format_columns(connection: Any, columns: Optional[Sequence[str]]) -> str:
     if not columns:
         return ""
+    validated_columns = validate_identifier_list(columns, kind="column identifier")
     preparer = getattr(
         getattr(connection, "dialect", None), "identifier_preparer", None
     )
     if preparer is None:
-        cols = ", ".join(columns)
+        cols = ", ".join(validated_columns)
     else:
-        cols = ", ".join(preparer.quote_identifier(col) for col in columns)
+        cols = ", ".join(preparer.quote_identifier(col) for col in validated_columns)
     return f" ({cols})"
 
 
@@ -115,6 +128,7 @@ def _copy_from_file(
     columns: Optional[Sequence[str]] = None,
     **options: Any,
 ) -> Any:
+    validate_identifier(format_name, kind="COPY format")
     table_name = _format_table(connection, table)
     column_clause = _format_columns(connection, columns)
     path_literal = _quote_literal(path)
