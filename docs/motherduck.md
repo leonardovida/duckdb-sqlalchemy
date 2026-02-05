@@ -41,6 +41,13 @@ engine = create_engine(
 )
 ```
 
+## Multiprocessing (fork)
+
+DuckDB's Python client is not fork-safe, so `multiprocessing` children created with
+`fork` can fail when opening new connections (commonly observed with MotherDuck or
+file-backed databases). Use the `spawn` or `forkserver` start methods and create
+engines/connections inside the child process.
+
 ## Options
 
 ### Connection-string parameters (instance cache key)
