@@ -6,6 +6,17 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.4.4.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.2...v1.4.4.3) (2026-02-21)
+
+### Bug Fixes
+
+* fix `USMALLINT` max range handling to cover the full `0..65535` domain
+* preserve `NULL` MAP values as `None` in Python instead of coercing to an empty dict
+
+### Tooling
+
+* add `.codex/environments/environment.toml` with local test/lint/type-check actions
+
 ## [1.4.4.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4...v1.4.4.2) (2026-02-05)
 
 ### Security
