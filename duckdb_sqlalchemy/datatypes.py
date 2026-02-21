@@ -69,7 +69,7 @@ class USmallInteger(DuckDBInteger):
     "AKA UInt2"
     # USMALLINT	-	0	65535
     min = 0
-    max = 2**15
+    max = 2**16 - 1
 
 
 class UBigInteger(DuckDBInteger):
@@ -204,9 +204,13 @@ class Map(TypeEngine):
         if IS_GT_1:
             return lambda value: value
         else:
-            return (
-                lambda value: dict(zip(value["key"], value["value"])) if value else {}
-            )
+
+            def _convert(value: Any) -> Optional[Dict[Any, Any]]:
+                if value is None:
+                    return None
+                return dict(zip(value["key"], value["value"]))
+
+            return _convert
 
 
 class Union(TypeEngine):
