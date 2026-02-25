@@ -117,6 +117,9 @@ For safety, string table names, column names, and COPY option keys must be
 identifiers. Dotted paths like `schema.events` are supported, but SQL
 fragments are rejected.
 
+If you need quoted or mixed-case identifiers, pass a SQLAlchemy `Table` object
+instead of a plain string so SQLAlchemy handles quoting.
+
 For row iterables, you can stream to a temporary CSV in chunks:
 
 ```python

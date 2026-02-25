@@ -75,7 +75,7 @@ duckdb:///md:my_db?attach_mode=single&access_mode=read_only&session_hint=team-a
 
 ## Next steps
 
-- Connection strings: `docs/connection-urls.md`
-- MotherDuck options: `docs/motherduck.md`
-- Configuration and pooling: `docs/configuration.md`
-- OLAP helpers: `docs/olap.md`
+- [Connection strings](connection-urls)
+- [MotherDuck options](motherduck)
+- [Configuration and pooling](configuration)
+- [OLAP helpers](olap)

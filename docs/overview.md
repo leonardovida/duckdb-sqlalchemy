@@ -37,7 +37,7 @@ with Session(engine) as session:
 
 ## Next steps
 
-- Connection strings: `docs/connection-urls.md`
-- MotherDuck usage: `docs/motherduck.md`
-- Configuration and pooling: `docs/configuration.md`
-- OLAP helpers: `docs/olap.md`
+- [Connection strings](connection-urls)
+- [MotherDuck usage](motherduck)
+- [Configuration and pooling](configuration)
+- [OLAP helpers](olap)

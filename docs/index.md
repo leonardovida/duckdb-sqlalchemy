@@ -23,4 +23,5 @@ Production-ready DuckDB SQLAlchemy dialect for DuckDB and MotherDuck.
 
 ## Examples
 
-See `examples/` in the repository for runnable scripts.
+See [examples/](https://github.com/leonardovida/duckdb-sqlalchemy/tree/main/examples)
+for runnable scripts.

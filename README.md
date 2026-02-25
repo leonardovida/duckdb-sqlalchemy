@@ -20,8 +20,8 @@ The dialect handles pooling defaults, bulk inserts, type mappings, and cloud-spe
 | Component | Supported versions |
 | --- | --- |
 | Python | 3.9+ |
-| SQLAlchemy | 1.3.22+ (2.x recommended) |
-| DuckDB | 1.3.0+ (1.4.4 recommended) |
+| SQLAlchemy | 1.3.22+ (CI-tested: 1.3, 1.4, 2.0.x) |
+| DuckDB | 0.5.0+ (CI-tested currently: 1.1.3 to 1.4.4) |
 
 ## Install
 
@@ -98,37 +98,58 @@ md_url = MotherDuckURL(database="md:my_db", attach_mode="single")
 
 This dialect defaults to `NullPool` for file/MotherDuck connections and `SingletonThreadPool` for `:memory:`. You can override pooling explicitly. For long-lived MotherDuck pools, use the performance helper or configure `QueuePool`, `pool_pre_ping`, and `pool_recycle`.
 
-See `docs/configuration.md` and `docs/motherduck.md` for detailed guidance.
+See [docs/configuration.md](docs/configuration.md) and
+[docs/motherduck.md](docs/motherduck.md) for detailed guidance.
 
 ## Documentation
 
-- `docs/index.md` - GitHub Pages entrypoint
-- `docs/README.md` - Docs index
-- `docs/overview.md` - Overview and quick start
-- `docs/getting-started.md` - Minimal install + setup walkthrough
-- `docs/migration-from-duckdb-engine.md` - Migration guide from older dialects
-- `docs/connection-urls.md` - URL formats and helpers
-- `docs/motherduck.md` - MotherDuck setup and options
-- `docs/configuration.md` - Connection configuration, extensions, filesystems
-- `docs/olap.md` - Parquet/CSV scans and ATTACH workflows
-- `docs/pandas-jupyter.md` - DataFrame registration and notebook usage
-- `docs/types-and-caveats.md` - Type support and known caveats
-- `docs/alembic.md` - Alembic integration
+- [docs/index.md](docs/index.md) - GitHub Pages entrypoint
+- [docs/README.md](docs/README.md) - Docs index
+- [docs/overview.md](docs/overview.md) - Overview and quick start
+- [docs/getting-started.md](docs/getting-started.md) - Minimal install + setup walkthrough
+- [docs/migration-from-duckdb-engine.md](docs/migration-from-duckdb-engine.md) - Migration guide from older dialects
+- [docs/connection-urls.md](docs/connection-urls.md) - URL formats and helpers
+- [docs/motherduck.md](docs/motherduck.md) - MotherDuck setup and options
+- [docs/configuration.md](docs/configuration.md) - Connection configuration, extensions, filesystems
+- [docs/olap.md](docs/olap.md) - Parquet/CSV scans and ATTACH workflows
+- [docs/pandas-jupyter.md](docs/pandas-jupyter.md) - DataFrame registration and notebook usage
+- [docs/types-and-caveats.md](docs/types-and-caveats.md) - Type support and known caveats
+- [docs/alembic.md](docs/alembic.md) - Alembic integration
 
 Docs site (GitHub Pages):
 
-```
-https://leonardovida.github.io/duckdb-sqlalchemy/
-```
+[https://leonardovida.github.io/duckdb-sqlalchemy/](https://leonardovida.github.io/duckdb-sqlalchemy/)
 
 ## Examples
 
-- `examples/sqlalchemy_example.py` - end-to-end example
-- `examples/motherduck_read_scaling_per_user.py` - per-user read scaling pattern
-- `examples/motherduck_queuepool_high_concurrency.py` - QueuePool tuning
-- `examples/motherduck_multi_instance_pool.py` - multi-instance pool rotation
-- `examples/motherduck_arrow_reads.py` - Arrow results + streaming
-- `examples/motherduck_attach_modes.py` - workspace vs single attach mode
+- [examples/sqlalchemy_example.py](examples/sqlalchemy_example.py) - end-to-end example
+- [examples/motherduck_read_scaling_per_user.py](examples/motherduck_read_scaling_per_user.py) - per-user read scaling pattern
+- [examples/motherduck_queuepool_high_concurrency.py](examples/motherduck_queuepool_high_concurrency.py) - QueuePool tuning
+- [examples/motherduck_multi_instance_pool.py](examples/motherduck_multi_instance_pool.py) - multi-instance pool rotation
+- [examples/motherduck_arrow_reads.py](examples/motherduck_arrow_reads.py) - Arrow results + streaming
+- [examples/motherduck_attach_modes.py](examples/motherduck_attach_modes.py) - workspace vs single attach mode
+
+## Development workflow
+
+Install development dependencies:
+
+```sh
+pip install -e ".[dev,devtools]"
+```
+
+Run quick checks in your current environment:
+
+```sh
+pytest
+nox -s ty
+pre-commit run --all-files
+```
+
+Run the full compatibility matrix (slow):
+
+```sh
+nox -s tests
+```
 
 ## Release and support policy
 
@@ -139,13 +160,14 @@ https://leonardovida.github.io/duckdb-sqlalchemy/
 
 ## Changelog and roadmap
 
-- `CHANGELOG.md` - release notes
-- `ROADMAP.md` - upcoming work and priorities
+- [CHANGELOG.md](CHANGELOG.md) - release notes
+- [ROADMAP.md](ROADMAP.md) - upcoming work and priorities
 
 ## Contributing
 
-See `AGENTS.md` for repo-specific workflow, tooling, and PR expectations. We welcome issues, bug reports, and high-quality pull requests.
+See [AGENTS.md](AGENTS.md) for repo-specific workflow, tooling, and PR
+expectations. We welcome issues, bug reports, and high-quality pull requests.
 
 ## License
 
-MIT. See `LICENSE.txt`.
+MIT. See [LICENSE.txt](LICENSE.txt).

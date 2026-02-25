@@ -27,4 +27,4 @@ SQLAlchemy URLs use the `duckdb://` driver name in both packages. Existing URLs 
 
 - The package name is now `duckdb-sqlalchemy` and the module is `duckdb_sqlalchemy`.
 - The dialect remains registered as `duckdb` for SQLAlchemy.
-- See `docs/motherduck.md` for MotherDuck-specific behavior.
+- See [motherduck.md](motherduck) for MotherDuck-specific behavior.

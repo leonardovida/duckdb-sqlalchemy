@@ -63,6 +63,25 @@ url = URL(database=":memory:", memory_limit="1GB")
 engine = create_engine(url)
 ```
 
+## MotherDuck URL helper
+
+Use `MotherDuckURL` when you want routing/instance-cache params to live in the
+database path and config params in the regular URL query:
+
+```python
+from sqlalchemy import create_engine
+from duckdb_sqlalchemy import MotherDuckURL
+
+url = MotherDuckURL(
+    database="md:my_db",
+    attach_mode="single",
+    access_mode="read_only",
+    session_hint="team-a",
+    query={"memory_limit": "1GB"},
+)
+engine = create_engine(url)
+```
+
 ## Manual escaping
 
 If you build URLs manually and your token contains special characters, escape it:
@@ -76,8 +95,10 @@ escaped = quote_plus(os.environ["MOTHERDUCK_TOKEN"])
 engine = create_engine(f"duckdb:///md:my_db?motherduck_token={escaped}")
 ```
 
-See `motherduck.md` for MotherDuck-specific examples and options.
+See [motherduck.md](motherduck) for MotherDuck-specific examples and options.
 
 ## Pool defaults
 
-Pooling behavior is described in `configuration.md` (NullPool for file/MotherDuck, SingletonThreadPool for `:memory:`) and can be overridden with `poolclass`.
+Pooling behavior is described in [configuration.md](configuration)
+(NullPool for file/MotherDuck, SingletonThreadPool for `:memory:`) and can be
+overridden with `poolclass`.
