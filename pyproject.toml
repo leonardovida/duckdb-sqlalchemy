@@ -1,6 +1,6 @@
 [project]
 name = "duckdb-sqlalchemy"
-version = "1.4.4.2"
+version = "1.4.4.3"
 description = "DuckDB SQLAlchemy dialect for DuckDB and MotherDuck"
 authors = [
     {name = "Leonardo Vida", email = "lleonardovida@gmail.com"},
