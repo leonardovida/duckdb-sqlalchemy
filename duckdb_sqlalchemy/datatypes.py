@@ -205,9 +205,9 @@ class Map(TypeEngine):
             return lambda value: value
         else:
 
-            def _convert(value: Any) -> Optional[Dict[Any, Any]]:
+            def _convert(value: Any) -> Dict[Any, Any]:
                 if value is None:
-                    return None
+                    return {}
                 return dict(zip(value["key"], value["value"]))
 
             return _convert
