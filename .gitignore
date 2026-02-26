@@ -237,3 +237,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local Codex sandbox rules (machine-specific)
+.codex/rules/
