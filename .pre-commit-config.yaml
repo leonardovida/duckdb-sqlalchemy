@@ -22,7 +22,7 @@ repos:
         entry: ty check --ignore unresolved-import duckdb_sqlalchemy/
         language: python
         additional_dependencies:
-          - "ty"
+          - "ty==0.0.5"
         pass_filenames: false
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
