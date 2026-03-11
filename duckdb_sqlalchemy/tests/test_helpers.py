@@ -20,6 +20,21 @@ def test_url_helper_round_trip() -> None:
     assert rendered.startswith("duckdb:///")
 
 
+def test_url_helper_coerces_iterables_and_drops_none() -> None:
+    url = URL(
+        database=":memory:",
+        extension=["httpfs", "parquet"],
+        read_only=False,
+        token=None,
+    )
+    rendered = url.render_as_string(hide_password=False)
+    _, query = rendered.split("?", 1)
+    assert parse_qs(query) == {
+        "extension": ["httpfs", "parquet"],
+        "read_only": ["false"],
+    }
+
+
 def test_read_parquet_helper() -> None:
     if Version(sqlalchemy.__version__) < Version("1.4.0"):
         with raises(NotImplementedError):

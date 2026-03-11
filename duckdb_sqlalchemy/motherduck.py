@@ -21,6 +21,8 @@ from sqlalchemy.engine import URL as SAURL
 from sqlalchemy.engine.url import make_url as sa_make_url
 from sqlalchemy.pool import Pool, QueuePool
 
+from ._query import coerce_query_mapping
+
 MOTHERDUCK_PATH_QUERY_KEYS = {
     "user",
     "session_hint",
@@ -78,28 +80,6 @@ def append_query_to_database(
     return f"{database}{separator}{query_string}"
 
 
-def _stringify_query_value(value: Any) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)
-
-
-def _coerce_query_value(value: Any) -> Any:
-    if value is None:
-        return None
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-        return tuple(_stringify_query_value(v) for v in value)
-    return _stringify_query_value(value)
-
-
-def _coerce_query_mapping(mapping: Mapping[str, Any]) -> Dict[str, Any]:
-    return {
-        key: value
-        for key, value in ((k, _coerce_query_value(v)) for k, v in mapping.items())
-        if value is not None
-    }
-
-
 def MotherDuckURL(
     *,
     database: str,
@@ -121,8 +101,8 @@ def MotherDuckURL(
         else:
             config_params[key] = value
 
-    path_params = _normalize_path_query_aliases(_coerce_query_mapping(path_params))
-    config_params = _coerce_query_mapping(config_params)
+    path_params = _normalize_path_query_aliases(coerce_query_mapping(path_params))
+    config_params = coerce_query_mapping(config_params)
 
     database_with_query = append_query_to_database(database, path_params)
     return SAURL.create("duckdb", database=database_with_query, query=config_params)
