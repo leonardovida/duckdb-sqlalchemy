@@ -678,6 +678,25 @@ def test_motherduck_helpers() -> None:
     assert normalized.database == "md:db"
 
 
+def test_motherduck_url_coerces_path_and_query_values() -> None:
+    url = md.MotherDuckURL(
+        database="md:db",
+        query={"saas_mode": False, "token": None},
+        path_query={
+            "session_hint": "team",
+            "attach_mode": ("single", "workspace"),
+            "cache_buster": None,
+        },
+    )
+    database, query = url.database.split("?", 1)
+    assert database == "md:db"
+    assert parse_qs(query) == {
+        "session_hint": ["team"],
+        "attach_mode": ["single", "workspace"],
+    }
+    assert url.query == {"saas_mode": "false"}
+
+
 def test_merge_and_copy_connect_args() -> None:
     base = {"config": {"threads": 2}, "url_config": {"memory_limit": "1GB"}}
     extra = {"config": {"threads": 4}, "url_config": {"s3_region": "us-east-1"}}

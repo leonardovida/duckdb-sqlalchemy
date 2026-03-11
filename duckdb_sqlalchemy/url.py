@@ -1,6 +1,8 @@
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional
 
 from sqlalchemy.engine import URL as SAURL
+
+from ._query import coerce_query_mapping
 
 __all__ = ["URL", "make_url"]
 
@@ -17,35 +19,10 @@ def URL(
     All keyword arguments are treated as DuckDB config options (URL query params).
     """
 
-    def _stringify(value: Any) -> str:
-        if isinstance(value, bool):
-            return "true" if value else "false"
-        return str(value)
-
-    def _coerce(value: Any) -> Any:
-        if value is None:
-            return None
-        if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-            return tuple(_stringify(v) for v in value)
-        return _stringify(value)
-
     query_dict: dict[str, str | tuple[str, ...]] = {}
-    if query:
-        query_dict.update(
-            {
-                k: v
-                for k, v in ((k, _coerce(v)) for k, v in query.items())
-                if v is not None
-            }
-        )
-    if kwargs:
-        query_dict.update(
-            {
-                k: v
-                for k, v in ((k, _coerce(v)) for k, v in kwargs.items())
-                if v is not None
-            }
-        )
+    for mapping in (query, kwargs):
+        if mapping:
+            query_dict.update(coerce_query_mapping(mapping))
 
     return SAURL.create("duckdb", database=database, query=query_dict)
 
