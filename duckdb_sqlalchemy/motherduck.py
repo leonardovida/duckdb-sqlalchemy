@@ -4,6 +4,7 @@ import hashlib
 from itertools import cycle
 from typing import (
     Any,
+    Collection,
     Dict,
     Mapping,
     MutableMapping,
@@ -47,24 +48,31 @@ def _normalize_path_query_aliases(path_query: Dict[str, Any]) -> Dict[str, Any]:
     return path_query
 
 
-def split_url_query(query: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def _partition_query(
+    query: Mapping[str, Any], *, ignored_keys: Collection[str] = ()
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     path_query: Dict[str, Any] = {}
-    url_config: Dict[str, Any] = {}
+    remaining: Dict[str, Any] = {}
+    ignored = set(ignored_keys)
     for key, value in query.items():
-        if key in DIALECT_QUERY_KEYS:
+        if key in ignored:
             continue
         if key in MOTHERDUCK_PATH_QUERY_KEYS:
             path_query[key] = value
         else:
-            url_config[key] = value
+            remaining[key] = value
+    return path_query, remaining
+
+
+def split_url_query(query: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    path_query, url_config = _partition_query(query, ignored_keys=DIALECT_QUERY_KEYS)
     return _normalize_path_query_aliases(path_query), url_config
 
 
 def extract_path_query_from_config(config: Dict[str, Any]) -> Dict[str, Any]:
-    path_query: Dict[str, Any] = {}
-    for key in list(config):
-        if key in MOTHERDUCK_PATH_QUERY_KEYS:
-            path_query[key] = config.pop(key)
+    path_query, _ = _partition_query(config)
+    for key in path_query:
+        config.pop(key, None)
     return _normalize_path_query_aliases(path_query)
 
 
