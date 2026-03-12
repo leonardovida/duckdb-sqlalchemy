@@ -31,7 +31,7 @@ from duckdb_sqlalchemy import (
 from duckdb_sqlalchemy import datatypes as dt
 from duckdb_sqlalchemy import motherduck as md
 from duckdb_sqlalchemy.bulk import copy_from_csv
-from duckdb_sqlalchemy.config import TYPES, apply_config, get_core_config
+from duckdb_sqlalchemy.config import TYPES, ConfigValue, apply_config, get_core_config
 
 
 def _cursor(conn: object) -> CursorWrapper:
@@ -647,7 +647,7 @@ def test_apply_config_handles_none_path_decimal() -> None:
     apply_config(
         dialect,
         conn,
-        cast(dict[str, str | int | bool | float | None], ext),
+        cast(dict[str, ConfigValue], ext),
     )
 
     string_processor = String().literal_processor(dialect=dialect)
@@ -657,6 +657,34 @@ def test_apply_config_handles_none_path_decimal() -> None:
         f"SET ratio = {string_processor(str(decimal.Decimal('1.5')))}",
     ]
     assert conn.executed == expected
+
+
+def test_apply_config_stringifies_unknown_values() -> None:
+    dialect = Dialect()
+
+    class DummyConn:
+        def __init__(self) -> None:
+            self.executed = []
+
+        def execute(self, statement: str) -> None:
+            self.executed.append(statement)
+
+    class UnknownValue:
+        def __str__(self) -> str:
+            return "custom-value"
+
+    conn = DummyConn()
+    apply_config(
+        dialect,
+        conn,
+        cast(
+            dict[str, ConfigValue],
+            {"custom_option": UnknownValue()},
+        ),
+    )
+
+    string_processor = String().literal_processor(dialect=dialect)
+    assert conn.executed == [f"SET custom_option = {string_processor('custom-value')}"]
 
 
 def test_motherduck_helpers() -> None:

@@ -17,6 +17,8 @@ TYPES: Dict[Type, TypeEngine] = {
     str: String(),
 }
 
+ConfigValue = Union[str, int, bool, float, os.PathLike[Any], Decimal, None]
+
 
 @lru_cache()
 def get_core_config() -> Set[str]:
@@ -40,34 +42,42 @@ def get_core_config() -> Set[str]:
 def apply_config(
     dialect: Dialect,
     conn: Any,
-    ext: Dict[str, Union[str, int, bool, float, None]],
+    ext: Dict[str, ConfigValue],
 ) -> None:
-    # TODO: does sqlalchemy have something that could do this for us?
-    processors = [
-        (typ, type_engine.literal_processor(dialect=dialect))
-        for typ, type_engine in TYPES.items()
-    ]
+    processors = _build_literal_processors(dialect)
     string_processor = String().literal_processor(dialect=dialect)
-
     for k, v in ext.items():
         key = validate_identifier(k, kind="config key")
-        if v is None:
-            conn.execute(f"SET {key} = NULL")
-            continue
-        if isinstance(v, os.PathLike):
-            v = os.fspath(v)
-            process = string_processor
-        elif isinstance(v, Decimal):
-            v = str(v)
-            process = string_processor
-        else:
-            process = None
-            for typ, processor in processors:
-                if isinstance(v, typ):
-                    process = processor
-                    break
-            if process is None:
-                v = str(v)
-                process = string_processor
-        assert process, f"Not able to configure {k} with {v}"
-        conn.execute(f"SET {key} = {process(v)}")
+        value_sql = _render_config_value(v, processors, string_processor)
+        conn.execute(f"SET {key} = {value_sql}")
+
+
+def _build_literal_processors(dialect: Dialect) -> Dict[type, Any]:
+    # TODO: does sqlalchemy have something that could do this for us?
+    return {
+        typ: type_engine.literal_processor(dialect=dialect)
+        for typ, type_engine in TYPES.items()
+    }
+
+
+def _render_config_value(
+    value: ConfigValue,
+    processors: Dict[type, Any],
+    string_processor: Any,
+) -> str:
+    if value is None:
+        return "NULL"
+
+    if isinstance(value, os.PathLike):
+        return string_processor(os.fspath(value))
+    if isinstance(value, Decimal):
+        return string_processor(str(value))
+
+    process = None
+    for typ, processor in processors.items():
+        if isinstance(value, typ):
+            process = processor
+            break
+    if process is None:
+        return string_processor(str(value))
+    return process(value)
