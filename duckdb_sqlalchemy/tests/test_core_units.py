@@ -677,7 +677,6 @@ def test_motherduck_helpers() -> None:
     normalized = md._normalize_path_item("md:db")
     assert normalized.database == "md:db"
 
-
 def test_motherduck_url_coerces_path_and_query_values() -> None:
     url = md.MotherDuckURL(
         database="md:db",
@@ -695,6 +694,37 @@ def test_motherduck_url_coerces_path_and_query_values() -> None:
         "attach_mode": ["single", "workspace"],
     }
     assert url.query == {"saas_mode": "false"}
+
+
+def test_split_url_query_partitions_and_ignores_dialect_keys() -> None:
+    query = {
+        "user": "alice",
+        "motherduck_dbinstance_inactivity_ttl": "15m",
+        "memory_limit": "1GB",
+        "duckdb_sqlalchemy_pool": "queue",
+    }
+
+    path_query, url_config = md.split_url_query(query)
+
+    assert path_query == {"user": "alice", "dbinstance_inactivity_ttl": "15m"}
+    assert url_config == {"memory_limit": "1GB"}
+    assert query["duckdb_sqlalchemy_pool"] == "queue"
+
+
+def test_extract_path_query_from_config_mutates_and_normalizes_aliases() -> None:
+    config = {
+        "session_hint": "team-a",
+        "motherduck_dbinstance_inactivity_ttl": "10m",
+        "threads": 4,
+    }
+
+    path_query = md.extract_path_query_from_config(config)
+
+    assert path_query == {
+        "session_hint": "team-a",
+        "dbinstance_inactivity_ttl": "10m",
+    }
+    assert config == {"threads": 4}
 
 
 def test_merge_and_copy_connect_args() -> None:
