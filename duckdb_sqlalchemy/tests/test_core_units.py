@@ -677,6 +677,7 @@ def test_motherduck_helpers() -> None:
     normalized = md._normalize_path_item("md:db")
     assert normalized.database == "md:db"
 
+
 def test_motherduck_url_coerces_path_and_query_values() -> None:
     url = md.MotherDuckURL(
         database="md:db",

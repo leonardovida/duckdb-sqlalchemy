@@ -263,6 +263,7 @@ ISCHEMA_NAMES = {
     "timestamp_s": sqltypes.TIMESTAMP,
     "timestamp_ms": sqltypes.TIMESTAMP,
     "timestamp_ns": sqltypes.TIMESTAMP,
+    "time_ns": sqltypes.TIME,
     "enum": sqltypes.Enum,
     "bool": sqltypes.BOOLEAN,
     "varchar": String,
