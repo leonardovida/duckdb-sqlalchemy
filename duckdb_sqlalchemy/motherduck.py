@@ -35,6 +35,8 @@ MOTHERDUCK_PATH_QUERY_KEYS = {
     "cache_buster",
 }
 
+MOTHERDUCK_CONFIG_KEYS = MOTHERDUCK_PATH_QUERY_KEYS | {"motherduck_token"}
+
 DIALECT_QUERY_KEYS = {"duckdb_sqlalchemy_pool", "pool"}
 
 
