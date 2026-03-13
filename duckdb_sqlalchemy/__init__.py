@@ -46,6 +46,7 @@ from .config import apply_config, get_core_config
 from .datatypes import ISCHEMA_NAMES, register_extension_types
 from .motherduck import (
     DIALECT_QUERY_KEYS,
+    MOTHERDUCK_CONFIG_KEYS,
     MotherDuckURL,
     append_query_to_database,
     create_engine_from_paths,
@@ -393,16 +394,7 @@ def _looks_like_motherduck(database: Optional[str], config: Dict[str, Any]) -> b
         database.startswith("md:") or database.startswith("motherduck:")
     ):
         return True
-    motherduck_keys = {
-        "motherduck_token",
-        "attach_mode",
-        "saas_mode",
-        "session_hint",
-        "access_mode",
-        "dbinstance_inactivity_ttl",
-        "motherduck_dbinstance_inactivity_ttl",
-    }
-    return any(k in config for k in motherduck_keys)
+    return any(k in config for k in MOTHERDUCK_CONFIG_KEYS)
 
 
 DISCONNECT_ERROR_PATTERNS = (
