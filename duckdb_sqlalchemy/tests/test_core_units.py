@@ -725,6 +725,27 @@ def test_motherduck_url_coerces_path_and_query_values() -> None:
     assert url.query == {"saas_mode": "false"}
 
 
+def test_motherduck_url_merges_and_overrides_across_inputs() -> None:
+    url = md.MotherDuckURL(
+        database="md:db",
+        query={"memory_limit": "256MB", "saas_mode": True, "drop": None},
+        path_query={"session_hint": "old-team", "user": "alice"},
+        session_hint="new-team",
+        attach_mode=("single", "workspace"),
+        memory_limit="1GB",
+        cache_buster=None,
+    )
+
+    database, query = url.database.split("?", 1)
+    assert database == "md:db"
+    assert parse_qs(query) == {
+        "session_hint": ["new-team"],
+        "user": ["alice"],
+        "attach_mode": ["single", "workspace"],
+    }
+    assert url.query == {"memory_limit": "1GB", "saas_mode": "true"}
+
+
 def test_split_url_query_partitions_and_ignores_dialect_keys() -> None:
     query = {
         "user": "alice",
