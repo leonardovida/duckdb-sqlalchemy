@@ -22,7 +22,7 @@ from sqlalchemy.engine import URL as SAURL
 from sqlalchemy.engine.url import make_url as sa_make_url
 from sqlalchemy.pool import Pool, QueuePool
 
-from ._query import coerce_query_mapping
+from ._query import merge_query_mappings
 
 MOTHERDUCK_PATH_QUERY_KEYS = {
     "user",
@@ -102,17 +102,11 @@ def MotherDuckURL(
     live in the database string.
     """
 
-    path_params: Dict[str, Any] = dict(path_query or {})
-    config_params: Dict[str, Any] = dict(query or {})
-
-    for key, value in kwargs.items():
-        if key in MOTHERDUCK_PATH_QUERY_KEYS:
-            path_params[key] = value
-        else:
-            config_params[key] = value
-
-    path_params = _normalize_path_query_aliases(coerce_query_mapping(path_params))
-    config_params = coerce_query_mapping(config_params)
+    path_kwargs, config_kwargs = _partition_query(kwargs)
+    path_params = _normalize_path_query_aliases(
+        merge_query_mappings(path_query, path_kwargs)
+    )
+    config_params = merge_query_mappings(query, config_kwargs)
 
     database_with_query = append_query_to_database(database, path_params)
     return SAURL.create("duckdb", database=database_with_query, query=config_params)

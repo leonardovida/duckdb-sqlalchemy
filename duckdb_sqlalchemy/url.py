@@ -1,8 +1,8 @@
-from typing import Any, Mapping, Optional, Tuple, Union
+from typing import Any, Mapping, Optional
 
 from sqlalchemy.engine import URL as SAURL
 
-from ._query import coerce_query_mapping
+from ._query import merge_query_mappings
 
 __all__ = ["URL", "make_url"]
 
@@ -19,10 +19,7 @@ def URL(
     All keyword arguments are treated as DuckDB config options (URL query params).
     """
 
-    query_dict: dict[str, Union[str, Tuple[str, ...]]] = {}
-    for mapping in (query, kwargs):
-        if mapping:
-            query_dict.update(coerce_query_mapping(mapping))
+    query_dict = merge_query_mappings(query, kwargs)
 
     return SAURL.create("duckdb", database=database, query=query_dict)
 
