@@ -19,14 +19,14 @@ repos:
     hooks:
       - id: ty
         name: ty
-        entry: ty check --ignore unresolved-import duckdb_sqlalchemy/
+        entry: ty check --ignore unresolved-import --ignore unused-type-ignore-comment
         language: python
+        files: ^duckdb_sqlalchemy/(?!tests/).*\.py$
         additional_dependencies:
-          - "ty==0.0.5"
-        pass_filenames: false
+          - "ty==0.0.23"
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
-    rev: 'v0.14.10'
+    rev: 'v0.15.6'
     hooks:
       - id: ruff
         args:

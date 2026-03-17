@@ -1,6 +1,6 @@
 [project]
 name = "duckdb-sqlalchemy"
-version = "1.4.4.3"
+version = "1.4.4.4"
 description = "DuckDB SQLAlchemy dialect for DuckDB and MotherDuck"
 authors = [
     {name = "Leonardo Vida", email = "lleonardovida@gmail.com"},
@@ -59,7 +59,7 @@ dev = [
 ]
 devtools = [
     "pdbpp>=0.11.0,<0.12.0",
-    "pre-commit>=4.0.0; python_version >= '3.9'",
+    "pre-commit>=4.5.1; python_version >= '3.9'",
 ]
 
 [project.entry-points."sqlalchemy.dialects"]
