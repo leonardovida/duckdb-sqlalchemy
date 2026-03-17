@@ -38,9 +38,10 @@ def group(title: str) -> Generator[None, None, None]:
         "1.4.1",
         "1.4.2",
         "1.4.4",
+        "1.5.0",
     ],
 )
-@nox.parametrize("sqlalchemy", ["1.3", "1.4", "2.0.45"])
+@nox.parametrize("sqlalchemy", ["1.3", "1.4", "2.0.48"])
 def tests(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
     tests_core(session, duckdb, sqlalchemy)
 

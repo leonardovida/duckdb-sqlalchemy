@@ -196,9 +196,12 @@ class Map(TypeEngine):
         self.value_type = type_api.to_instance(value_type)
 
     def bind_processor(self, dialect: Dialect) -> Any:
-        return lambda value: (
-            {"key": list(value), "value": list(value.values())} if value else None
-        )
+        def _bind(value: Any) -> Any:
+            if value is None:
+                return None
+            return {"key": list(value), "value": list(value.values())}
+
+        return _bind
 
     def result_processor(self, dialect: Dialect, coltype: object) -> Any:
         if IS_GT_1:
@@ -244,7 +247,7 @@ class Union(TypeEngine):
         return (self.__class__, ("fields", self._fields_cache_key))
 
 
-ISCHEMA_NAMES = {
+ISCHEMA_NAMES: Dict[str, Any] = {
     "bignum": sqltypes.Numeric,
     "hugeint": HugeInteger,
     "uhugeint": UHugeInteger,

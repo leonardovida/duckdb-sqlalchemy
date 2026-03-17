@@ -6,6 +6,17 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.4.4.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.3...v1.4.4.4) (2026-03-17)
+
+### Bug Fixes
+
+* preserve empty `MAP` values as empty dicts instead of coercing them to `NULL`
+
+### Tooling
+
+* update local lint/type-check tool pins and CI matrix versions
+* add repo architecture and execution-plan guidance docs
+
 ## [1.4.4.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.2...v1.4.4.3) (2026-02-21)
 
 ### Bug Fixes
