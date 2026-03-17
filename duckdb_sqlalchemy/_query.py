@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 
 def stringify_query_value(value: Any) -> str:
@@ -23,3 +23,11 @@ def coerce_query_mapping(mapping: Mapping[str, Any]) -> Dict[str, Any]:
         for key, value in ((k, coerce_query_value(v)) for k, v in mapping.items())
         if value is not None
     }
+
+
+def merge_query_mappings(*mappings: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {}
+    for mapping in mappings:
+        if mapping:
+            merged.update(coerce_query_mapping(mapping))
+    return merged
