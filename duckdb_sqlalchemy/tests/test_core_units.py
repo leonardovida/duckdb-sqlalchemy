@@ -149,6 +149,7 @@ def test_motherduck_url_builder_moves_path_params() -> None:
         query={"memory_limit": "1GB"},
     )
 
+    assert url.database is not None
     database, query = url.database.split("?", 1)
     assert database == "md:my_db"
     assert parse_qs(query) == {
@@ -182,9 +183,11 @@ def test_apply_config_uses_literal_processors() -> None:
     apply_config(dialect, conn, ext)
 
     processors = {k: v.literal_processor(dialect=dialect) for k, v in TYPES.items()}
-    expected = [
-        f"SET {key} = {processors[type(value)](value)}" for key, value in ext.items()
-    ]
+    expected = []
+    for key, value in ext.items():
+        processor = processors[type(value)]
+        assert processor is not None
+        expected.append(f"SET {key} = {processor(value)}")
 
     assert conn.executed == expected
 
@@ -693,6 +696,7 @@ def test_motherduck_helpers() -> None:
         query={"memory_limit": "1GB"},
         path_query={"user": "alice", "session_hint": "team"},
     )
+    assert url.database is not None
     assert url.database.startswith("md:db?")
     assert url.query == {"memory_limit": "1GB"}
 
@@ -716,6 +720,7 @@ def test_motherduck_url_coerces_path_and_query_values() -> None:
             "cache_buster": None,
         },
     )
+    assert url.database is not None
     database, query = url.database.split("?", 1)
     assert database == "md:db"
     assert parse_qs(query) == {
@@ -736,6 +741,7 @@ def test_motherduck_url_merges_and_overrides_across_inputs() -> None:
         cache_buster=None,
     )
 
+    assert url.database is not None
     database, query = url.database.split("?", 1)
     assert database == "md:db"
     assert parse_qs(query) == {

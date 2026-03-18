@@ -78,9 +78,10 @@ supports_user_agent: bool = _capabilities.supports_user_agent
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection
-
-    ReflectedCheckConstraint = Dict[str, Any]
-    ReflectedIndex = Dict[str, Any]
+    from sqlalchemy.engine.interfaces import (
+        ReflectedCheckConstraint,
+        ReflectedIndex,
+    )
 
     from .capabilities import DuckDBCapabilities
 
