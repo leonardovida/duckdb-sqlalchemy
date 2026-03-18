@@ -178,7 +178,11 @@ def test_apply_config_uses_literal_processors() -> None:
             self.executed.append(statement)
 
     conn = DummyConn()
-    ext = {"memory_limit": "1GB", "threads": 4, "enable_profiling": True}
+    ext: dict[str, ConfigValue] = {
+        "memory_limit": "1GB",
+        "threads": 4,
+        "enable_profiling": True,
+    }
 
     apply_config(dialect, conn, ext)
 
@@ -458,6 +462,7 @@ def test_map_processors(monkeypatch: pytest.MonkeyPatch) -> None:
     bind = map_type.bind_processor(Dialect())
 
     assert bind({"a": 1, "b": 2}) == {"key": ["a", "b"], "value": [1, 2]}
+    assert bind({}) == {"key": [], "value": []}
     assert bind(None) is None
 
     result = map_type.result_processor(Dialect(), None)({"key": ["a"], "value": [1]})

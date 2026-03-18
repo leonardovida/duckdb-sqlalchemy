@@ -67,7 +67,7 @@ else:
         _pg_base, "PGExecutionContext", DefaultExecutionContext
     )
 
-__version__ = "1.4.4.3"
+__version__ = "1.4.4.4"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -78,7 +78,7 @@ supports_user_agent: bool = _capabilities.supports_user_agent
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection
-    from sqlalchemy.engine.interfaces import (
+    from sqlalchemy.engine.interfaces import (  # noqa: F401
         ReflectedCheckConstraint,
         ReflectedIndex,
     )
@@ -129,7 +129,7 @@ class DBAPI:
 class DuckDBInspector(PGInspector):
     def get_check_constraints(
         self, table_name: str, schema: Optional[str] = None, **kw: Any
-    ) -> List["ReflectedCheckConstraint"]:
+    ) -> Any:
         try:
             return super().get_check_constraints(table_name, schema, **kw)
         except Exception as e:
@@ -930,7 +930,7 @@ class Dialect(PGDialect_psycopg2):
         table_name: str,
         schema: Optional[str] = None,
         **kw: Any,
-    ) -> List["ReflectedIndex"]:
+    ) -> List["ReflectedIndex"]:  # type: ignore[override]
         index_warning()
         return []
 
@@ -992,7 +992,7 @@ class Dialect(PGDialect_psycopg2):
             return False
 
         column_names = [
-            getattr(column_key, "key", column_key) for column_key in column_keys
+            str(getattr(column_key, "key", column_key)) for column_key in column_keys
         ]
 
         data = None
@@ -1121,7 +1121,9 @@ class Dialect(PGDialect_psycopg2):
 
         self._execute_with_retry(cursor, statement, parameters, context, executor)
 
-    def do_execute_no_params(self, cursor: Any, statement: str, *args: Any) -> None:
+    def do_execute_no_params(  # type: ignore[override]
+        self, cursor: Any, statement: str, *args: Any
+    ) -> None:
         parameters: Any = None
         context: Optional[Any] = None
         if len(args) == 1:

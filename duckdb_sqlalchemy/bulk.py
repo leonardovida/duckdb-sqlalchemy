@@ -1,7 +1,7 @@
 import csv
 import tempfile
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple, Union, cast
 
 from ._validation import (
     validate_dotted_identifier,
@@ -153,17 +153,6 @@ def copy_from_rows(
     if first is None:
         return None
 
-    if isinstance(first, Mapping):
-        if columns is None:
-            columns = list(first.keys())
-
-        def row_to_seq(row: Mapping[str, Any]) -> Sequence[Any]:
-            return [row.get(col) for col in columns or []]
-    else:
-
-        def row_to_seq(row: Sequence[Any]) -> Sequence[Any]:
-            return row
-
     def open_writer() -> Tuple[Any, Any, int]:
         tmp = tempfile.NamedTemporaryFile("w", newline="", suffix=".csv", delete=False)
         writer = csv.writer(tmp)
@@ -191,12 +180,37 @@ def copy_from_rows(
 
     copy_options = {"header": include_header, **copy_options}
 
+    if isinstance(first, Mapping):
+        if columns is None:
+            columns = [str(col) for col in cast(Mapping[str, Any], first).keys()]
+
+        def row_to_seq(row: Mapping[str, Any]) -> Sequence[Any]:
+            return [row.get(col) for col in columns or []]
+
+        tmp, writer, count = open_writer()
+        writer.writerow(row_to_seq(cast(Mapping[str, Any], first)))
+        count += 1
+
+        for row in iterator:
+            writer.writerow(row_to_seq(cast(Mapping[str, Any], row)))
+            count += 1
+            if chunk_size and count >= chunk_size:
+                flush_chunk(tmp)
+                tmp, writer, count = open_writer()
+
+        if count:
+            flush_chunk(tmp)
+        return None
+
+    def row_to_seq(row: Sequence[Any]) -> Sequence[Any]:
+        return row
+
     tmp, writer, count = open_writer()
-    writer.writerow(row_to_seq(first))
+    writer.writerow(row_to_seq(cast(Sequence[Any], first)))
     count += 1
 
     for row in iterator:
-        writer.writerow(row_to_seq(row))
+        writer.writerow(row_to_seq(cast(Sequence[Any], row)))
         count += 1
         if chunk_size and count >= chunk_size:
             flush_chunk(tmp)
