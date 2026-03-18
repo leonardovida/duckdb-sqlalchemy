@@ -7,7 +7,6 @@ from typing import (
     Collection,
     Dict,
     Mapping,
-    MutableMapping,
     Optional,
     Sequence,
     Tuple,
@@ -38,6 +37,7 @@ MOTHERDUCK_PATH_QUERY_KEYS = {
 MOTHERDUCK_CONFIG_KEYS = MOTHERDUCK_PATH_QUERY_KEYS | {"motherduck_token"}
 
 DIALECT_QUERY_KEYS = {"duckdb_sqlalchemy_pool", "pool"}
+CONNECT_ARG_MAPPING_KEYS = ("config", "url_config")
 
 
 def _normalize_path_query_aliases(path_query: Dict[str, Any]) -> Dict[str, Any]:
@@ -165,29 +165,24 @@ def _normalize_path_item(path: Union[str, SAURL]) -> SAURL:
 
 
 def _merge_connect_args(
-    base: MutableMapping[str, Any], extra: Mapping[str, Any]
+    base: Mapping[str, Any], extra: Mapping[str, Any]
 ) -> Dict[str, Any]:
-    merged = dict(base)
+    merged = _copy_connect_params(base)
     if not extra:
         return merged
-    extra = dict(extra)
-    if "config" in extra:
-        merged["config"] = {**merged.get("config", {}), **extra.pop("config")}
-    if "url_config" in extra:
-        merged["url_config"] = {
-            **merged.get("url_config", {}),
-            **extra.pop("url_config"),
-        }
-    merged.update(extra)
+    remaining = dict(extra)
+    for key in CONNECT_ARG_MAPPING_KEYS:
+        if key in remaining:
+            merged[key] = {**merged.get(key, {}), **remaining.pop(key)}
+    merged.update(remaining)
     return merged
 
 
 def _copy_connect_params(params: Mapping[str, Any]) -> Dict[str, Any]:
     copied = dict(params)
-    if "config" in copied:
-        copied["config"] = dict(copied["config"])
-    if "url_config" in copied:
-        copied["url_config"] = dict(copied["url_config"])
+    for key in CONNECT_ARG_MAPPING_KEYS:
+        if key in copied:
+            copied[key] = dict(copied[key])
     return copied
 
 

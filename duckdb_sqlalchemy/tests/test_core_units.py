@@ -789,6 +789,10 @@ def test_merge_and_copy_connect_args() -> None:
 
     assert merged["config"] == {"threads": 4}
     assert merged["url_config"] == {"memory_limit": "1GB", "s3_region": "us-east-1"}
+    assert base["config"] == {"threads": 2}
+    assert base["url_config"] == {"memory_limit": "1GB"}
+    assert merged["config"] is not base["config"]
+    assert merged["url_config"] is not base["url_config"]
 
     copied = md._copy_connect_params(merged)
     copied["config"]["threads"] = 1
