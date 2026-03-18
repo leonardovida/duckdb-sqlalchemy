@@ -59,7 +59,7 @@ dev = [
 ]
 devtools = [
     "pdbpp>=0.11.0,<0.12.0",
-    "pre-commit>=4.5.1; python_version >= '3.9'",
+    "pre-commit>=4.3.0,<4.4.0; python_version >= '3.9'",
 ]
 
 [project.entry-points."sqlalchemy.dialects"]
@@ -70,7 +70,7 @@ addopts = "--hypothesis-show-statistics --strict --strict-markers"
 xfail_strict = true
 
 [tool.ruff]
-target-version = "py38"
+target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]

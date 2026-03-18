@@ -9,6 +9,7 @@ on:
       - "noxfile.py"
       - "test.cfg"
       - ".github/workflows/lint.yml"
+  workflow_dispatch:
 
 jobs:
   pre-commit:
