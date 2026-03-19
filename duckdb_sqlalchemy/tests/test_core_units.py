@@ -757,6 +757,16 @@ def test_motherduck_url_merges_and_overrides_across_inputs() -> None:
     assert url.query == {"memory_limit": "1GB", "saas_mode": "true"}
 
 
+def test_motherduck_url_prefers_canonical_ttl_over_alias() -> None:
+    url = md.MotherDuckURL(
+        database="md:db",
+        path_query={"motherduck_dbinstance_inactivity_ttl": "10m"},
+        dbinstance_inactivity_ttl="15m",
+    )
+
+    assert url.database == "md:db?dbinstance_inactivity_ttl=15m"
+
+
 def test_split_url_query_partitions_and_ignores_dialect_keys() -> None:
     query = {
         "user": "alice",
