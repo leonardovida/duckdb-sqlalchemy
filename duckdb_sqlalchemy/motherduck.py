@@ -50,6 +50,12 @@ def _normalize_path_query_aliases(path_query: Dict[str, Any]) -> Dict[str, Any]:
     return path_query
 
 
+def _normalize_path_query_mapping(
+    *mappings: Optional[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    return _normalize_path_query_aliases(merge_query_mappings(*mappings))
+
+
 def _partition_query(
     query: Mapping[str, Any], *, ignored_keys: Collection[str] = ()
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -66,16 +72,22 @@ def _partition_query(
     return path_query, remaining
 
 
+def _split_path_query(
+    query: Mapping[str, Any], *, ignored_keys: Collection[str] = ()
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    path_query, remaining = _partition_query(query, ignored_keys=ignored_keys)
+    return _normalize_path_query_mapping(path_query), remaining
+
+
 def split_url_query(query: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    path_query, url_config = _partition_query(query, ignored_keys=DIALECT_QUERY_KEYS)
-    return _normalize_path_query_aliases(path_query), url_config
+    return _split_path_query(query, ignored_keys=DIALECT_QUERY_KEYS)
 
 
 def extract_path_query_from_config(config: Dict[str, Any]) -> Dict[str, Any]:
-    path_query, _ = _partition_query(config)
-    for key in path_query:
-        config.pop(key, None)
-    return _normalize_path_query_aliases(path_query)
+    path_query, remaining = _split_path_query(config)
+    config.clear()
+    config.update(remaining)
+    return path_query
 
 
 def append_query_to_database(
@@ -103,9 +115,7 @@ def MotherDuckURL(
     """
 
     path_kwargs, config_kwargs = _partition_query(kwargs)
-    path_params = _normalize_path_query_aliases(
-        merge_query_mappings(path_query, path_kwargs)
-    )
+    path_params = _normalize_path_query_mapping(path_query, path_kwargs)
     config_params = merge_query_mappings(query, config_kwargs)
 
     database_with_query = append_query_to_database(database, path_params)
