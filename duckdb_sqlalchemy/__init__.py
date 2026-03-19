@@ -306,9 +306,14 @@ class DuckDBArrowResult:
         cursor = getattr(self._result, "cursor", None)
         if cursor is None:
             cursor = getattr(self._result, "_cursor", None)
-        if cursor is None or not hasattr(cursor, "fetch_arrow_table"):
+        if cursor is None:
             raise NotImplementedError("Arrow results are not available on this cursor")
-        self._arrow = cursor.fetch_arrow_table()
+        fetch_arrow_table = getattr(cursor, "to_arrow_table", None)
+        if fetch_arrow_table is None:
+            fetch_arrow_table = getattr(cursor, "fetch_arrow_table", None)
+        if fetch_arrow_table is None:
+            raise NotImplementedError("Arrow results are not available on this cursor")
+        self._arrow = fetch_arrow_table()
         return self._arrow
 
     @property

@@ -3,6 +3,22 @@ from pyarrow import Table as ArrowTable
 from sqlalchemy import MetaData, Table, create_engine, text
 
 
+def _to_arrow_table(cursor):
+    if hasattr(cursor, "to_arrow_table"):
+        return cursor.to_arrow_table()
+    return cursor.fetch_arrow_table()
+
+
+def _to_arrow_reader(cursor, batch_size=None):
+    if hasattr(cursor, "to_arrow_reader"):
+        if batch_size is None:
+            return cursor.to_arrow_reader()
+        return cursor.to_arrow_reader(batch_size=batch_size)
+    if batch_size is None:
+        return cursor.fetch_record_batch()
+    return cursor.fetch_record_batch(rows_per_batch=batch_size)
+
+
 def test_fetch_arrow() -> None:
     engine = create_engine("duckdb:///:memory:")
     with engine.begin() as con:
@@ -24,7 +40,7 @@ def test_fetch_arrow() -> None:
 
     # arrow table
     with engine.begin() as con:
-        res = con.execute(stmt).cursor.fetch_arrow_table()
+        res = _to_arrow_table(con.execute(stmt).cursor)
         assert isinstance(res, ArrowTable)
         assert res == ArrowTable.from_pydict(
             {"label": ["xx", "yy", "zz"], "value": [-1.0, 2.5, 6.0]}
@@ -32,12 +48,12 @@ def test_fetch_arrow() -> None:
 
     # arrow batches
     with engine.begin() as con:
-        res = con.execute(stmt).cursor.fetch_record_batch()
+        res = _to_arrow_reader(con.execute(stmt).cursor)
         assert isinstance(res, RecordBatchReader)
         assert res.read_all() == ArrowTable.from_pydict(
             {"label": ["xx", "yy", "zz"], "value": [-1.0, 2.5, 6.0]}
         )
-        res = con.execute(stmt).cursor.fetch_record_batch(rows_per_batch=2)
+        res = _to_arrow_reader(con.execute(stmt).cursor, batch_size=2)
         assert res.read_next_batch() == RecordBatch.from_pydict(
             {"label": ["xx", "yy"], "value": [-1.0, 2.5]}
         )

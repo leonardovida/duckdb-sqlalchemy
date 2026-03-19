@@ -59,7 +59,7 @@ dev = [
 ]
 devtools = [
     "pdbpp>=0.11.0,<0.12.0",
-    "pre-commit>=4.3.0,<4.4.0; python_version >= '3.9'",
+    "pre-commit>=4.5.1,<4.6.0; python_version >= '3.10'",
 ]
 
 [project.entry-points."sqlalchemy.dialects"]
