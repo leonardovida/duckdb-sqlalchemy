@@ -999,13 +999,13 @@ class Dialect(PGDialect_psycopg2):
         column_names = [
             str(getattr(column_key, "key", column_key)) for column_key in column_keys
         ]
+        rows = parameters if isinstance(parameters, list) else list(parameters)
 
         data = None
-        if isinstance(parameters[0], dict):
+        if isinstance(rows[0], dict):
             try:
                 import pandas as pd  # type: ignore[import-not-found]
 
-                rows = parameters if isinstance(parameters, list) else list(parameters)
                 data = pd.DataFrame.from_records(rows, columns=column_names)
             except Exception:
                 data = None
@@ -1013,9 +1013,6 @@ class Dialect(PGDialect_psycopg2):
                 try:
                     import pyarrow as pa  # type: ignore[import-not-found]
 
-                    rows = (
-                        parameters if isinstance(parameters, list) else list(parameters)
-                    )
                     data = pa.Table.from_pylist(rows)
                     if column_names:
                         data = data.select(column_names)
@@ -1025,7 +1022,6 @@ class Dialect(PGDialect_psycopg2):
             try:
                 import pandas as pd  # type: ignore[import-not-found]
 
-                rows = parameters if isinstance(parameters, list) else list(parameters)
                 data = pd.DataFrame(rows, columns=cast(Any, column_names))
             except Exception:
                 data = None
@@ -1033,9 +1029,6 @@ class Dialect(PGDialect_psycopg2):
                 try:
                     import pyarrow as pa  # type: ignore[import-not-found]
 
-                    rows = (
-                        parameters if isinstance(parameters, list) else list(parameters)
-                    )
                     if rows:
                         cols = list(zip(*rows))
                     else:
