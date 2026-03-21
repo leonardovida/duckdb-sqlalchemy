@@ -48,6 +48,7 @@ from .motherduck import (
     DIALECT_QUERY_KEYS,
     MOTHERDUCK_CONFIG_KEYS,
     MotherDuckURL,
+    _normalize_config_aliases,
     append_query_to_database,
     create_engine_from_paths,
     create_motherduck_engine,
@@ -464,13 +465,7 @@ def _apply_motherduck_defaults(config: Dict[str, Any], database: Optional[str]) 
 
 
 def _normalize_motherduck_config(config: Dict[str, Any]) -> None:
-    if (
-        "dbinstance_inactivity_ttl" in config
-        and "motherduck_dbinstance_inactivity_ttl" not in config
-    ):
-        config["motherduck_dbinstance_inactivity_ttl"] = config[
-            "dbinstance_inactivity_ttl"
-        ]
+    _normalize_config_aliases(config)
 
 
 class DuckDBIdentifierPreparer(PGIdentifierPreparer):
