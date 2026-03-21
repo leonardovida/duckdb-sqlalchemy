@@ -607,6 +607,65 @@ def test_copy_from_rows_sequence_uses_explicit_columns_and_chunks() -> None:
     assert rows == [(1, "one"), (2, "two"), (3, "three")]
 
 
+def test_copy_from_rows_closes_rotated_tempfiles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = []
+    copied = []
+
+    class TrackingTempFile:
+        def __init__(self, path: Path) -> None:
+            self.name = str(path)
+            self._fh = path.open("w", newline="")
+            self.closed = False
+            created.append(self)
+
+        def write(self, data: str) -> int:
+            return self._fh.write(data)
+
+        def flush(self) -> None:
+            self._fh.flush()
+
+        def close(self) -> None:
+            if not self.closed:
+                self._fh.close()
+                self.closed = True
+
+    def fake_named_temporary_file(
+        mode: str,
+        newline: str,
+        suffix: str,
+        delete: bool,
+    ) -> TrackingTempFile:
+        path = tmp_path / f"chunk-{len(created)}{suffix}"
+        return TrackingTempFile(path)
+
+    def fake_copy_from_csv(connection: object, table: object, path: str, **kwargs):
+        copied.append(Path(path))
+        assert Path(path).exists()
+
+    monkeypatch.setattr(
+        duckdb_sqlalchemy.bulk.tempfile,
+        "NamedTemporaryFile",
+        fake_named_temporary_file,
+    )
+    monkeypatch.setattr(duckdb_sqlalchemy.bulk, "copy_from_csv", fake_copy_from_csv)
+
+    copy_from_rows(
+        object(),
+        "safe",
+        [(1,), (2,)],
+        columns=["id"],
+        chunk_size=1,
+    )
+
+    assert len(created) == 3
+    assert len(copied) == 2
+    assert all(temp.closed for temp in created)
+    assert all(not Path(temp.name).exists() for temp in created)
+
+
 def test_parse_register_params_dict_and_tuple() -> None:
     view_name, df = _parse_register_params({"view_name": "v", "df": "data"})
     assert view_name == "v"
