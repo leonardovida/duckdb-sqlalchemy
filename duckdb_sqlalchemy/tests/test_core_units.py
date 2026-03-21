@@ -30,7 +30,7 @@ from duckdb_sqlalchemy import (
 )
 from duckdb_sqlalchemy import datatypes as dt
 from duckdb_sqlalchemy import motherduck as md
-from duckdb_sqlalchemy.bulk import copy_from_csv
+from duckdb_sqlalchemy.bulk import copy_from_csv, copy_from_rows
 from duckdb_sqlalchemy.config import TYPES, ConfigValue, apply_config, get_core_config
 
 
@@ -568,6 +568,43 @@ def test_copy_from_csv_rejects_invalid_table_and_option_key(
     ).fetchone()
     assert found is not None
     assert found[0] == 0
+
+
+def test_copy_from_rows_mapping_infers_columns_and_chunks() -> None:
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE safe(i INTEGER, label VARCHAR)")
+
+    copy_from_rows(
+        conn,
+        "safe",
+        [
+            {"i": 1, "label": "one"},
+            {"i": 2, "label": "two"},
+            {"i": 3, "label": "three"},
+        ],
+        chunk_size=2,
+        include_header=True,
+    )
+
+    rows = conn.execute("SELECT i, label FROM safe ORDER BY i").fetchall()
+    assert rows == [(1, "one"), (2, "two"), (3, "three")]
+
+
+def test_copy_from_rows_sequence_uses_explicit_columns_and_chunks() -> None:
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE safe(i INTEGER, label VARCHAR)")
+
+    copy_from_rows(
+        conn,
+        "safe",
+        [(1, "one"), (2, "two"), (3, "three")],
+        columns=["i", "label"],
+        chunk_size=2,
+        include_header=True,
+    )
+
+    rows = conn.execute("SELECT i, label FROM safe ORDER BY i").fetchall()
+    assert rows == [(1, "one"), (2, "two"), (3, "three")]
 
 
 def test_parse_register_params_dict_and_tuple() -> None:

@@ -1,5 +1,6 @@
 import csv
 import tempfile
+from itertools import chain
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple, Union, cast
 
@@ -83,6 +84,54 @@ def _execute_sql(connection: Any, statement: str) -> Any:
     return connection.execute(statement)
 
 
+def _copy_rows_as_csv_chunks(
+    connection: Any,
+    table: TableLike,
+    rows: Iterable[Sequence[Any]],
+    *,
+    columns: Optional[Sequence[str]],
+    chunk_size: int,
+    include_header: bool,
+    copy_options: Mapping[str, Any],
+) -> None:
+    def open_writer() -> Tuple[Any, Any, int]:
+        tmp = tempfile.NamedTemporaryFile("w", newline="", suffix=".csv", delete=False)
+        writer = csv.writer(tmp)
+        if include_header and columns:
+            writer.writerow(columns)
+        return tmp, writer, 0
+
+    def flush_chunk(tmp: Any) -> None:
+        tmp.flush()
+        path = tmp.name
+        tmp.close()
+        try:
+            copy_from_csv(
+                connection,
+                table,
+                path,
+                columns=columns if columns else None,
+                **copy_options,
+            )
+        finally:
+            try:
+                Path(path).unlink()
+            except FileNotFoundError:
+                pass
+
+    tmp, writer, count = open_writer()
+
+    for row in rows:
+        writer.writerow(row)
+        count += 1
+        if chunk_size and count >= chunk_size:
+            flush_chunk(tmp)
+            tmp, writer, count = open_writer()
+
+    if count:
+        flush_chunk(tmp)
+
+
 def copy_from_parquet(
     connection: Any,
     table: TableLike,
@@ -153,31 +202,6 @@ def copy_from_rows(
     if first is None:
         return None
 
-    def open_writer() -> Tuple[Any, Any, int]:
-        tmp = tempfile.NamedTemporaryFile("w", newline="", suffix=".csv", delete=False)
-        writer = csv.writer(tmp)
-        if include_header and columns:
-            writer.writerow(columns)
-        return tmp, writer, 0
-
-    def flush_chunk(tmp: Any) -> None:
-        tmp.flush()
-        path = tmp.name
-        tmp.close()
-        try:
-            copy_from_csv(
-                connection,
-                table,
-                path,
-                columns=columns if columns else None,
-                **copy_options,
-            )
-        finally:
-            try:
-                Path(path).unlink()
-            except FileNotFoundError:
-                pass
-
     copy_options = {"header": include_header, **copy_options}
 
     if isinstance(first, Mapping):
@@ -187,34 +211,20 @@ def copy_from_rows(
         def row_to_seq(row: Mapping[str, Any]) -> Sequence[Any]:
             return [row.get(col) for col in columns or []]
 
-        tmp, writer, count = open_writer()
-        writer.writerow(row_to_seq(cast(Mapping[str, Any], first)))
-        count += 1
+        first_row = row_to_seq(cast(Mapping[str, Any], first))
+        remaining_rows = (row_to_seq(cast(Mapping[str, Any], row)) for row in iterator)
+    else:
+        first_row = cast(Sequence[Any], first)
+        remaining_rows = (cast(Sequence[Any], row) for row in iterator)
 
-        for row in iterator:
-            writer.writerow(row_to_seq(cast(Mapping[str, Any], row)))
-            count += 1
-            if chunk_size and count >= chunk_size:
-                flush_chunk(tmp)
-                tmp, writer, count = open_writer()
-
-        if count:
-            flush_chunk(tmp)
-        return None
-
-    def row_to_seq(row: Sequence[Any]) -> Sequence[Any]:
-        return row
-
-    tmp, writer, count = open_writer()
-    writer.writerow(row_to_seq(cast(Sequence[Any], first)))
-    count += 1
-
-    for row in iterator:
-        writer.writerow(row_to_seq(cast(Sequence[Any], row)))
-        count += 1
-        if chunk_size and count >= chunk_size:
-            flush_chunk(tmp)
-            tmp, writer, count = open_writer()
-
-    if count:
-        flush_chunk(tmp)
+    chunked_rows = chain((first_row,), remaining_rows)
+    _copy_rows_as_csv_chunks(
+        connection,
+        table,
+        chunked_rows,
+        columns=columns,
+        chunk_size=chunk_size,
+        include_header=include_header,
+        copy_options=copy_options,
+    )
+    return None
