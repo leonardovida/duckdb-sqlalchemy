@@ -6,6 +6,12 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.4.4.6](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.5...v1.4.4.6) (2026-03-22)
+
+### Bug Fixes
+
+* reflect DuckDB `DOUBLE`/`FLOAT8` columns as SQLAlchemy `DOUBLE` on SQLAlchemy 2.x
+
 ## [1.4.4.5](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.3...v1.4.4.5) (2026-03-22)
 
 ### Bug Fixes
