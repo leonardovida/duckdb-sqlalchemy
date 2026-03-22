@@ -133,17 +133,19 @@ def _copy_rows_as_csv_chunks(
 
     tmp, writer, count = open_writer()
 
-    for row in rows:
-        writer.writerow(row)
-        count += 1
-        if chunk_size and count >= chunk_size:
-            flush_chunk(tmp)
-            tmp, writer, count = open_writer()
+    try:
+        for row in rows:
+            writer.writerow(row)
+            count += 1
+            if chunk_size and count >= chunk_size:
+                flush_chunk(tmp)
+                tmp, writer, count = open_writer()
 
-    if count:
-        flush_chunk(tmp)
-    else:
-        _close_and_unlink_tempfile(tmp)
+        if count:
+            flush_chunk(tmp)
+    finally:
+        if not tmp.closed:
+            _close_and_unlink_tempfile(tmp)
 
 
 def copy_from_parquet(
