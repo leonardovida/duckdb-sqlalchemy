@@ -296,6 +296,49 @@ def _normalize_execution_options(execution_options: Dict[str, Any]) -> Dict[str,
     return execution_options
 
 
+def _build_bulk_insert_dataframe(
+    rows: Sequence[Any], column_names: Sequence[str]
+) -> Any:
+    try:
+        import pandas as pd  # type: ignore[import-not-found]
+    except Exception:
+        return None
+
+    try:
+        if isinstance(rows[0], dict):
+            return pd.DataFrame.from_records(rows, columns=column_names)
+        return pd.DataFrame(rows, columns=cast(Any, column_names))
+    except Exception:
+        return None
+
+
+def _build_bulk_insert_arrow_table(
+    rows: Sequence[Any], column_names: Sequence[str]
+) -> Any:
+    try:
+        import pyarrow as pa  # type: ignore[import-not-found]
+    except Exception:
+        return None
+
+    try:
+        if isinstance(rows[0], dict):
+            table = pa.Table.from_pylist(rows)
+            if column_names:
+                return table.select(column_names)
+            return table
+        columns = list(zip(*rows)) if rows else [[] for _ in column_names]
+        return pa.Table.from_arrays(columns, names=column_names)
+    except Exception:
+        return None
+
+
+def _build_bulk_insert_data(rows: Sequence[Any], column_names: Sequence[str]) -> Any:
+    data = _build_bulk_insert_dataframe(rows, column_names)
+    if data is not None:
+        return data
+    return _build_bulk_insert_arrow_table(rows, column_names)
+
+
 class DuckDBArrowResult:
     def __init__(self, result: Any) -> None:
         self._result = result
@@ -995,42 +1038,9 @@ class Dialect(PGDialect_psycopg2):
             str(getattr(column_key, "key", column_key)) for column_key in column_keys
         ]
         rows = parameters if isinstance(parameters, list) else list(parameters)
-
-        data = None
-        if isinstance(rows[0], dict):
-            try:
-                import pandas as pd  # type: ignore[import-not-found]
-
-                data = pd.DataFrame.from_records(rows, columns=column_names)
-            except Exception:
-                data = None
-            if data is None:
-                try:
-                    import pyarrow as pa  # type: ignore[import-not-found]
-
-                    data = pa.Table.from_pylist(rows)
-                    if column_names:
-                        data = data.select(column_names)
-                except Exception:
-                    return False
-        else:
-            try:
-                import pandas as pd  # type: ignore[import-not-found]
-
-                data = pd.DataFrame(rows, columns=cast(Any, column_names))
-            except Exception:
-                data = None
-            if data is None:
-                try:
-                    import pyarrow as pa  # type: ignore[import-not-found]
-
-                    if rows:
-                        cols = list(zip(*rows))
-                    else:
-                        cols = [[] for _ in column_names]
-                    data = pa.Table.from_arrays(cols, names=column_names)
-                except Exception:
-                    return False
+        data = _build_bulk_insert_data(rows, column_names)
+        if data is None:
+            return False
 
         view_name = f"__duckdb_sa_bulk_{uuid.uuid4().hex}"
         dbapi_conn = cursor.connection
