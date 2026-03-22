@@ -134,6 +134,36 @@ def test_json(engine: Engine, session: Session) -> None:
     assert result.meta == {"hello": "world"}
 
 
+def test_table_autoload_reflects_json_enum_and_array_types(engine: Engine) -> None:
+    with engine.begin() as con:
+        con.execute(text("CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy')"))
+        con.execute(text("CREATE TABLE t (payload JSON, tags VARCHAR[], state mood)"))
+
+    table = Table("t", MetaData(), autoload_with=engine)
+
+    assert isinstance(table.c.payload.type, JSON)
+    assert isinstance(table.c.tags.type, sqltypes.ARRAY)
+    assert type(table.c.tags.type.item_type) is String
+    assert isinstance(table.c.state.type, sqltypes.Enum)
+    assert list(table.c.state.type.enums) == ["sad", "ok", "happy"]
+
+
+def test_metadata_reflect_preserves_json_enum_and_array_types(engine: Engine) -> None:
+    with engine.begin() as con:
+        con.execute(text("CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy')"))
+        con.execute(text("CREATE TABLE t (payload JSON, tags VARCHAR[], state mood)"))
+
+    metadata = MetaData()
+    metadata.reflect(bind=engine)
+    table = metadata.tables["t"]
+
+    assert isinstance(table.c.payload.type, JSON)
+    assert isinstance(table.c.tags.type, sqltypes.ARRAY)
+    assert type(table.c.tags.type.item_type) is String
+    assert isinstance(table.c.state.type, sqltypes.Enum)
+    assert list(table.c.state.type.enums) == ["sad", "ok", "happy"]
+
+
 def test_uuid(engine: Engine, session: Session) -> None:
     importorskip("duckdb", "0.7.1")
     base = declarative_base()
@@ -185,6 +215,34 @@ def test_double_reflection_uses_double_type(engine: Engine) -> None:
     assert type(table.c.float4_col.type) is FLOAT
 
 
+def test_pk_and_index_reflection(engine: Engine) -> None:
+    importorskip("sqlalchemy", "2.0.0")
+
+    with engine.begin() as con:
+        con.execute(
+            text("CREATE TABLE t (id INTEGER PRIMARY KEY, name VARCHAR, age INTEGER)")
+        )
+        con.execute(text("CREATE INDEX idx_t_name_age ON t(name, age)"))
+
+    inspector = inspect(engine)
+    pk = inspector.get_pk_constraint("t")
+    indexes = inspector.get_indexes("t")
+    multi_pk = dict(inspector.get_multi_pk_constraint(filter_names=["t"]))
+    multi_indexes = dict(inspector.get_multi_indexes(filter_names=["t"]))
+
+    assert pk["name"] == "t_id_pkey"
+    assert pk["constrained_columns"] == ["id"]
+    assert indexes == [
+        {
+            "name": "idx_t_name_age",
+            "column_names": ["name", "age"],
+            "unique": False,
+        }
+    ]
+    assert multi_pk[(None, "t")]["constrained_columns"] == ["id"]
+    assert multi_indexes[(None, "t")] == indexes
+
+
 def test_all_types_reflection(engine: Engine) -> None:
     importorskip("sqlalchemy", "1.4.0")
     importorskip("duckdb", "0.5.1")
@@ -196,7 +254,7 @@ def test_all_types_reflection(engine: Engine) -> None:
             name = col.name
             if name.endswith("_enum") and duckdb_version < Version("0.7.1"):
                 continue
-            if "array" in name or "struct" in name or "map" in name or "union" in name:
+            if "struct" in name or "map" in name or "union" in name:
                 assert col.type == sqltypes.NULLTYPE, name
             else:
                 assert col.type != sqltypes.NULLTYPE, name
