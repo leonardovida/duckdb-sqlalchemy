@@ -26,7 +26,7 @@ jobs:
       FORCE_COLOR: 1
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Remove cached duckdb extensions
         run: rm -rf ~/.duckdb
       - name: Set up Python
