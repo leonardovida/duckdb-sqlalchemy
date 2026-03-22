@@ -168,6 +168,23 @@ def test_double_in_sqla_v2(engine: Engine) -> None:
         con.execute(t.select())
 
 
+def test_double_reflection_uses_double_type(engine: Engine) -> None:
+    importorskip("sqlalchemy", "2.0.0")
+
+    with engine.begin() as con:
+        con.execute(
+            text(
+                "CREATE TABLE t (double_col DOUBLE, float8_col FLOAT8, float4_col FLOAT4)"
+            )
+        )
+
+    table = Table("t", MetaData(), autoload_with=engine)
+
+    assert type(table.c.double_col.type) is sqltypes.DOUBLE
+    assert type(table.c.float8_col.type) is sqltypes.DOUBLE
+    assert type(table.c.float4_col.type) is FLOAT
+
+
 def test_all_types_reflection(engine: Engine) -> None:
     importorskip("sqlalchemy", "1.4.0")
     importorskip("duckdb", "0.5.1")

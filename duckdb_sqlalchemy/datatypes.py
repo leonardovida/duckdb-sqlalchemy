@@ -26,6 +26,7 @@ from sqlalchemy.types import BigInteger, Integer, SmallInteger, String
 (BigInteger, SmallInteger)  # pure reexport
 
 duckdb_version = duckdb.__version__
+SQLA_DOUBLE = getattr(sqltypes, "DOUBLE", None)
 
 IS_GT_1 = Version(duckdb_version) > Version("1.0.0")
 
@@ -259,7 +260,8 @@ ISCHEMA_NAMES: Dict[str, Any] = {
     "timetz": sqltypes.TIME,
     "timestamptz": sqltypes.TIMESTAMP,
     "float4": sqltypes.FLOAT,
-    "float8": sqltypes.FLOAT,
+    "float8": SQLA_DOUBLE or sqltypes.FLOAT,
+    "double": SQLA_DOUBLE or sqltypes.FLOAT,
     "usmallint": USmallInteger,
     "uinteger": UInteger,
     "ubigint": UBigInteger,
