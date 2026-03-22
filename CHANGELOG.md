@@ -6,6 +6,16 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.4.4.7](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.6...v1.4.4.7) (2026-03-22)
+
+### Bug Fixes
+
+* reflect `JSON` columns as `JSON` during single-table autoload and `MetaData.reflect()`
+* reflect array/list columns from DuckDB metadata instead of degrading them to `NullType`
+* populate reflected enum labels from DuckDB type metadata
+* populate reflected primary key columns from `duckdb_constraints()`
+* reflect indexes from `duckdb_indexes()` instead of returning an empty list
+
 ## [1.4.4.6](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.5...v1.4.4.6) (2026-03-22)
 
 ### Bug Fixes

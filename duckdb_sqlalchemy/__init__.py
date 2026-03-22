@@ -2,7 +2,7 @@ import os
 import re
 import time
 import uuid
-import warnings
+from collections import defaultdict
 from functools import lru_cache
 from typing import (
     TYPE_CHECKING,
@@ -31,7 +31,7 @@ from sqlalchemy.dialects.postgresql.base import (
 )
 from sqlalchemy.dialects.postgresql.psycopg2 import PGDialect_psycopg2
 from sqlalchemy.engine.default import DefaultDialect, DefaultExecutionContext
-from sqlalchemy.engine.reflection import cache
+from sqlalchemy.engine.reflection import ReflectionDefaults, cache
 from sqlalchemy.engine.url import URL as SAURL
 from sqlalchemy.exc import NoSuchTableError
 from sqlalchemy.ext.compiler import compiles
@@ -68,7 +68,7 @@ else:
         _pg_base, "PGExecutionContext", DefaultExecutionContext
     )
 
-__version__ = "1.4.4.6"
+__version__ = "1.4.4.7"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -275,13 +275,6 @@ class CursorWrapper:
 
 class DuckDBEngineWarning(Warning):
     pass
-
-
-def index_warning() -> None:
-    warnings.warn(
-        "duckdb-sqlalchemy doesn't yet support reflection on indices",
-        DuckDBEngineWarning,
-    )
 
 
 def _normalize_execution_options(execution_options: Dict[str, Any]) -> Dict[str, Any]:
@@ -868,12 +861,29 @@ class Dialect(PGDialect_psycopg2):
     def _duckdb_columns(
         self, connection: "Connection", table_name: str, schema: Optional[str]
     ) -> Optional[List[Dict[str, Any]]]:
-        sql = """
-            SELECT column_name, column_default, is_nullable, data_type, comment, column_index
-            FROM duckdb_columns()
-            WHERE table_name = :table_name
+        rows = self._duckdb_column_rows(
+            connection, schema=schema, filter_names=[table_name]
+        )
+        if not rows:
+            return None
+        return self._duckdb_columns_from_rows(connection, rows)[table_name]
+
+    def _duckdb_reflection_stmt(
+        self,
+        relation: str,
+        columns: str,
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+        include_internal_filter: bool = False,
+    ) -> Tuple[Any, Dict[str, Any]]:
+        sql = f"""
+            SELECT {columns}
+            FROM {relation}()
+            WHERE schema_name NOT LIKE 'pg\\_%' ESCAPE '\\'
             """
-        params: Dict[str, Any] = {"table_name": table_name}
+        params: Dict[str, Any] = {}
+        if include_internal_filter:
+            sql += "AND internal = false\n"
         if schema is not None:
             database_name, schema_name = self.identifier_preparer._separate(schema)
             sql += "AND schema_name = :schema_name\n"
@@ -881,30 +891,222 @@ class Dialect(PGDialect_psycopg2):
             if database_name is not None:
                 sql += "AND database_name = :database_name\n"
                 params["database_name"] = database_name
-        sql += "ORDER BY column_index"
-        rows = list(connection.execute(text(sql), params).mappings())
-        if not rows:
-            return None
-        columns: List[Dict[str, Any]] = []
-        for row in rows:
-            coltype = self._reflect_type(  # type: ignore[attr-defined]
-                row["data_type"],
+        if filter_names is not None:
+            names = list(filter_names)
+            if not names:
+                sql += "AND 1 = 0\n"
+            else:
+                sql += "AND table_name IN :filter_names\n"
+                params["filter_names"] = names
+        stmt = text(sql)
+        if params.get("filter_names"):
+            stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
+        return stmt, params
+
+    def _duckdb_column_rows(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        stmt, params = self._duckdb_reflection_stmt(
+            "duckdb_columns",
+            (
+                "database_name, schema_name, table_name, column_name, column_default, "
+                "is_nullable, data_type, data_type_id, comment, column_index"
+            ),
+            schema=schema,
+            filter_names=filter_names,
+            include_internal_filter=True,
+        )
+        sql = f"{stmt.text}ORDER BY table_name, column_index"
+        stmt = text(sql)
+        if params.get("filter_names"):
+            stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
+        return list(connection.execute(stmt, params).mappings())
+
+    def _duckdb_table_names(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+    ) -> List[str]:
+        stmt, params = self._duckdb_reflection_stmt(
+            "duckdb_tables",
+            "table_name",
+            schema=schema,
+            filter_names=filter_names,
+            include_internal_filter=True,
+        )
+        sql = f"{stmt.text}ORDER BY table_name"
+        stmt = text(sql)
+        if params.get("filter_names"):
+            stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
+        return [row[0] for row in connection.execute(stmt, params)]
+
+    def _duckdb_enum_rows(
+        self, connection: "Connection", type_ids: Collection[Any]
+    ) -> Dict[Any, Dict[str, Any]]:
+        ids = sorted({type_id for type_id in type_ids if type_id is not None})
+        if not ids:
+            return {}
+        stmt = text(
+            """
+            SELECT type_oid, type_name, labels
+            FROM duckdb_types()
+            WHERE type_oid IN :type_ids
+            """
+        ).bindparams(bindparam("type_ids", expanding=True))
+        return {
+            row["type_oid"]: dict(row)
+            for row in connection.execute(stmt, {"type_ids": ids}).mappings()
+        }
+
+    def _split_duckdb_list(self, value: str) -> List[str]:
+        items: List[str] = []
+        current: List[str] = []
+        depth = 0
+        in_single_quote = False
+        in_double_quote = False
+        index = 0
+        while index < len(value):
+            char = value[index]
+            if in_single_quote:
+                current.append(char)
+                if char == "'" and index + 1 < len(value) and value[index + 1] == "'":
+                    current.append(value[index + 1])
+                    index += 1
+                elif char == "'":
+                    in_single_quote = False
+            elif in_double_quote:
+                current.append(char)
+                if char == '"' and index + 1 < len(value) and value[index + 1] == '"':
+                    current.append(value[index + 1])
+                    index += 1
+                elif char == '"':
+                    in_double_quote = False
+            else:
+                if char == "'":
+                    in_single_quote = True
+                    current.append(char)
+                elif char == '"':
+                    in_double_quote = True
+                    current.append(char)
+                elif char in "([":
+                    depth += 1
+                    current.append(char)
+                elif char in ")]":
+                    depth = max(0, depth - 1)
+                    current.append(char)
+                elif char == "," and depth == 0:
+                    item = "".join(current).strip()
+                    if item:
+                        items.append(item)
+                    current = []
+                else:
+                    current.append(char)
+            index += 1
+        item = "".join(current).strip()
+        if item:
+            items.append(item)
+        return items
+
+    def _parse_duckdb_enum_labels(
+        self, data_type: str, enum_row: Optional[Dict[str, Any]]
+    ) -> Tuple[List[str], Optional[str]]:
+        if enum_row is not None and enum_row.get("labels"):
+            enum_name = enum_row.get("type_name")
+            if isinstance(enum_name, str) and enum_name.lower() == "enum":
+                enum_name = None
+            return list(enum_row["labels"]), cast(Optional[str], enum_name)
+
+        inner = data_type[len("ENUM(") : -1]
+        labels: List[str] = []
+        for token in self._split_duckdb_list(inner):
+            label = token.strip()
+            if label.startswith("'") and label.endswith("'"):
+                label = label[1:-1].replace("''", "'")
+            labels.append(label)
+        return labels, None
+
+    def _reflect_duckdb_data_type(
+        self,
+        data_type: str,
+        data_type_id: Optional[Any],
+        enum_rows: Dict[Any, Dict[str, Any]],
+        type_description: str,
+    ) -> Any:
+        normalized = data_type.strip()
+        dimensions = 0
+        while True:
+            match = re.search(r"\[[0-9]*\]$", normalized)
+            if match is None:
+                break
+            dimensions += 1
+            normalized = normalized[: match.start()].strip()
+
+        upper = normalized.upper()
+        if upper == "JSON":
+            reflected = sqltypes.JSON()
+        elif upper == "BLOB":
+            reflected = sqltypes.LargeBinary()
+        elif upper.startswith(("DECIMAL(", "NUMERIC(")) and normalized.endswith(")"):
+            precision_scale = normalized[normalized.index("(") + 1 : -1]
+            parts = [part.strip() for part in precision_scale.split(",", 1)]
+            precision = int(parts[0]) if parts[0] else None
+            scale = int(parts[1]) if len(parts) > 1 and parts[1] else None
+            reflected = sqltypes.Numeric(precision=precision, scale=scale)
+        elif upper in {"DECIMAL", "NUMERIC"}:
+            reflected = sqltypes.Numeric()
+        elif upper.startswith("ENUM(") and normalized.endswith(")"):
+            labels, enum_name = self._parse_duckdb_enum_labels(
+                normalized, enum_rows.get(data_type_id)
+            )
+            reflected = sqltypes.Enum(*labels, name=enum_name)
+        elif upper.startswith(("STRUCT(", "MAP(", "UNION(")):
+            reflected = sqltypes.NULLTYPE
+        else:
+            reflected = self._reflect_type(  # type: ignore[attr-defined]
+                normalized,
                 {},
                 {},
-                type_description=f"column '{row['column_name']}'",
+                type_description=type_description,
                 collation=None,
             )
-            columns.append(
+
+        if dimensions:
+            if reflected == sqltypes.NULLTYPE:
+                return sqltypes.NULLTYPE
+            return sqltypes.ARRAY(reflected, dimensions=dimensions)
+        return reflected
+
+    def _duckdb_columns_from_rows(
+        self, connection: "Connection", rows: Sequence[Dict[str, Any]]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        enum_rows = self._duckdb_enum_rows(
+            connection, [row["data_type_id"] for row in rows]
+        )
+        columns: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            columns[row["table_name"]].append(
                 {
                     "name": row["column_name"],
-                    "type": coltype,
+                    "type": self._reflect_duckdb_data_type(
+                        row["data_type"],
+                        row.get("data_type_id"),
+                        enum_rows,
+                        type_description=f"column '{row['column_name']}'",
+                    ),
                     "nullable": bool(row["is_nullable"]),
                     "default": row["column_default"],
                     "autoincrement": False,
                     "comment": row["comment"],
                 }
             )
-        return columns
+        return dict(columns)
+
+    def _reflection_schema_key(self, schema: Optional[str]) -> Optional[str]:
+        return schema
 
     def has_table(
         self,
@@ -922,13 +1124,76 @@ class Dialect(PGDialect_psycopg2):
     def get_columns(  # type: ignore[no-untyped-def]
         self, connection: "Connection", table_name: str, schema=None, **kw: "Any"
     ):
-        try:
-            return super().get_columns(connection, table_name, schema=schema, **kw)
-        except NoSuchTableError:
-            columns = self._duckdb_columns(connection, table_name, schema)
-            if columns is None:
-                raise
-            return columns
+        columns = self._duckdb_columns(connection, table_name, schema)
+        if columns is None:
+            raise NoSuchTableError(table_name)
+        return columns
+
+    @cache  # type: ignore[call-arg]
+    def get_pk_constraint(
+        self,
+        connection: "Connection",
+        table_name: str,
+        schema: Optional[str] = None,
+        **kw: Any,
+    ) -> Dict[str, Any]:
+        scope = kw.pop("scope", None)
+        kind = kw.pop("kind", None)
+        constraints = dict(
+            self.get_multi_pk_constraint(
+                connection,
+                schema=schema,
+                filter_names=[table_name],
+                scope=scope,
+                kind=kind,
+                **kw,
+            )
+        )
+        key = (self._reflection_schema_key(schema), table_name)
+        if key in constraints:
+            return constraints[key]
+        if self._duckdb_table_exists(connection, table_name, schema):
+            return ReflectionDefaults.pk_constraint()
+        raise NoSuchTableError(table_name)
+
+    def get_multi_pk_constraint(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+        scope: Any = None,
+        kind: Any = None,
+        **kw: Any,
+    ) -> Iterable[Tuple[Any, Any]]:
+        table_names = self._duckdb_table_names(
+            connection, schema=schema, filter_names=filter_names
+        )
+        stmt, params = self._duckdb_reflection_stmt(
+            "duckdb_constraints",
+            "table_name, constraint_name, constraint_column_names",
+            schema=schema,
+            filter_names=filter_names,
+        )
+        sql = f"{stmt.text}AND constraint_type = 'PRIMARY KEY'\nORDER BY table_name, constraint_index"
+        stmt = text(sql)
+        if params.get("filter_names"):
+            stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
+        constraint_rows = list(connection.execute(stmt, params).mappings())
+        constraints = {
+            row["table_name"]: {
+                "name": row["constraint_name"],
+                "constrained_columns": list(row["constraint_column_names"] or []),
+            }
+            for row in constraint_rows
+        }
+        schema_key = self._reflection_schema_key(schema)
+        return (
+            (
+                (schema_key, table_name),
+                constraints.get(table_name, ReflectionDefaults.pk_constraint()),
+            )
+            for table_name in table_names
+        )
 
     @cache  # type: ignore[call-arg]
     def get_foreign_keys(  # type: ignore[no-untyped-def]
@@ -974,8 +1239,24 @@ class Dialect(PGDialect_psycopg2):
         schema: Optional[str] = None,
         **kw: Any,
     ) -> List["ReflectedIndex"]:  # type: ignore[override]
-        index_warning()
-        return []
+        scope = kw.pop("scope", None)
+        kind = kw.pop("kind", None)
+        indexes = dict(
+            self.get_multi_indexes(
+                connection,
+                schema=schema,
+                filter_names=[table_name],
+                scope=scope,
+                kind=kind,
+                **kw,
+            )
+        )
+        key = (self._reflection_schema_key(schema), table_name)
+        if key in indexes:
+            return indexes[key]
+        if self._duckdb_table_exists(connection, table_name, schema):
+            return ReflectionDefaults.indexes()
+        raise NoSuchTableError(table_name)
 
     # the following methods are for SQLA2 compatibility
     def get_multi_indexes(
@@ -987,8 +1268,51 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        index_warning()
-        return []
+        table_names = self._duckdb_table_names(
+            connection, schema=schema, filter_names=filter_names
+        )
+        stmt, params = self._duckdb_reflection_stmt(
+            "duckdb_indexes",
+            "table_name, index_name, expressions, is_unique",
+            schema=schema,
+            filter_names=filter_names,
+        )
+        sql = f"{stmt.text}ORDER BY table_name, index_name"
+        stmt = text(sql)
+        if params.get("filter_names"):
+            stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
+        index_rows = list(connection.execute(stmt, params).mappings())
+        indexes: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for row in index_rows:
+            raw = (row["expressions"] or "").strip()
+            inner = raw[1:-1] if raw.startswith("[") and raw.endswith("]") else raw
+            expressions = self._split_duckdb_list(inner)
+            column_names: List[Optional[str]] = []
+            has_expression = False
+            for expression in expressions:
+                candidate = expression.strip()
+                if candidate.startswith("'") and candidate.endswith("'"):
+                    candidate = candidate[1:-1].replace("''", "'")
+                if candidate.startswith('"') and candidate.endswith('"'):
+                    column_names.append(candidate[1:-1].replace('""', '"'))
+                elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]*", candidate):
+                    column_names.append(candidate)
+                else:
+                    column_names.append(None)
+                    has_expression = True
+            reflected_index: Dict[str, Any] = {
+                "name": row["index_name"],
+                "column_names": column_names,
+                "unique": bool(row["is_unique"]),
+            }
+            if has_expression:
+                reflected_index["expressions"] = expressions
+            indexes[row["table_name"]].append(reflected_index)
+        schema_key = self._reflection_schema_key(schema)
+        return (
+            ((schema_key, table_name), indexes.get(table_name, []))
+            for table_name in table_names
+        )
 
     def create_connect_args(self, url: SAURL) -> Tuple[tuple, dict]:
         opts = url.translate_connect_args(database="database")
@@ -1312,68 +1636,15 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Any:
-        """
-        Copyright 2005-2023 SQLAlchemy authors and contributors <see AUTHORS file>.
-
-        Permission is hereby granted, free of charge, to any person obtaining a copy of
-        this software and associated documentation files (the "Software"), to deal in
-        the Software without restriction, including without limitation the rights to
-        use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-        of the Software, and to permit persons to whom the Software is furnished to do
-        so, subject to the following conditions:
-
-        The above copyright notice and this permission notice shall be included in all
-        copies or substantial portions of the Software.
-
-        THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-        SOFTWARE.
-        """
-
-        scope = kw.get("scope", scope)
-        kind = kw.get("kind", kind)
-        has_filter_names, params = self._prepare_filter_names(filter_names)  # type: ignore[attr-defined]
-        query = self._columns_query(schema, has_filter_names, scope, kind)  # type: ignore[attr-defined]
-        rows = list(connection.execute(query, params).mappings())
-
-        # dictionary with (name, ) if default search path or (schema, name)
-        # as keys
-        domains: Dict[tuple, dict] = {}
-        """
-        TODO: fix these pg_collation errors in SQLA2
-        domains = {
-            ((d["schema"], d["name"]) if not d["visible"] else (d["name"],)): d
-            for d in self._load_domains(  # type: ignore[attr-defined]
-                connection, schema="*", info_cache=kw.get("info_cache")
-            )
-        }
-        """
-
-        # dictionary with (name, ) if default search path or (schema, name)
-        # as keys
-        load_enums = getattr(self, "_load_enums")
-        try:
-            enum_records = load_enums(
-                connection, schema="*", info_cache=kw.get("info_cache")
-            )
-        except TypeError:
-            enum_records = load_enums(connection, schema="*")
-        enums = dict(
-            (
-                ((rec["name"],), rec)
-                if rec["visible"]
-                else ((rec["schema"], rec["name"]), rec)
-            )
-            for rec in enum_records
+        rows = self._duckdb_column_rows(
+            connection, schema=schema, filter_names=filter_names
         )
-
-        columns = self._get_columns_info(rows, domains, enums, schema)  # type: ignore[attr-defined]
-
-        return columns.items()
+        columns = self._duckdb_columns_from_rows(connection, rows)
+        schema_key = self._reflection_schema_key(schema)
+        return (
+            ((schema_key, table_name), table_columns)
+            for table_name, table_columns in columns.items()
+        )
 
     # fix for https://github.com/leonardovida/duckdb-sqlalchemy/issues/1128
     # (Overrides sqlalchemy method)
