@@ -6,11 +6,20 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
-## [1.4.4.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.3...v1.4.4.4) (2026-03-17)
+## [1.4.4.5](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.3...v1.4.4.5) (2026-03-22)
 
 ### Bug Fixes
 
 * preserve empty `MAP` values as empty dicts instead of coercing them to `NULL`
+* refresh Arrow compatibility and package constraints across supported environments
+
+### Performance
+
+* refactor bulk insert preparation and `copy_from_rows` chunk handling to reduce duplication
+
+### Refactoring
+
+* simplify MotherDuck config, query, URL, path, connect-arg, and TTL normalization helpers
 
 ### Tooling
 
