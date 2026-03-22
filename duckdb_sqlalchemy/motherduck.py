@@ -23,13 +23,16 @@ from sqlalchemy.pool import Pool, QueuePool
 
 from ._query import merge_query_mappings
 
+DBINSTANCE_INACTIVITY_TTL_KEY = "dbinstance_inactivity_ttl"
+MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY = "motherduck_dbinstance_inactivity_ttl"
+
 MOTHERDUCK_PATH_QUERY_KEYS = {
     "user",
     "session_hint",
     "attach_mode",
     "access_mode",
-    "dbinstance_inactivity_ttl",
-    "motherduck_dbinstance_inactivity_ttl",
+    DBINSTANCE_INACTIVITY_TTL_KEY,
+    MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
     "saas_mode",
     "cache_buster",
 }
@@ -41,12 +44,9 @@ CONNECT_ARG_MAPPING_KEYS = ("config", "url_config")
 
 
 def _normalize_path_query_aliases(path_query: Dict[str, Any]) -> Dict[str, Any]:
-    if "motherduck_dbinstance_inactivity_ttl" in path_query:
-        if "dbinstance_inactivity_ttl" not in path_query:
-            path_query["dbinstance_inactivity_ttl"] = path_query[
-                "motherduck_dbinstance_inactivity_ttl"
-            ]
-        path_query.pop("motherduck_dbinstance_inactivity_ttl", None)
+    alias_value = path_query.pop(MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY, None)
+    if DBINSTANCE_INACTIVITY_TTL_KEY not in path_query and alias_value is not None:
+        path_query[DBINSTANCE_INACTIVITY_TTL_KEY] = alias_value
     return path_query
 
 
@@ -54,6 +54,13 @@ def _normalize_path_query_mapping(
     *mappings: Optional[Mapping[str, Any]],
 ) -> Dict[str, Any]:
     return _normalize_path_query_aliases(merge_query_mappings(*mappings))
+
+
+def _normalize_config_aliases(config: Dict[str, Any]) -> Dict[str, Any]:
+    ttl = config.get(DBINSTANCE_INACTIVITY_TTL_KEY)
+    if ttl is not None and MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY not in config:
+        config[MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY] = ttl
+    return config
 
 
 def _partition_query(

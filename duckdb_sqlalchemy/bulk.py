@@ -84,6 +84,18 @@ def _execute_sql(connection: Any, statement: str) -> Any:
     return connection.execute(statement)
 
 
+def _close_and_unlink_tempfile(tmp: Any) -> None:
+    path = tmp.name
+    try:
+        tmp.flush()
+    finally:
+        tmp.close()
+    try:
+        Path(path).unlink()
+    except FileNotFoundError:
+        pass
+
+
 def _copy_rows_as_csv_chunks(
     connection: Any,
     table: TableLike,
@@ -133,12 +145,7 @@ def _copy_rows_as_csv_chunks(
             flush_chunk(tmp)
     finally:
         if not tmp.closed:
-            path = tmp.name
-            tmp.close()
-            try:
-                Path(path).unlink()
-            except FileNotFoundError:
-                pass
+            _close_and_unlink_tempfile(tmp)
 
 
 def copy_from_parquet(

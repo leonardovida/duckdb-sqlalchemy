@@ -48,6 +48,7 @@ from .motherduck import (
     DIALECT_QUERY_KEYS,
     MOTHERDUCK_CONFIG_KEYS,
     MotherDuckURL,
+    _normalize_config_aliases,
     append_query_to_database,
     create_engine_from_paths,
     create_motherduck_engine,
@@ -464,13 +465,7 @@ def _apply_motherduck_defaults(config: Dict[str, Any], database: Optional[str]) 
 
 
 def _normalize_motherduck_config(config: Dict[str, Any]) -> None:
-    if (
-        "dbinstance_inactivity_ttl" in config
-        and "motherduck_dbinstance_inactivity_ttl" not in config
-    ):
-        config["motherduck_dbinstance_inactivity_ttl"] = config[
-            "dbinstance_inactivity_ttl"
-        ]
+    _normalize_config_aliases(config)
 
 
 class DuckDBIdentifierPreparer(PGIdentifierPreparer):
@@ -999,13 +994,13 @@ class Dialect(PGDialect_psycopg2):
         column_names = [
             str(getattr(column_key, "key", column_key)) for column_key in column_keys
         ]
+        rows = parameters if isinstance(parameters, list) else list(parameters)
 
         data = None
-        if isinstance(parameters[0], dict):
+        if isinstance(rows[0], dict):
             try:
                 import pandas as pd  # type: ignore[import-not-found]
 
-                rows = parameters if isinstance(parameters, list) else list(parameters)
                 data = pd.DataFrame.from_records(rows, columns=column_names)
             except Exception:
                 data = None
@@ -1013,9 +1008,6 @@ class Dialect(PGDialect_psycopg2):
                 try:
                     import pyarrow as pa  # type: ignore[import-not-found]
 
-                    rows = (
-                        parameters if isinstance(parameters, list) else list(parameters)
-                    )
                     data = pa.Table.from_pylist(rows)
                     if column_names:
                         data = data.select(column_names)
@@ -1025,7 +1017,6 @@ class Dialect(PGDialect_psycopg2):
             try:
                 import pandas as pd  # type: ignore[import-not-found]
 
-                rows = parameters if isinstance(parameters, list) else list(parameters)
                 data = pd.DataFrame(rows, columns=cast(Any, column_names))
             except Exception:
                 data = None
@@ -1033,9 +1024,6 @@ class Dialect(PGDialect_psycopg2):
                 try:
                     import pyarrow as pa  # type: ignore[import-not-found]
 
-                    rows = (
-                        parameters if isinstance(parameters, list) else list(parameters)
-                    )
                     if rows:
                         cols = list(zip(*rows))
                     else:
