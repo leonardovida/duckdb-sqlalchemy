@@ -68,7 +68,7 @@ else:
         _pg_base, "PGExecutionContext", DefaultExecutionContext
     )
 
-__version__ = "1.4.4.4"
+__version__ = "1.4.4.5"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
