@@ -6,7 +6,7 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
-## Unreleased
+## [1.4.4.8](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.7...v1.4.4.8) (2026-03-24)
 
 ### Bug Fixes
 
