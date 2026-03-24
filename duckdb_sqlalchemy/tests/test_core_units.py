@@ -4,7 +4,7 @@ from urllib.parse import parse_qs
 
 import duckdb
 import pytest
-from sqlalchemy import Integer, String, pool
+from sqlalchemy import Integer, String, create_engine, pool, text
 from sqlalchemy import exc as sa_exc
 from sqlalchemy.engine import URL as SAURL
 
@@ -391,6 +391,36 @@ def test_cursorwrapper_execute_show_isolation_level() -> None:
     cursor.execute("show transaction isolation level")
 
     assert conn.calls == ["select 'read committed' as transaction_isolation"]
+
+
+def test_get_default_isolation_level_is_not_implemented() -> None:
+    with pytest.raises(NotImplementedError):
+        Dialect().get_default_isolation_level(object())
+
+
+def test_engine_connect_does_not_probe_isolation_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    original_execute = duckdb_sqlalchemy.CursorWrapper.execute
+
+    def tracked_execute(
+        self: CursorWrapper,
+        statement: str,
+        parameters: tuple[Any, ...] | None = None,
+        context: Any | None = None,
+    ) -> None:
+        calls.append(statement)
+        return original_execute(self, statement, parameters, context)
+
+    monkeypatch.setattr(duckdb_sqlalchemy.CursorWrapper, "execute", tracked_execute)
+
+    engine = create_engine("duckdb:///:memory:isolation_lifecycle")
+    with engine.connect() as conn:
+        assert conn.execute(text("select 1")).scalar() == 1
+
+    assert "select 1" in calls
+    assert "show transaction isolation level" not in calls
 
 
 def test_cursorwrapper_executemany_coerces_to_list() -> None:
