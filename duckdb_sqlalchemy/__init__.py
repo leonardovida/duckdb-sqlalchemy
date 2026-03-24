@@ -666,10 +666,12 @@ class Dialect(PGDialect_psycopg2):
             return pool.SingletonThreadPool
         if pool_override in {"null", "nullpool"}:
             return pool.NullPool
+        if url.database == ":memory:":
+            return pool.SingletonThreadPool
         if not url.database:
-            return pool.SingletonThreadPool
-        if url.database and url.database.startswith(":memory:"):
-            return pool.SingletonThreadPool
+            return pool.QueuePool
+        if url.database.startswith(":memory:"):
+            return pool.QueuePool
         if _looks_like_motherduck(url.database, dict(url.query)):
             return pool.NullPool
         return pool.NullPool

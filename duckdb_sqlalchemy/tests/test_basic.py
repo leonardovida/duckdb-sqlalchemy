@@ -37,7 +37,7 @@ from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, relationship, sessionmaker
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import QueuePool, SingletonThreadPool
 
 from .. import Dialect, insert, supports_attach, supports_user_agent
 from .._supports import has_comment_support
@@ -588,6 +588,16 @@ def test_do_ping(tmp_path: Path, caplog: LogCaptureFixture) -> None:
         assert any(
             "Pool pre-ping on connection" in message for message in caplog.messages
         )
+
+
+def test_named_in_memory_uses_queue_pool() -> None:
+    exact_memory = create_engine("duckdb:///:memory:")
+    named_memory = create_engine("duckdb:///:memory:named")
+    empty_database = create_engine("duckdb://")
+
+    assert isinstance(exact_memory.pool, SingletonThreadPool)
+    assert isinstance(named_memory.pool, QueuePool)
+    assert isinstance(empty_database.pool, QueuePool)
 
 
 def test_try_cast(engine: Engine) -> None:

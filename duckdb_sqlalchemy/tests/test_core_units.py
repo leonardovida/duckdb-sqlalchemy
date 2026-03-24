@@ -723,9 +723,23 @@ def test_pool_override_from_url_and_env(monkeypatch: pytest.MonkeyPatch) -> None
     assert _pool_override_from_url(url) == "null"
 
 
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        (SAURL.create("duckdb", database=":memory:"), pool.SingletonThreadPool),
+        (SAURL.create("duckdb", database=":memory:named"), pool.QueuePool),
+        (SAURL.create("duckdb"), pool.QueuePool),
+        (SAURL.create("duckdb", database="local.db"), pool.NullPool),
+        (SAURL.create("duckdb", database="md:my_db"), pool.NullPool),
+    ],
+)
+def test_pool_class_defaults(url: SAURL, expected: type[pool.Pool]) -> None:
+    assert Dialect.get_pool_class(url) is expected
+
+
 def test_pool_class_for_empty_database() -> None:
     url = SAURL.create("duckdb")
-    assert Dialect.get_pool_class(url) is pool.SingletonThreadPool
+    assert Dialect.get_pool_class(url) is pool.QueuePool
 
 
 def test_apply_config_handles_none_path_decimal() -> None:
