@@ -39,7 +39,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, relationship, sessionmaker
 from sqlalchemy.pool import QueuePool, SingletonThreadPool
 
-from .. import Dialect, insert, supports_attach, supports_user_agent
+from .. import Dialect, checkpoint, insert, supports_attach, supports_user_agent
 from .._supports import has_comment_support
 
 try:
@@ -598,6 +598,48 @@ def test_named_in_memory_uses_queue_pool() -> None:
     assert isinstance(exact_memory.pool, SingletonThreadPool)
     assert isinstance(named_memory.pool, QueuePool)
     assert isinstance(empty_database.pool, QueuePool)
+
+
+def test_checkpoint_helper_commits_sqlalchemy_connection(tmp_path: Path) -> None:
+    engine = create_engine(f"duckdb:///{tmp_path / 'checkpoint_helper.duckdb'}")
+
+    with engine.connect() as conn:
+        conn.execute(text("create table t(i int)"))
+        conn.execute(text("insert into t values (1)"))
+
+        checkpoint(conn)
+
+        assert conn.in_transaction() is False
+        assert conn.execute(text("select count(*) from t")).scalar() == 1
+
+
+def test_checkpoint_helper_commits_raw_duckdb_connection(tmp_path: Path) -> None:
+    conn = duckdb.connect(str(tmp_path / "checkpoint_helper_raw.duckdb"))
+    try:
+        conn.execute("create table t(i int)")
+        conn.execute("begin")
+        conn.execute("insert into t values (1)")
+
+        checkpoint(conn)
+
+        assert conn.execute("select count(*) from t").fetchone() == (1,)
+    finally:
+        conn.close()
+
+
+def test_checkpoint_helper_without_commit_preserves_checkpoint_failure(
+    tmp_path: Path,
+) -> None:
+    engine = create_engine(f"duckdb:///{tmp_path / 'checkpoint_no_commit.duckdb'}")
+
+    with engine.connect() as conn:
+        conn.execute(text("create table t(i int)"))
+        conn.execute(text("insert into t values (1)"))
+
+        with raises(sqlalchemy.exc.OperationalError):
+            checkpoint(conn, commit=False)
+
+        conn.rollback()
 
 
 def test_try_cast(engine: Engine) -> None:

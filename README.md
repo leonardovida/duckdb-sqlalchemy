@@ -132,6 +132,10 @@ This dialect defaults to `SingletonThreadPool` for exact `:memory:`, `QueuePool`
 See [docs/configuration.md](docs/configuration.md) and
 [docs/motherduck.md](docs/motherduck.md) for detailed guidance.
 
+For manual WAL syncs after SQLAlchemy writes, prefer the explicit
+`duckdb_sqlalchemy.checkpoint(conn)` helper over issuing raw `CHECKPOINT`
+through a transactional SQLAlchemy connection.
+
 ## Documentation
 
 - [docs/index.md](docs/index.md) - GitHub Pages entrypoint

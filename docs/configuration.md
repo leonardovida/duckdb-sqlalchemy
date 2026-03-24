@@ -108,3 +108,25 @@ You can also switch the dialect default pool class via URL or env var:
 
 For long-lived MotherDuck pools, set `pool_pre_ping=True` and consider
 `pool_recycle=23*3600` to pick up backend upgrades.
+
+## Checkpoint helper
+
+DuckDB's `CHECKPOINT` statement can fail on a SQLAlchemy connection after
+writes because SQLAlchemy 2.x keeps the connection inside an implicit
+transaction until you commit or roll it back.
+
+Use the explicit helper instead:
+
+```python
+from sqlalchemy import text
+
+from duckdb_sqlalchemy import checkpoint
+
+with engine.connect() as conn:
+    conn.execute(text("insert into events values (1)"))
+    checkpoint(conn)
+```
+
+`checkpoint(conn)` commits the current transaction before and after the
+checkpoint so the connection does not remain in an aborted state. It also
+works with raw DuckDB connections.
