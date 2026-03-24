@@ -684,7 +684,7 @@ class Dialect(PGDialect_psycopg2):
         return (8, 0)
 
     def get_default_isolation_level(self, dbapi_conn):
-        return self.get_isolation_level(dbapi_conn)
+        raise NotImplementedError()
 
     def do_rollback(self, dbapi_connection: Any) -> None:
         try:

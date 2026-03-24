@@ -6,6 +6,12 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## Unreleased
+
+### Bug Fixes
+
+* stop probing the default isolation level during connection setup to match `duckdb_engine`
+
 ## [1.4.4.7](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.6...v1.4.4.7) (2026-03-22)
 
 ### Bug Fixes
