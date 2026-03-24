@@ -11,6 +11,7 @@ preserved from the upstream project for historical context.
 ### Bug Fixes
 
 * stop probing the default isolation level during connection setup to match `duckdb_engine`
+* add an explicit `checkpoint()` helper that commits around DuckDB checkpoints on SQLAlchemy connections
 
 ## [1.4.4.7](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.6...v1.4.4.7) (2026-03-22)
 
