@@ -127,7 +127,7 @@ md_url = MotherDuckURL(database="md:my_db", attach_mode="single")
 
 ## Configuration and pooling
 
-This dialect defaults to `NullPool` for file/MotherDuck connections and `SingletonThreadPool` for `:memory:`. You can override pooling explicitly. For long-lived MotherDuck pools, use the performance helper or configure `QueuePool`, `pool_pre_ping`, and `pool_recycle`.
+This dialect defaults to `SingletonThreadPool` for exact `:memory:`, `QueuePool` for named in-memory and empty database URLs, and `NullPool` for file/MotherDuck connections. You can override pooling explicitly. For long-lived MotherDuck pools, use the performance helper or configure `QueuePool`, `pool_pre_ping`, and `pool_recycle`.
 
 See [docs/configuration.md](docs/configuration.md) and
 [docs/motherduck.md](docs/motherduck.md) for detailed guidance.
