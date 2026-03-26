@@ -759,7 +759,7 @@ def test_pool_override_from_url_and_env(monkeypatch: pytest.MonkeyPatch) -> None
         (SAURL.create("duckdb", database=":memory:"), pool.SingletonThreadPool),
         (SAURL.create("duckdb", database=":memory:named"), pool.QueuePool),
         (SAURL.create("duckdb"), pool.QueuePool),
-        (SAURL.create("duckdb", database="local.db"), pool.NullPool),
+        (SAURL.create("duckdb", database="local.db"), pool.QueuePool),
         (SAURL.create("duckdb", database="md:my_db"), pool.NullPool),
     ],
 )

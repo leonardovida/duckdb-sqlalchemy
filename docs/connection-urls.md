@@ -100,5 +100,5 @@ See [motherduck.md](motherduck) for MotherDuck-specific examples and options.
 ## Pool defaults
 
 Pooling behavior is described in [configuration.md](configuration)
-(NullPool for file/MotherDuck, SingletonThreadPool for `:memory:`) and can be
+(QueuePool for local files, NullPool for MotherDuck, SingletonThreadPool for `:memory:`) and can be
 overridden with `poolclass`.

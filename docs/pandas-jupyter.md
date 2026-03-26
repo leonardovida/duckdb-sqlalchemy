@@ -18,11 +18,7 @@ conn = engine.connect()
 
 df = pd.DataFrame({"id": [1, 2], "name": ["Ada", "Grace"]})
 
-# SQLAlchemy 1.3
-conn.execute("register", ("people", df))
-
-# SQLAlchemy 1.4+
-# conn.execute(text("register(:name, :df)"), {"name": "people", "df": df})
+conn.execute(text("register(:name, :df)"), {"name": "people", "df": df})
 
 rows = conn.execute(text("select * from people")).fetchall()
 ```

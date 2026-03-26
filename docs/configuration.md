@@ -90,15 +90,16 @@ engine = create_engine(
 
 - Exact `:memory:` uses `SingletonThreadPool`.
 - Named in-memory URLs such as `:memory:analytics` and empty database URLs (`duckdb://`) use `QueuePool` for compatibility with `duckdb_engine`.
-- File paths and MotherDuck default to `NullPool` to avoid multi-writer contention.
+- Local file paths also use `QueuePool` so ORM and `Session` workloads can reuse a live DuckDB connection.
+- MotherDuck defaults to `NullPool` to avoid keeping cloud sessions open unless you opt into pooling.
 
 Override with `poolclass` if you need a different pooling strategy:
 
 ```python
 from sqlalchemy import create_engine
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import NullPool
 
-engine = create_engine("duckdb:///analytics.db", poolclass=QueuePool, pool_size=5)
+engine = create_engine("duckdb:///analytics.db", poolclass=NullPool)
 ```
 
 You can also switch the dialect default pool class via URL or env var:

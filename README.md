@@ -51,7 +51,7 @@ Current direction in this repository:
 | Component | Supported versions |
 | --- | --- |
 | Python | 3.9+ |
-| SQLAlchemy | 1.3.22+ (CI-tested: 1.3, 1.4, 2.0.48) |
+| SQLAlchemy | 2.0.45+ (CI-tested: 2.0.45, 2.0.48) |
 | DuckDB | 0.5.0+ (CI-tested currently: 1.1.3 to 1.5.1) |
 
 ## Install
@@ -127,7 +127,7 @@ md_url = MotherDuckURL(database="md:my_db", attach_mode="single")
 
 ## Configuration and pooling
 
-This dialect defaults to `SingletonThreadPool` for exact `:memory:`, `QueuePool` for named in-memory and empty database URLs, and `NullPool` for file/MotherDuck connections. You can override pooling explicitly. For long-lived MotherDuck pools, use the performance helper or configure `QueuePool`, `pool_pre_ping`, and `pool_recycle`.
+This dialect defaults to `SingletonThreadPool` for exact `:memory:`, `QueuePool` for named in-memory, empty database URLs, and local file paths, and `NullPool` for MotherDuck connections. You can still override pooling explicitly. For long-lived MotherDuck pools, use the performance helper or configure `QueuePool`, `pool_pre_ping`, and `pool_recycle`.
 
 See [docs/configuration.md](docs/configuration.md) and
 [docs/motherduck.md](docs/motherduck.md) for detailed guidance.
