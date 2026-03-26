@@ -6,6 +6,22 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.5.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.8...v1.5.1) (2026-03-26)
+
+### Versioning
+
+* align package version with supported DuckDB version (1.5.1)
+* extend the compatibility matrix and lockfile to include DuckDB 1.5.1
+
+### Features
+
+* add a native `VARIANT` SQLAlchemy type and reflect DuckDB `VARIANT` columns without degrading them to `NullType`
+
+### Notes
+
+* DuckDB 1.5.1 is a bugfix release; no dialect-level changes were required beyond validation and metadata updates
+* DuckDB 1.5.0 also introduced `GEOMETRY`, but the Python binding still raises `Unsupported type: "GEOMETRY"` on fetch, so this release does not claim first-class geometry value support yet
+
 ## [1.4.4.8](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.7...v1.4.4.8) (2026-03-24)
 
 ### Bug Fixes

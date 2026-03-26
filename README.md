@@ -52,7 +52,7 @@ Current direction in this repository:
 | --- | --- |
 | Python | 3.9+ |
 | SQLAlchemy | 1.3.22+ (CI-tested: 1.3, 1.4, 2.0.48) |
-| DuckDB | 0.5.0+ (CI-tested currently: 1.1.3 to 1.5.0) |
+| DuckDB | 0.5.0+ (CI-tested currently: 1.1.3 to 1.5.1) |
 
 ## Install
 

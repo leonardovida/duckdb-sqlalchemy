@@ -28,7 +28,7 @@ from sqlalchemy.sql import sqltypes
 from sqlalchemy.types import FLOAT, JSON
 
 from .._supports import duckdb_version, has_uhugeint_support
-from ..datatypes import Map, Struct, types
+from ..datatypes import Map, Struct, Variant, types
 
 
 @mark.parametrize("coltype", types)
@@ -162,6 +162,53 @@ def test_metadata_reflect_preserves_json_enum_and_array_types(engine: Engine) ->
     assert type(table.c.tags.type.item_type) is String
     assert isinstance(table.c.state.type, sqltypes.Enum)
     assert list(table.c.state.type.enums) == ["sad", "ok", "happy"]
+
+
+def test_variant_round_trip(engine: Engine, session: Session) -> None:
+    importorskip("duckdb", "1.5.0")
+
+    base = declarative_base()
+
+    class Entry(base):
+        __tablename__ = "test_variant"
+
+        id = Column(Integer, primary_key=True, default=0)
+        payload = Column(Variant)
+
+    base.metadata.create_all(bind=engine)
+
+    rows = [
+        Entry(id=1, payload=42),
+        Entry(id=2, payload="hello"),
+        Entry(id=3, payload={"a": 1, "b": [1, 2]}),
+        Entry(id=4, payload=[1, 2, 3]),
+        Entry(id=5, payload=None),
+    ]
+    session.add_all(rows)  # type: ignore[arg-type]
+    session.commit()
+
+    result = session.query(Entry).order_by(Entry.id).all()
+
+    assert [row.payload for row in result] == [
+        42,
+        "hello",
+        {"a": 1, "b": [1, 2]},
+        [1, 2, 3],
+        None,
+    ]
+
+
+def test_variant_reflection(engine: Engine) -> None:
+    importorskip("duckdb", "1.5.0")
+
+    with engine.begin() as con:
+        con.execute(text("CREATE TABLE t (payload VARIANT, tags VARIANT[])"))
+
+    table = Table("t", MetaData(), autoload_with=engine)
+
+    assert isinstance(table.c.payload.type, Variant)
+    assert isinstance(table.c.tags.type, sqltypes.ARRAY)
+    assert isinstance(table.c.tags.type.item_type, Variant)
 
 
 def test_uuid(engine: Engine, session: Session) -> None:
