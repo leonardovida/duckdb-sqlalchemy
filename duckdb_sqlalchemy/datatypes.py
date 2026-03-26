@@ -248,6 +248,13 @@ class Union(TypeEngine):
         return (self.__class__, ("fields", self._fields_cache_key))
 
 
+class Variant(TypeEngine):
+    """Represents the DuckDB VARIANT type."""
+
+    __visit_name__ = "variant"
+    cache_ok = True
+
+
 ISCHEMA_NAMES: Dict[str, Any] = {
     "bignum": sqltypes.Numeric,
     "hugeint": HugeInteger,
@@ -271,6 +278,7 @@ ISCHEMA_NAMES: Dict[str, Any] = {
     "time_ns": sqltypes.TIME,
     "enum": sqltypes.Enum,
     "bool": sqltypes.BOOLEAN,
+    "variant": Variant,
     "varchar": String,
 }
 if IS_GT_1:
@@ -300,6 +308,15 @@ def visit_union(
     **kw: Any,
 ) -> str:
     return "UNION" + struct_or_union(instance, compiler, identifier_preparer, **kw)
+
+
+@compiles(Variant, "duckdb")  # type: ignore[misc]
+def visit_variant(
+    instance: Variant,
+    compiler: PGTypeCompiler,
+    **kw: Any,
+) -> str:
+    return "VARIANT"
 
 
 def struct_or_union(
