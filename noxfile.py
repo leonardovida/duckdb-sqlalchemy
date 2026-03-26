@@ -3,7 +3,6 @@ from typing import Generator
 
 import github_action_utils as gha
 import nox
-from packaging.version import Version
 
 nox.options.default_venv_backend = "uv"
 nox.options.error_on_external_run = True
@@ -43,7 +42,7 @@ def group(title: str) -> Generator[None, None, None]:
         "1.5.1",
     ],
 )
-@nox.parametrize("sqlalchemy", ["1.3", "1.4", "2.0.48"])
+@nox.parametrize("sqlalchemy", ["2.0.45", "2.0.48"])
 def tests(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
     tests_core(session, duckdb, sqlalchemy)
 
@@ -51,22 +50,14 @@ def tests(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
 @nox.session(py=["3.9"])
 def nightly(session: nox.Session) -> None:
     session.skip("DuckDB nightly installs are broken right now")
-    tests_core(session, "master", "1.4")
+    tests_core(session, "master", "2.0.48")
 
 
 def tests_core(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
-    if session.python is not None:
-        major, minor = (int(part) for part in session.python.split(".")[:2])
-        if (major, minor) >= (3, 12) and sqlalchemy == "1.3":
-            session.skip("SQLAlchemy 1.3 is not supported on Python >= 3.12")
-        if (major, minor) >= (3, 13) and sqlalchemy == "1.4":
-            session.skip("SQLAlchemy 1.4 is not supported on Python >= 3.13")
     with group(f"{session.name} - Install"):
         session.install("-e", ".[dev]")
         operator = "==" if sqlalchemy.count(".") == 2 else "~="
         session.install(f"sqlalchemy{operator}{sqlalchemy}")
-        if Version(sqlalchemy) < Version("2.0"):
-            session.install("pandas<2.2")
         if duckdb == "master":
             session.install("duckdb", "--pre", "-U")
         else:

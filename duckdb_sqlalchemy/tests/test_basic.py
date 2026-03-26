@@ -590,14 +590,16 @@ def test_do_ping(tmp_path: Path, caplog: LogCaptureFixture) -> None:
         )
 
 
-def test_named_in_memory_uses_queue_pool() -> None:
+def test_pool_defaults_for_memory_and_file_urls(tmp_path: Path) -> None:
     exact_memory = create_engine("duckdb:///:memory:")
     named_memory = create_engine("duckdb:///:memory:named")
     empty_database = create_engine("duckdb://")
+    file_database = create_engine(f"duckdb:///{tmp_path / 'pool_defaults.duckdb'}")
 
     assert isinstance(exact_memory.pool, SingletonThreadPool)
     assert isinstance(named_memory.pool, QueuePool)
     assert isinstance(empty_database.pool, QueuePool)
+    assert isinstance(file_database.pool, QueuePool)
 
 
 def test_checkpoint_helper_commits_sqlalchemy_connection(tmp_path: Path) -> None:

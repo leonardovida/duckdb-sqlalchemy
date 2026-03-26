@@ -6,6 +6,13 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## Unreleased
+
+### Bug Fixes
+
+* require SQLAlchemy 2.0.45+ in package metadata and the test matrix to match the reflection API used by the dialect
+* default local file-backed DuckDB engines to `QueuePool` while keeping MotherDuck on `NullPool`
+
 ## [1.5.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.8...v1.5.1) (2026-03-26)
 
 ### Versioning

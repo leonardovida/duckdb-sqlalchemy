@@ -711,7 +711,7 @@ class Dialect(PGDialect_psycopg2):
             return pool.QueuePool
         if _looks_like_motherduck(url.database, dict(url.query)):
             return pool.NullPool
-        return pool.NullPool
+        return pool.QueuePool
 
     @staticmethod
     def dbapi(**kwargs: Any) -> Type[DBAPI]:
