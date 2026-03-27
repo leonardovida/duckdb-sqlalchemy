@@ -35,8 +35,7 @@ from sqlalchemy.dialects import registry  # type: ignore
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Session, relationship, sessionmaker
+from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 from sqlalchemy.pool import QueuePool, SingletonThreadPool
 
 from .. import Dialect, checkpoint, insert, supports_attach, supports_user_agent
@@ -464,7 +463,7 @@ def test_sessions(session: Session) -> None:
     session.add(c)
     session.commit()
 
-    c2 = session.query(IntervalModel).get(1)
+    c2 = session.get(IntervalModel, 1)
     assert c2
     c2.field = timedelta(days=5)
     session.flush()

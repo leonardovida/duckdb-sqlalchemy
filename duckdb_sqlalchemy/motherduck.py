@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import warnings
 from itertools import cycle
 from typing import (
     Any,
@@ -43,8 +44,19 @@ DIALECT_QUERY_KEYS = {"duckdb_sqlalchemy_pool", "pool"}
 CONNECT_ARG_MAPPING_KEYS = ("config", "url_config")
 
 
+def _warn_deprecated_ttl_alias() -> None:
+    warnings.warn(
+        "`motherduck_dbinstance_inactivity_ttl` is deprecated; use "
+        "`dbinstance_inactivity_ttl` instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
 def _normalize_path_query_aliases(path_query: Dict[str, Any]) -> Dict[str, Any]:
     alias_value = path_query.pop(MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY, None)
+    if alias_value is not None:
+        _warn_deprecated_ttl_alias()
     if DBINSTANCE_INACTIVITY_TTL_KEY not in path_query and alias_value is not None:
         path_query[DBINSTANCE_INACTIVITY_TTL_KEY] = alias_value
     return path_query
@@ -57,6 +69,8 @@ def _normalize_path_query_mapping(
 
 
 def _normalize_config_aliases(config: Dict[str, Any]) -> Dict[str, Any]:
+    if MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY in config:
+        _warn_deprecated_ttl_alias()
     ttl = config.get(DBINSTANCE_INACTIVITY_TTL_KEY)
     if ttl is not None and MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY not in config:
         config[MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY] = ttl

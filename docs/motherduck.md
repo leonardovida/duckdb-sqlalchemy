@@ -63,7 +63,8 @@ Parameters that are treated as part of the database string:
 - `session_hint` (read-scaling affinity)
 - `attach_mode` (`workspace` or `single`)
 - `access_mode` (`read_only` for read-scaling tokens)
-- `dbinstance_inactivity_ttl` (alias for `motherduck_dbinstance_inactivity_ttl`)
+- `dbinstance_inactivity_ttl` (preferred; `motherduck_dbinstance_inactivity_ttl`
+  remains supported but is deprecated)
 - `saas_mode`
 - `cache_buster`
 
