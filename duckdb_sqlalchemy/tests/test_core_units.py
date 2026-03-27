@@ -73,7 +73,8 @@ def test_create_connect_args_moves_user_query_param() -> None:
         },
     )
 
-    args, kwargs = dialect.create_connect_args(url)
+    with pytest.warns(DeprecationWarning, match="dbinstance_inactivity_ttl"):
+        args, kwargs = dialect.create_connect_args(url)
 
     assert args == ()
     database, query = kwargs["database"].split("?", 1)
@@ -141,13 +142,14 @@ def test_retry_on_transient_select() -> None:
 
 
 def test_motherduck_url_builder_moves_path_params() -> None:
-    url = MotherDuckURL(
-        database="md:my_db",
-        session_hint="team-a",
-        attach_mode="single",
-        motherduck_dbinstance_inactivity_ttl="15m",
-        query={"memory_limit": "1GB"},
-    )
+    with pytest.warns(DeprecationWarning, match="dbinstance_inactivity_ttl"):
+        url = MotherDuckURL(
+            database="md:my_db",
+            session_hint="team-a",
+            attach_mode="single",
+            motherduck_dbinstance_inactivity_ttl="15m",
+            query={"memory_limit": "1GB"},
+        )
 
     assert url.database is not None
     database, query = url.database.split("?", 1)
@@ -254,8 +256,18 @@ def test_normalize_motherduck_config_alias() -> None:
         "dbinstance_inactivity_ttl": "1h",
         "motherduck_dbinstance_inactivity_ttl": "2h",
     }
-    _normalize_motherduck_config(config)
+    with pytest.warns(DeprecationWarning, match="dbinstance_inactivity_ttl"):
+        _normalize_motherduck_config(config)
     assert config["motherduck_dbinstance_inactivity_ttl"] == "2h"
+
+
+def test_normalize_motherduck_config_warns_on_deprecated_alias() -> None:
+    config = {"motherduck_dbinstance_inactivity_ttl": "1h"}
+
+    with pytest.warns(DeprecationWarning, match="dbinstance_inactivity_ttl"):
+        _normalize_motherduck_config(config)
+
+    assert config["motherduck_dbinstance_inactivity_ttl"] == "1h"
 
 
 def test_has_comment_support_false_on_parser_exception(
@@ -898,11 +910,12 @@ def test_motherduck_url_merges_and_overrides_across_inputs() -> None:
 
 
 def test_motherduck_url_prefers_canonical_ttl_over_alias() -> None:
-    url = md.MotherDuckURL(
-        database="md:db",
-        path_query={"motherduck_dbinstance_inactivity_ttl": "10m"},
-        dbinstance_inactivity_ttl="15m",
-    )
+    with pytest.warns(DeprecationWarning, match="dbinstance_inactivity_ttl"):
+        url = md.MotherDuckURL(
+            database="md:db",
+            path_query={"motherduck_dbinstance_inactivity_ttl": "10m"},
+            dbinstance_inactivity_ttl="15m",
+        )
 
     assert url.database == "md:db?dbinstance_inactivity_ttl=15m"
 
@@ -915,7 +928,8 @@ def test_split_url_query_partitions_and_ignores_dialect_keys() -> None:
         "duckdb_sqlalchemy_pool": "queue",
     }
 
-    path_query, url_config = md.split_url_query(query)
+    with pytest.warns(DeprecationWarning, match="dbinstance_inactivity_ttl"):
+        path_query, url_config = md.split_url_query(query)
 
     assert path_query == {"user": "alice", "dbinstance_inactivity_ttl": "15m"}
     assert url_config == {"memory_limit": "1GB"}
@@ -929,7 +943,8 @@ def test_extract_path_query_from_config_mutates_and_normalizes_aliases() -> None
         "threads": 4,
     }
 
-    path_query = md.extract_path_query_from_config(config)
+    with pytest.warns(DeprecationWarning, match="dbinstance_inactivity_ttl"):
+        path_query = md.extract_path_query_from_config(config)
 
     assert path_query == {
         "session_hint": "team-a",
