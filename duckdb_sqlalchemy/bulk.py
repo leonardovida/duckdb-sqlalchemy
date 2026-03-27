@@ -131,20 +131,26 @@ def _copy_rows_as_csv_chunks(
             except FileNotFoundError:
                 pass
 
-    tmp, writer, count = open_writer()
+    tmp = None
+    writer = None
+    count = 0
 
     try:
         for row in rows:
-            writer.writerow(row)
-            count += 1
-            if chunk_size and count >= chunk_size:
+            if tmp is None or writer is None:
+                tmp, writer, count = open_writer()
+            elif chunk_size and count >= chunk_size:
                 flush_chunk(tmp)
                 tmp, writer, count = open_writer()
 
-        if count:
+            writer.writerow(row)
+            count += 1
+
+        if tmp is not None and count:
             flush_chunk(tmp)
+            tmp = None
     finally:
-        if not tmp.closed:
+        if tmp is not None and not tmp.closed:
             _close_and_unlink_tempfile(tmp)
 
 

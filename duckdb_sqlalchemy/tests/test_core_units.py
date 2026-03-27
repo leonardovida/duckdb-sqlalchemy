@@ -690,7 +690,7 @@ def test_copy_from_rows_closes_rotated_tempfiles(
         chunk_size=1,
     )
 
-    assert len(created) == 3
+    assert len(created) == 2
     assert len(copied) == 2
     assert all(temp.closed for temp in created)
     assert all(not Path(temp.name).exists() for temp in created)
