@@ -321,6 +321,29 @@ def test_identifier_preparer_separate_and_format_schema() -> None:
     assert formatted == '"my db".main'
 
 
+def test_identifier_preparer_reserved_words_are_cached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    duckdb_sqlalchemy._get_reserved_words.cache_clear()
+    calls = 0
+
+    class DummyCursor:
+        def execute(self, statement: str):
+            nonlocal calls
+            calls += 1
+            return self
+
+        def fetchall(self):
+            return [("select",)]
+
+    monkeypatch.setattr(duckdb_sqlalchemy.duckdb, "cursor", lambda: DummyCursor())
+
+    Dialect().identifier_preparer
+    Dialect().identifier_preparer
+
+    assert calls == 1
+
+
 def test_table_function_error_without_table_valued(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -469,6 +492,16 @@ def test_cursorwrapper_execute_handles_specific_runtime_errors() -> None:
 
     cursor = _cursor(NotImplementedConn())
     with pytest.raises(NotImplementedError):
+        cursor.execute("select 1")
+
+
+def test_cursorwrapper_execute_preserves_runtime_errors_without_message() -> None:
+    class BrokenConn:
+        def execute(self, *args, **kwargs):
+            raise RuntimeError()
+
+    cursor = _cursor(BrokenConn())
+    with pytest.raises(RuntimeError):
         cursor.execute("select 1")
 
 

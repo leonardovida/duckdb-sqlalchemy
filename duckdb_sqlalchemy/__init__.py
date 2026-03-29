@@ -265,10 +265,11 @@ class CursorWrapper:
             else:
                 self.__c.execute(statement, parameters)
         except RuntimeError as e:
-            if e.args[0].startswith("Not implemented Error"):
+            message = str(e)
+            if message.startswith("Not implemented Error"):
                 raise NotImplementedError(*e.args) from e
             elif (
-                e.args[0]
+                message
                 == "TransactionContext Error: cannot commit - no transaction is active"
             ):
                 return
@@ -312,6 +313,18 @@ class CursorWrapper:
 
 class DuckDBEngineWarning(Warning):
     pass
+
+
+@lru_cache()
+def _get_reserved_words() -> set[str]:
+    return {
+        keyword_name
+        for (keyword_name,) in duckdb.cursor()
+        .execute(
+            "select keyword_name from duckdb_keywords() where keyword_category == 'reserved'"
+        )
+        .fetchall()
+    }
 
 
 def _normalize_execution_options(execution_options: Dict[str, Any]) -> Dict[str, Any]:
@@ -544,17 +557,7 @@ def _normalize_motherduck_config(config: Dict[str, Any]) -> None:
 class DuckDBIdentifierPreparer(PGIdentifierPreparer):
     def __init__(self, dialect: "Dialect", **kwargs: Any) -> None:
         super().__init__(dialect, **kwargs)
-
-        self.reserved_words.update(
-            {
-                keyword_name
-                for (keyword_name,) in duckdb.cursor()
-                .execute(
-                    "select keyword_name from duckdb_keywords() where keyword_category == 'reserved'"
-                )
-                .fetchall()
-            }
-        )
+        self.reserved_words.update(_get_reserved_words())
 
     def _separate(self, name: Optional[str]) -> Tuple[Optional[Any], Optional[str]]:
         """
