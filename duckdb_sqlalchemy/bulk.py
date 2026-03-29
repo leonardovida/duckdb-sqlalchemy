@@ -43,11 +43,13 @@ def _format_copy_options(options: Mapping[str, Any]) -> str:
     return " (" + ", ".join(parts) + ")"
 
 
+def _get_identifier_preparer(connection: Any) -> Any:
+    return getattr(getattr(connection, "dialect", None), "identifier_preparer", None)
+
+
 def _format_table(connection: Any, table: TableLike) -> str:
     if hasattr(table, "name"):
-        preparer = getattr(
-            getattr(connection, "dialect", None), "identifier_preparer", None
-        )
+        preparer = _get_identifier_preparer(connection)
         if preparer is not None:
             return preparer.format_table(table)
         schema = getattr(table, "schema", None)
@@ -68,9 +70,7 @@ def _format_columns(connection: Any, columns: Optional[Sequence[str]]) -> str:
     if not columns:
         return ""
     validated_columns = validate_identifier_list(columns, kind="column identifier")
-    preparer = getattr(
-        getattr(connection, "dialect", None), "identifier_preparer", None
-    )
+    preparer = _get_identifier_preparer(connection)
     if preparer is None:
         cols = ", ".join(validated_columns)
     else:
@@ -84,16 +84,20 @@ def _execute_sql(connection: Any, statement: str) -> Any:
     return connection.execute(statement)
 
 
+def _unlink_if_exists(path: Union[str, Path]) -> None:
+    try:
+        Path(path).unlink()
+    except FileNotFoundError:
+        pass
+
+
 def _close_and_unlink_tempfile(tmp: Any) -> None:
     path = tmp.name
     try:
         tmp.flush()
     finally:
         tmp.close()
-    try:
-        Path(path).unlink()
-    except FileNotFoundError:
-        pass
+    _unlink_if_exists(path)
 
 
 def _copy_rows_as_csv_chunks(
@@ -126,10 +130,7 @@ def _copy_rows_as_csv_chunks(
                 **copy_options,
             )
         finally:
-            try:
-                Path(path).unlink()
-            except FileNotFoundError:
-                pass
+            _unlink_if_exists(path)
 
     tmp = None
     writer = None
