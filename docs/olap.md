@@ -99,7 +99,8 @@ If `pyarrow`/`pandas` are unavailable, the dialect falls back to regular
 `ON CONFLICT` is in use.
 
 On SQLAlchemy 2.x you can also tune multi-row INSERT batching with
-`duckdb_insertmanyvalues_page_size` (defaults to 1000).
+`insertmanyvalues_page_size` (defaults to 1000). The older
+`duckdb_insertmanyvalues_page_size` alias still works but is deprecated.
 
 ## COPY helpers
 

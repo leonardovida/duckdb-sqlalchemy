@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qs
@@ -764,7 +765,8 @@ def test_parse_register_params_errors() -> None:
 
 def test_normalize_execution_options_insertmanyvalues() -> None:
     original = {"duckdb_insertmanyvalues_page_size": 123}
-    normalized = _normalize_execution_options(original)
+    with pytest.warns(DeprecationWarning, match="insertmanyvalues_page_size"):
+        normalized = _normalize_execution_options(original)
     assert normalized["insertmanyvalues_page_size"] == 123
     assert "insertmanyvalues_page_size" not in original
 
@@ -774,6 +776,20 @@ def test_normalize_execution_options_insertmanyvalues() -> None:
     }
     normalized = _normalize_execution_options(already)
     assert normalized["insertmanyvalues_page_size"] == 10
+
+
+def test_normalize_execution_options_canonical_value_skips_warning() -> None:
+    original = {
+        "duckdb_insertmanyvalues_page_size": 5,
+        "insertmanyvalues_page_size": 10,
+    }
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        normalized = _normalize_execution_options(original)
+
+    assert normalized["insertmanyvalues_page_size"] == 10
+    assert recorded == []
 
 
 def test_idempotent_statement_detection() -> None:

@@ -2,6 +2,7 @@ import os
 import re
 import time
 import uuid
+import warnings
 from collections import defaultdict
 from functools import lru_cache
 from typing import (
@@ -333,6 +334,12 @@ def _normalize_execution_options(execution_options: Dict[str, Any]) -> Dict[str,
         and "insertmanyvalues_page_size" not in execution_options
     ):
         execution_options = dict(execution_options)
+        warnings.warn(
+            "`duckdb_insertmanyvalues_page_size` is deprecated; use "
+            "`insertmanyvalues_page_size` instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
         execution_options["insertmanyvalues_page_size"] = execution_options[
             "duckdb_insertmanyvalues_page_size"
         ]
