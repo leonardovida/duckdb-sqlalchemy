@@ -57,14 +57,15 @@ DuckDB-specific execution options are available on connections and statements:
 with engine.connect().execution_options(
     duckdb_arrow=True,
     duckdb_copy_threshold=10000,
-    duckdb_insertmanyvalues_page_size=1000,
+    insertmanyvalues_page_size=1000,
 ) as conn:
     conn.execute(stmt)
 ```
 
 - `duckdb_arrow`: return Arrow tables for SELECTs (`result.arrow` or `result.all()`); requires `pyarrow`.
 - `duckdb_copy_threshold`: for large INSERT executemany, register a pandas/Arrow object and run `INSERT INTO ... SELECT ...`.
-- `duckdb_insertmanyvalues_page_size`: batch size for SQLAlchemy 2.x multi-row VALUES inserts.
+- `insertmanyvalues_page_size`: canonical SQLAlchemy batch size for 2.x multi-row VALUES inserts.
+- `duckdb_insertmanyvalues_page_size`: deprecated alias for `insertmanyvalues_page_size`; still supported for backward compatibility.
 - `duckdb_arraysize`: cursor fetch size for `stream_results` / `fetchmany` workloads.
 
 Arrow results consume the cursor; fetch rows or Arrow, not both.
