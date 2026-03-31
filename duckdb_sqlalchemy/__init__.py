@@ -15,7 +15,6 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
-    Type,
     cast,
 )
 
@@ -82,7 +81,10 @@ if TYPE_CHECKING:
     from sqlalchemy.engine import Connection
     from sqlalchemy.engine.interfaces import (  # noqa: F401
         ReflectedCheckConstraint,
+        ReflectedForeignKeyConstraint,
         ReflectedIndex,
+        ReflectedPrimaryKeyConstraint,
+        ReflectedUniqueConstraint,
     )
 
     from .capabilities import DuckDBCapabilities
@@ -652,7 +654,9 @@ class Dialect(PGDialect_psycopg2):
     def capabilities(self) -> "DuckDBCapabilities":
         return self._capabilities
 
-    def type_descriptor(self, typeobj: Type[sqltypes.TypeEngine]) -> Any:  # type: ignore[override]
+    def type_descriptor(
+        self, typeobj: sqltypes.TypeEngine[Any]
+    ) -> sqltypes.TypeEngine[Any]:
         res = super().type_descriptor(typeobj)
 
         if isinstance(res, sqltypes.NullType):
@@ -705,7 +709,7 @@ class Dialect(PGDialect_psycopg2):
         pass
 
     @classmethod
-    def get_pool_class(cls, url: SAURL) -> Type[pool.Pool]:
+    def get_pool_class(cls, url: SAURL) -> type[pool.Pool]:
         pool_override = _pool_override_from_url(url)
         if pool_override == "queue":
             return pool.QueuePool
@@ -724,7 +728,7 @@ class Dialect(PGDialect_psycopg2):
         return pool.QueuePool
 
     @staticmethod
-    def dbapi(**kwargs: Any) -> Type[DBAPI]:
+    def dbapi(**kwargs: Any) -> type[DBAPI]:
         return DBAPI
 
     def _get_server_version_info(self, connection: "Connection") -> Tuple[int, int]:
@@ -972,7 +976,7 @@ class Dialect(PGDialect_psycopg2):
         stmt = text(sql)
         if params.get("filter_names"):
             stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
-        return list(connection.execute(stmt, params).mappings())
+        return [dict(row) for row in connection.execute(stmt, params).mappings()]
 
     def _duckdb_table_names(
         self,
@@ -1185,7 +1189,7 @@ class Dialect(PGDialect_psycopg2):
         table_name: str,
         schema: Optional[str] = None,
         **kw: Any,
-    ) -> Dict[str, Any]:
+    ) -> "ReflectedPrimaryKeyConstraint":
         scope = kw.pop("scope", None)
         kind = kw.pop("kind", None)
         constraints = dict(
@@ -1245,20 +1249,35 @@ class Dialect(PGDialect_psycopg2):
         )
 
     @cache  # type: ignore[call-arg]
-    def get_foreign_keys(  # type: ignore[no-untyped-def]
-        self, connection: "Connection", table_name: str, schema=None, **kw: "Any"
-    ):
+    def get_foreign_keys(
+        self,
+        connection: "Connection",
+        table_name: str,
+        schema: Optional[str] = None,
+        postgresql_ignore_search_path: bool = False,
+        **kw: Any,
+    ) -> List["ReflectedForeignKeyConstraint"]:
         try:
-            return super().get_foreign_keys(connection, table_name, schema=schema, **kw)
+            return super().get_foreign_keys(
+                connection,
+                table_name,
+                schema=schema,
+                postgresql_ignore_search_path=postgresql_ignore_search_path,
+                **kw,
+            )
         except NoSuchTableError:
             if self._duckdb_table_exists(connection, table_name, schema):
                 return []
             raise
 
     @cache  # type: ignore[call-arg]
-    def get_unique_constraints(  # type: ignore[no-untyped-def]
-        self, connection: "Connection", table_name: str, schema=None, **kw: "Any"
-    ):
+    def get_unique_constraints(
+        self,
+        connection: "Connection",
+        table_name: str,
+        schema: Optional[str] = None,
+        **kw: Any,
+    ) -> List["ReflectedUniqueConstraint"]:
         try:
             return super().get_unique_constraints(
                 connection, table_name, schema=schema, **kw
@@ -1269,9 +1288,13 @@ class Dialect(PGDialect_psycopg2):
             raise
 
     @cache  # type: ignore[call-arg]
-    def get_check_constraints(  # type: ignore[no-untyped-def]
-        self, connection: "Connection", table_name: str, schema=None, **kw: "Any"
-    ):
+    def get_check_constraints(
+        self,
+        connection: "Connection",
+        table_name: str,
+        schema: Optional[str] = None,
+        **kw: Any,
+    ) -> List["ReflectedCheckConstraint"]:
         try:
             return super().get_check_constraints(
                 connection, table_name, schema=schema, **kw
@@ -1497,27 +1520,13 @@ class Dialect(PGDialect_psycopg2):
 
         self._execute_with_retry(cursor, statement, parameters, context, executor)
 
-    def do_execute_no_params(  # type: ignore[override]
-        self, cursor: Any, statement: str, *args: Any
+    def do_execute_no_params(
+        self, cursor: Any, statement: str, context: Optional[Any] = None
     ) -> None:
-        parameters: Any = None
-        context: Optional[Any] = None
-        if len(args) == 1:
-            context = cast(Optional[Any], args[0])
-        elif len(args) >= 2:
-            parameters = args[0]
-            context = cast(Optional[Any], args[1])
-
         def executor() -> Any:
-            if parameters is None:
-                return DefaultDialect.do_execute_no_params(
-                    self, cursor, statement, context
-                )
-            return DefaultDialect.do_execute(
-                self, cursor, statement, parameters, context
-            )
+            return DefaultDialect.do_execute_no_params(self, cursor, statement, context)
 
-        self._execute_with_retry(cursor, statement, parameters, context, executor)
+        self._execute_with_retry(cursor, statement, None, context, executor)
 
     def _pg_class_filter_scope_schema(
         self,
