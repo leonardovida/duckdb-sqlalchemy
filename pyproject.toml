@@ -45,7 +45,7 @@ dev = [
     "numpy>=2.0,<3.0; python_version >= '3.13'",
     "pyarrow>=22.0.0; python_version >= '3.10'",
     "pytest>=8.0.0,<10.0.0",
-    "ty==0.0.24",
+    "ty==0.0.26",
     "hypothesis>=6.75.2,<7.0.0",
     "github-action-utils>=1.1.0,<2.0.0",
     "pandas>=1,<2.0; python_version < '3.12'",

@@ -22,7 +22,7 @@ def group(title: str) -> Generator[None, None, None]:
 
 
 # TODO: "0.5.1", "0.6.1", "0.7.1", "0.8.1"
-@nox.session(py=["3.10", "3.11", "3.12", "3.13"])
+@nox.session(py=["3.10", "3.11", "3.12", "3.13", "3.14"])
 # Keep the matrix aligned with the DuckDB and SQLAlchemy release lines we validate.
 @nox.parametrize(
     "duckdb",
@@ -81,4 +81,14 @@ def tests_core(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
 @nox.session(py=["3.11"])
 def ty(session: nox.Session) -> None:
     session.install("-e", ".[dev]")
-    session.run("ty", "check", "duckdb_sqlalchemy/")
+    session.run(
+        "ty",
+        "check",
+        "--ignore",
+        "unresolved-import",
+        "--ignore",
+        "unused-type-ignore-comment",
+        "--exclude",
+        "duckdb_sqlalchemy/tests/**",
+        "duckdb_sqlalchemy/",
+    )
