@@ -997,6 +997,8 @@ def test_merge_and_copy_connect_args() -> None:
     assert base["url_config"] == {"memory_limit": "1GB"}
     assert merged["config"] is not base["config"]
     assert merged["url_config"] is not base["url_config"]
+    assert merged["config"] is not extra["config"]
+    assert merged["url_config"] is not extra["url_config"]
 
     copied = md._copy_connect_params(merged)
     copied["config"]["threads"] = 1
