@@ -221,10 +221,12 @@ def _merge_connect_args(
     merged = _copy_connect_params(base)
     if not extra:
         return merged
-    remaining = dict(extra)
+    remaining = _copy_connect_params(extra)
     for key in CONNECT_ARG_MAPPING_KEYS:
-        if key in remaining:
-            merged[key] = {**merged.get(key, {}), **remaining.pop(key)}
+        extra_mapping = remaining.pop(key, None)
+        if extra_mapping is None:
+            continue
+        merged[key] = {**merged.get(key, {}), **extra_mapping}
     merged.update(remaining)
     return merged
 
@@ -232,8 +234,9 @@ def _merge_connect_args(
 def _copy_connect_params(params: Mapping[str, Any]) -> Dict[str, Any]:
     copied = dict(params)
     for key in CONNECT_ARG_MAPPING_KEYS:
-        if key in copied:
-            copied[key] = dict(copied[key])
+        value = copied.get(key)
+        if value is not None:
+            copied[key] = dict(value)
     return copied
 
 
