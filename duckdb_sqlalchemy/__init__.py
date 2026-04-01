@@ -1074,13 +1074,41 @@ class Dialect(PGDialect_psycopg2):
             return list(enum_row["labels"]), cast(Optional[str], enum_name)
 
         inner = data_type[len("ENUM(") : -1]
-        labels: List[str] = []
-        for token in self._split_duckdb_list(inner):
-            label = token.strip()
-            if label.startswith("'") and label.endswith("'"):
-                label = label[1:-1].replace("''", "'")
-            labels.append(label)
+        labels = [
+            self._unquote_duckdb_string(token)
+            for token in self._split_duckdb_list(inner)
+        ]
         return labels, None
+
+    def _unquote_duckdb_string(self, value: str) -> str:
+        value = value.strip()
+        if value.startswith("'") and value.endswith("'"):
+            return value[1:-1].replace("''", "'")
+        return value
+
+    def _unquote_duckdb_identifier(self, value: str) -> Optional[str]:
+        if value.startswith('"') and value.endswith('"'):
+            return value[1:-1].replace('""', '"')
+        return None
+
+    def _reflect_duckdb_index_expressions(
+        self,
+        raw_expressions: Any,
+    ) -> Tuple[List[str], List[Optional[str]]]:
+        raw = str(raw_expressions or "").strip()
+        inner = raw[1:-1] if raw.startswith("[") and raw.endswith("]") else raw
+        expressions = self._split_duckdb_list(inner)
+        column_names: List[Optional[str]] = []
+        for expression in expressions:
+            candidate = self._unquote_duckdb_string(expression)
+            identifier = self._unquote_duckdb_identifier(candidate)
+            if identifier is not None:
+                column_names.append(identifier)
+            elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]*", candidate):
+                column_names.append(candidate)
+            else:
+                column_names.append(None)
+        return expressions, column_names
 
     def _reflect_duckdb_data_type(
         self,
@@ -1356,28 +1384,15 @@ class Dialect(PGDialect_psycopg2):
         index_rows = list(connection.execute(stmt, params).mappings())
         indexes: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for row in index_rows:
-            raw = (row["expressions"] or "").strip()
-            inner = raw[1:-1] if raw.startswith("[") and raw.endswith("]") else raw
-            expressions = self._split_duckdb_list(inner)
-            column_names: List[Optional[str]] = []
-            has_expression = False
-            for expression in expressions:
-                candidate = expression.strip()
-                if candidate.startswith("'") and candidate.endswith("'"):
-                    candidate = candidate[1:-1].replace("''", "'")
-                if candidate.startswith('"') and candidate.endswith('"'):
-                    column_names.append(candidate[1:-1].replace('""', '"'))
-                elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]*", candidate):
-                    column_names.append(candidate)
-                else:
-                    column_names.append(None)
-                    has_expression = True
+            expressions, column_names = self._reflect_duckdb_index_expressions(
+                row["expressions"]
+            )
             reflected_index: Dict[str, Any] = {
                 "name": row["index_name"],
                 "column_names": column_names,
                 "unique": bool(row["is_unique"]),
             }
-            if has_expression:
+            if any(column_name is None for column_name in column_names):
                 reflected_index["expressions"] = expressions
             indexes[row["table_name"]].append(reflected_index)
         schema_key = self._reflection_schema_key(schema)

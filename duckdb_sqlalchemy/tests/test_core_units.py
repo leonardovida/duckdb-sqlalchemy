@@ -568,6 +568,25 @@ def test_struct_or_union_requires_fields() -> None:
     assert '"first name"' in rendered
 
 
+def test_parse_duckdb_enum_labels_unquotes_escaped_strings() -> None:
+    labels, enum_name = Dialect()._parse_duckdb_enum_labels(
+        "ENUM('alpha', 'it''s fine')",
+        None,
+    )
+
+    assert labels == ["alpha", "it's fine"]
+    assert enum_name is None
+
+
+def test_reflect_duckdb_index_expressions_parses_columns_and_expressions() -> None:
+    expressions, column_names = Dialect()._reflect_duckdb_index_expressions(
+        "['name', '\"display name\"', 'lower(name)']"
+    )
+
+    assert expressions == ["'name'", "'\"display name\"'", "'lower(name)'"]
+    assert column_names == ["name", "display name", None]
+
+
 def test_apply_config_rejects_invalid_key_no_side_effect() -> None:
     conn = duckdb.connect(":memory:")
     dialect = Dialect()
