@@ -834,6 +834,23 @@ def test_pool_override_from_url_and_env(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.mark.parametrize(
+    ("override", "expected"),
+    [
+        ("queue", pool.QueuePool),
+        ("singleton", pool.SingletonThreadPool),
+        ("singletonthreadpool", pool.SingletonThreadPool),
+        ("null", pool.NullPool),
+        ("nullpool", pool.NullPool),
+    ],
+)
+def test_pool_class_uses_override_aliases(
+    override: str, expected: type[pool.Pool]
+) -> None:
+    url = URL(database="md:my_db", query={"duckdb_sqlalchemy_pool": override})
+    assert Dialect.get_pool_class(url) is expected
+
+
+@pytest.mark.parametrize(
     ("url", "expected"),
     [
         (SAURL.create("duckdb", database=":memory:"), pool.SingletonThreadPool),
