@@ -14,6 +14,10 @@ preserved from the upstream project for historical context.
 * default local file-backed DuckDB engines to `QueuePool` while keeping MotherDuck on `NullPool`
 * install `nox` with the `devtools` extra so the documented `nox -s ...` workflow works in a fresh repo checkout
 
+### Tooling
+
+* refresh the locked dev toolchain and bump `ty` to 0.0.27 after validating the current suite against the latest allowed package set
+
 ## [1.5.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.8...v1.5.1) (2026-03-26)
 
 ### Versioning

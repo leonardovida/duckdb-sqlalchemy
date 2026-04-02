@@ -549,6 +549,35 @@ def _pool_override_from_url(url: SAURL) -> Optional[str]:
     return str(value).lower()
 
 
+_POOL_CLASS_OVERRIDES: Dict[str, type[pool.Pool]] = {
+    "queue": pool.QueuePool,
+    "singleton": pool.SingletonThreadPool,
+    "singletonthreadpool": pool.SingletonThreadPool,
+    "null": pool.NullPool,
+    "nullpool": pool.NullPool,
+}
+
+
+def _pool_class_from_override(
+    pool_override: Optional[str],
+) -> Optional[type[pool.Pool]]:
+    if pool_override is None:
+        return None
+    return _POOL_CLASS_OVERRIDES.get(pool_override)
+
+
+def _default_pool_class_for_database(
+    database: Optional[str], query: Dict[str, Any]
+) -> type[pool.Pool]:
+    if database == ":memory:":
+        return pool.SingletonThreadPool
+    if not database or database.startswith(":memory:"):
+        return pool.QueuePool
+    if _looks_like_motherduck(database, query):
+        return pool.NullPool
+    return pool.QueuePool
+
+
 def _apply_motherduck_defaults(config: Dict[str, Any], database: Optional[str]) -> None:
     if "motherduck_token" not in config:
         token = os.getenv("motherduck_token") or os.getenv("MOTHERDUCK_TOKEN")
@@ -710,22 +739,10 @@ class Dialect(PGDialect_psycopg2):
 
     @classmethod
     def get_pool_class(cls, url: SAURL) -> type[pool.Pool]:
-        pool_override = _pool_override_from_url(url)
-        if pool_override == "queue":
-            return pool.QueuePool
-        if pool_override in {"singleton", "singletonthreadpool"}:
-            return pool.SingletonThreadPool
-        if pool_override in {"null", "nullpool"}:
-            return pool.NullPool
-        if url.database == ":memory:":
-            return pool.SingletonThreadPool
-        if not url.database:
-            return pool.QueuePool
-        if url.database.startswith(":memory:"):
-            return pool.QueuePool
-        if _looks_like_motherduck(url.database, dict(url.query)):
-            return pool.NullPool
-        return pool.QueuePool
+        pool_class = _pool_class_from_override(_pool_override_from_url(url))
+        if pool_class is not None:
+            return pool_class
+        return _default_pool_class_for_database(url.database, dict(url.query))
 
     @staticmethod
     def dbapi(**kwargs: Any) -> type[DBAPI]:
