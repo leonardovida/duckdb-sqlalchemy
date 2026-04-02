@@ -12,6 +12,7 @@ preserved from the upstream project for historical context.
 
 * require SQLAlchemy 2.0.45+ in package metadata and the test matrix to match the reflection API used by the dialect
 * default local file-backed DuckDB engines to `QueuePool` while keeping MotherDuck on `NullPool`
+* install `nox` with the `devtools` extra so the documented `nox -s ...` workflow works in a fresh repo checkout
 
 ### Tooling
 
