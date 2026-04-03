@@ -125,13 +125,15 @@ def _normalize_fields(
     if fields is None:
         return None
     if isinstance(fields, dict):
-        items = fields.items()
+        items = typing.cast(typing.Iterable[Tuple[str, TV]], fields.items())
     else:
         items = fields
-    return tuple(
-        (str(key), type_api.to_instance(value))
-        for key, value in items  # type: ignore[arg-type]
-    )
+    normalized: list[Tuple[str, TypeEngine]] = []
+    for key, value in items:
+        normalized.append(
+            (str(key), typing.cast(TypeEngine, type_api.to_instance(value)))
+        )
+    return tuple(normalized)
 
 
 def _normalize_fields_cache_key(
@@ -328,7 +330,7 @@ def struct_or_union(
 ) -> str:
     fields = getattr(instance, "_fields", None)
     if fields is None:
-        fields = instance.fields
+        fields = _normalize_fields(instance.fields)
     if fields is None:
         raise exc.CompileError(f"DuckDB {repr(instance)} type requires fields")
     return "({})".format(
