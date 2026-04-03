@@ -199,6 +199,29 @@ def test_apply_config_uses_literal_processors() -> None:
     assert conn.executed == expected
 
 
+@pytest.mark.parametrize("factory", [dt.Struct, dt.Union])
+def test_fields_types_share_field_normalization_and_cache_key(factory: Any) -> None:
+    field_items = [("name", String), ("age", Integer)]
+
+    field_type = factory(field_items)
+
+    assert field_type.fields == field_items
+    assert field_type._fields is not None
+    assert [key for key, _ in field_type._fields] == ["name", "age"]
+    assert isinstance(field_type._fields[0][1], String)
+    assert isinstance(field_type._fields[1][1], Integer)
+    assert field_type._static_cache_key == (
+        type(field_type),
+        (
+            "fields",
+            (
+                ("name", String()._static_cache_key),
+                ("age", Integer()._static_cache_key),
+            ),
+        ),
+    )
+
+
 def test_get_core_config_includes_motherduck_keys() -> None:
     core = get_core_config()
 

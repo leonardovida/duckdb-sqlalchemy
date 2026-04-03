@@ -112,11 +112,16 @@ assert types
 
 
 TV = typing.Union[Type[TypeEngine], TypeEngine]
+FieldCollection = typing.Union[
+    typing.Mapping[str, TV],
+    typing.Iterable[Tuple[str, TV]],
+]
+NormalizedFields = Optional[Tuple[Tuple[str, TypeEngine], ...]]
 
 
 def _normalize_fields(
-    fields: Optional[Dict[str, TV]],
-) -> Optional[Tuple[Tuple[str, TypeEngine], ...]]:
+    fields: Optional[FieldCollection],
+) -> NormalizedFields:
     if fields is None:
         return None
     if isinstance(fields, dict):
@@ -130,7 +135,7 @@ def _normalize_fields(
 
 
 def _normalize_fields_cache_key(
-    fields: Optional[Tuple[Tuple[str, TypeEngine], ...]],
+    fields: NormalizedFields,
 ) -> Optional[Tuple[Tuple[str, Any], ...]]:
     if fields is None:
         return None
@@ -140,7 +145,24 @@ def _normalize_fields_cache_key(
     )
 
 
-class Struct(TypeEngine):
+class _FieldsType(TypeEngine):
+    cache_ok = True
+    fields: Optional[FieldCollection]
+    _fields: NormalizedFields
+
+    def __init__(self, fields: Optional[FieldCollection] = None):
+        self.fields = fields
+        self._fields = _normalize_fields(fields)
+        self._fields_cache_key = _normalize_fields_cache_key(self._fields)
+
+    @util.memoized_property
+    def _static_cache_key(self):  # type: ignore[override]
+        if self._fields_cache_key is None:
+            return (self.__class__,)
+        return (self.__class__, ("fields", self._fields_cache_key))
+
+
+class Struct(_FieldsType):
     """
     Represents a STRUCT type in DuckDB
 
@@ -158,18 +180,6 @@ class Struct(TypeEngine):
     """
 
     __visit_name__ = "struct"
-    cache_ok = True
-
-    def __init__(self, fields: Optional[Dict[str, TV]] = None):
-        self.fields = fields
-        self._fields = _normalize_fields(fields)
-        self._fields_cache_key = _normalize_fields_cache_key(self._fields)
-
-    @util.memoized_property
-    def _static_cache_key(self):  # type: ignore[override]
-        if self._fields_cache_key is None:
-            return (self.__class__,)
-        return (self.__class__, ("fields", self._fields_cache_key))
 
 
 class Map(TypeEngine):
@@ -217,7 +227,7 @@ class Map(TypeEngine):
             return _convert
 
 
-class Union(TypeEngine):
+class Union(_FieldsType):
     """
     Represents a UNION type in DuckDB
 
@@ -233,19 +243,10 @@ class Union(TypeEngine):
     """
 
     __visit_name__ = "union"
-    cache_ok = True
-    fields: Dict[str, TV]
+    fields: FieldCollection
 
-    def __init__(self, fields: Dict[str, TV]):
-        self.fields = fields
-        self._fields = _normalize_fields(fields)
-        self._fields_cache_key = _normalize_fields_cache_key(self._fields)
-
-    @util.memoized_property
-    def _static_cache_key(self):  # type: ignore[override]
-        if self._fields_cache_key is None:
-            return (self.__class__,)
-        return (self.__class__, ("fields", self._fields_cache_key))
+    def __init__(self, fields: FieldCollection):
+        super().__init__(fields)
 
 
 class Variant(TypeEngine):
