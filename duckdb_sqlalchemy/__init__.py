@@ -68,7 +68,7 @@ else:
         _pg_base, "PGExecutionContext", DefaultExecutionContext
     )
 
-__version__ = "1.5.1"
+__version__ = "1.5.1.1"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -521,10 +521,50 @@ TRANSIENT_ERROR_PATTERNS = (
     "rate limit",
 )
 
+IDEMPOTENT_STATEMENT_PREFIXES = (
+    "select",
+    "show",
+    "describe",
+    "pragma",
+    "explain",
+    "values",
+)
+MUTATING_STATEMENT_PATTERN = re.compile(
+    r"\b("
+    r"insert|update|delete|merge|copy|create|alter|drop|grant|revoke|truncate|"
+    r"call|attach|detach"
+    r")\b"
+)
+
+
+def _strip_leading_sql_comments(statement: str) -> str:
+    sql = statement.lstrip()
+    while sql:
+        if sql.startswith("--"):
+            newline_index = sql.find("\n")
+            if newline_index == -1:
+                return ""
+            sql = sql[newline_index + 1 :].lstrip()
+            continue
+        if sql.startswith("/*"):
+            comment_end = sql.find("*/", 2)
+            if comment_end == -1:
+                return ""
+            sql = sql[comment_end + 2 :].lstrip()
+            continue
+        break
+    return sql
+
 
 def _is_idempotent_statement(statement: str) -> bool:
-    normalized = statement.strip().lower()
-    return normalized.startswith(("select", "show", "describe", "pragma", "explain"))
+    normalized = _strip_leading_sql_comments(statement).lower()
+    if not normalized:
+        return False
+    if normalized.startswith(IDEMPOTENT_STATEMENT_PREFIXES):
+        return True
+    if not normalized.startswith("with"):
+        return False
+    return MUTATING_STATEMENT_PATTERN.search(normalized) is None
 
 
 def _is_transient_error(error: BaseException) -> bool:
