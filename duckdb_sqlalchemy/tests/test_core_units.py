@@ -838,7 +838,19 @@ def test_idempotent_statement_detection() -> None:
     assert _is_idempotent_statement("SELECT 1")
     assert _is_idempotent_statement("  show tables")
     assert _is_idempotent_statement("pragma version")
+    assert _is_idempotent_statement("-- comment\nSELECT 1")
+    assert _is_idempotent_statement(
+        "WITH recent AS (SELECT 1 AS value) SELECT value FROM recent"
+    )
+    assert _is_idempotent_statement(
+        "/* comment */ WITH RECURSIVE seq(n) AS "
+        "(SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 3) "
+        "SELECT n FROM seq"
+    )
     assert not _is_idempotent_statement("insert into t values (1)")
+    assert not _is_idempotent_statement(
+        "WITH source AS (SELECT 1 AS value) INSERT INTO t SELECT value FROM source"
+    )
 
 
 def test_transient_error_detection() -> None:

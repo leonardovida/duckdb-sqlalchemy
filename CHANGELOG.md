@@ -8,15 +8,18 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+## [1.5.1.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1...v1.5.1.1) (2026-04-03)
+
 ### Bug Fixes
 
 * require SQLAlchemy 2.0.45+ in package metadata and the test matrix to match the reflection API used by the dialect
 * default local file-backed DuckDB engines to `QueuePool` while keeping MotherDuck on `NullPool`
-* install `nox` with the `devtools` extra so the documented `nox -s ...` workflow works in a fresh repo checkout
+* treat read-only `WITH` statements and comment-prefixed queries as idempotent for transient retry handling
 
 ### Tooling
 
-* refresh the locked dev toolchain and bump `ty` to 0.0.27 after validating the current suite against the latest allowed package set
+* install `nox` with the `dev` and `devtools` extras so the documented `nox -s ...` workflow works after standard development installs and in fresh repo checkouts
+* refresh the locked dev toolchain and bump `ty` to 0.0.28 after validating the current suite against the latest allowed package set
 
 ## [1.5.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.4.4.8...v1.5.1) (2026-03-26)
 
