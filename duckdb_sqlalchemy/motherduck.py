@@ -53,32 +53,30 @@ def _warn_deprecated_ttl_alias() -> None:
     )
 
 
-def _sync_ttl_alias(
+def _normalize_ttl_alias(
     values: Dict[str, Any],
     *,
-    source_key: str,
-    target_key: str,
+    canonical_key: str,
+    alias_key: str,
     warn_on_key: str,
-    drop_source: bool = False,
+    drop_alias: bool = False,
 ) -> Dict[str, Any]:
     if warn_on_key in values:
         _warn_deprecated_ttl_alias()
 
-    source_value = (
-        values.pop(source_key, None) if drop_source else values.get(source_key)
-    )
-    if target_key not in values and source_value is not None:
-        values[target_key] = source_value
+    alias_value = values.pop(alias_key, None) if drop_alias else values.get(alias_key)
+    if canonical_key not in values and alias_value is not None:
+        values[canonical_key] = alias_value
     return values
 
 
 def _normalize_path_query_aliases(path_query: Dict[str, Any]) -> Dict[str, Any]:
-    return _sync_ttl_alias(
+    return _normalize_ttl_alias(
         path_query,
-        source_key=MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
-        target_key=DBINSTANCE_INACTIVITY_TTL_KEY,
+        canonical_key=DBINSTANCE_INACTIVITY_TTL_KEY,
+        alias_key=MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
         warn_on_key=MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
-        drop_source=True,
+        drop_alias=True,
     )
 
 
@@ -89,10 +87,10 @@ def _normalize_path_query_mapping(
 
 
 def _normalize_config_aliases(config: Dict[str, Any]) -> Dict[str, Any]:
-    return _sync_ttl_alias(
+    return _normalize_ttl_alias(
         config,
-        source_key=DBINSTANCE_INACTIVITY_TTL_KEY,
-        target_key=MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
+        canonical_key=MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
+        alias_key=DBINSTANCE_INACTIVITY_TTL_KEY,
         warn_on_key=MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
     )
 
