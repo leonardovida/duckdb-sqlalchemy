@@ -8,6 +8,16 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+## [1.5.1.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1.1...v1.5.1.2) (2026-04-07)
+
+### Bug Fixes
+
+- default URLs without an explicit database back to `:memory:` before applying DuckDB path query parameters, so `duckdb://?access_mode=read_only` no longer opens a file named from the query string.
+
+### Maintenance
+
+- test SQLAlchemy 2.0.49 in CI and update the `ty` dev dependency to 0.0.29.
+
 ## [1.5.1.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1...v1.5.1.1) (2026-04-03)
 
 ### Bug Fixes

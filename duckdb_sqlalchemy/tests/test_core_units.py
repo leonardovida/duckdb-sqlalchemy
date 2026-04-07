@@ -90,6 +90,17 @@ def test_create_connect_args_moves_user_query_param() -> None:
     assert kwargs["url_config"] == {"memory_limit": "1GB"}
 
 
+def test_create_connect_args_defaults_to_memory_before_path_query() -> None:
+    dialect = Dialect()
+    url = SAURL.create("duckdb", query={"access_mode": "read_only", "threads": "4"})
+
+    args, kwargs = dialect.create_connect_args(url)
+
+    assert args == ()
+    assert kwargs["database"] == ":memory:?access_mode=read_only"
+    assert kwargs["url_config"] == {"threads": "4"}
+
+
 def test_create_connect_args_strips_pool_override() -> None:
     dialect = Dialect()
     url = URL(
@@ -480,6 +491,18 @@ def test_engine_connect_does_not_probe_isolation_level(
 
     assert "select 1" in calls
     assert "show transaction isolation level" not in calls
+
+
+def test_engine_url_without_database_keeps_memory_database(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    engine = create_engine("duckdb://?access_mode=read_only")
+    with engine.connect() as conn:
+        assert conn.execute(text("select current_database()")).scalar() == "memory"
+
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_cursorwrapper_executemany_coerces_to_list() -> None:
