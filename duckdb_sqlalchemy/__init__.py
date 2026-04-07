@@ -68,7 +68,7 @@ else:
         _pg_base, "PGExecutionContext", DefaultExecutionContext
     )
 
-__version__ = "1.5.1.1"
+__version__ = "1.5.1.2"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -1462,7 +1462,10 @@ class Dialect(PGDialect_psycopg2):
         opts = url.translate_connect_args(database="database")
         path_query, url_config = split_url_query(dict(url.query))
         opts["url_config"] = url_config
-        opts["database"] = append_query_to_database(opts.get("database"), path_query)
+        database = opts.get("database")
+        if database in {None, ""}:
+            database = ":memory:"
+        opts["database"] = append_query_to_database(database, path_query)
         return (), opts
 
     @classmethod

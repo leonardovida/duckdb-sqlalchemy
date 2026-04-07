@@ -1,6 +1,6 @@
 [project]
 name = "duckdb-sqlalchemy"
-version = "1.5.1.1"
+version = "1.5.1.2"
 description = "DuckDB SQLAlchemy dialect for DuckDB and MotherDuck"
 authors = [
     {name = "Leonardo Vida", email = "lleonardovida@gmail.com"},
@@ -46,7 +46,7 @@ dev = [
     "nox>=2026.2.9,<2027.0.0",
     "pyarrow>=22.0.0; python_version >= '3.10'",
     "pytest>=8.0.0,<10.0.0",
-    "ty==0.0.28",
+    "ty==0.0.29",
     "hypothesis>=6.75.2,<7.0.0",
     "github-action-utils>=1.1.0,<2.0.0",
     "pandas>=1,<2.0; python_version < '3.12'",
