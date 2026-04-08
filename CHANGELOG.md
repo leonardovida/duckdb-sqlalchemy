@@ -8,15 +8,16 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
-## [1.5.1.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1.1...v1.5.1.2) (2026-04-07)
+## [1.5.1.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1.1...v1.5.1.2) (2026-04-08)
 
 ### Bug Fixes
 
-- default URLs without an explicit database back to `:memory:` before applying DuckDB path query parameters, so `duckdb://?access_mode=read_only` no longer opens a file named from the query string.
+- default URLs without an explicit database back to `:memory:` before applying DuckDB path query parameters, so `duckdb://?access_mode=read_only` no longer opens a file named from the query string
+- normalize older MotherDuck startup aliases such as `motherduck_session_hint`, `motherduck_attach_mode`, `motherduck_saas_mode`, and `cachebust` into the canonical URL path-query keys so connection routing and cache isolation keep working
 
-### Maintenance
+### Tooling
 
-- test SQLAlchemy 2.0.49 in CI and update the `ty` dev dependency to 0.0.29.
+- test SQLAlchemy 2.0.49 in CI, update the `ty` dev dependency to 0.0.29, and refresh the locked development environment to the latest non-breaking versions within the existing constraints
 
 ## [1.5.1.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1...v1.5.1.1) (2026-04-03)
 

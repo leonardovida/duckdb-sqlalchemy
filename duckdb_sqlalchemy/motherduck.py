@@ -26,16 +26,24 @@ from ._query import merge_query_mappings
 
 DBINSTANCE_INACTIVITY_TTL_KEY = "dbinstance_inactivity_ttl"
 MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY = "motherduck_dbinstance_inactivity_ttl"
+MOTHERDUCK_ATTACH_MODE_KEY = "motherduck_attach_mode"
+MOTHERDUCK_SESSION_HINT_KEY = "motherduck_session_hint"
+MOTHERDUCK_SAAS_MODE_KEY = "motherduck_saas_mode"
+CACHE_BUST_ALIAS_KEY = "cachebust"
 
 MOTHERDUCK_PATH_QUERY_KEYS = {
     "user",
     "session_hint",
+    MOTHERDUCK_SESSION_HINT_KEY,
     "attach_mode",
+    MOTHERDUCK_ATTACH_MODE_KEY,
     "access_mode",
     DBINSTANCE_INACTIVITY_TTL_KEY,
     MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
     "saas_mode",
+    MOTHERDUCK_SAAS_MODE_KEY,
     "cache_buster",
+    CACHE_BUST_ALIAS_KEY,
 }
 
 MOTHERDUCK_CONFIG_KEYS = MOTHERDUCK_PATH_QUERY_KEYS | {"motherduck_token"}
@@ -53,16 +61,24 @@ def _warn_deprecated_ttl_alias() -> None:
     )
 
 
-def _normalize_ttl_alias(
+def _warn_deprecated_path_query_alias(alias_key: str, canonical_key: str) -> None:
+    warnings.warn(
+        f"`{alias_key}` is deprecated; use `{canonical_key}` instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+def _normalize_alias(
     values: Dict[str, Any],
     *,
     canonical_key: str,
     alias_key: str,
-    warn_on_key: str,
+    warn_on_alias: bool = True,
     drop_alias: bool = False,
 ) -> Dict[str, Any]:
-    if warn_on_key in values:
-        _warn_deprecated_ttl_alias()
+    if warn_on_alias and alias_key in values:
+        _warn_deprecated_path_query_alias(alias_key, canonical_key)
 
     alias_value = values.pop(alias_key, None) if drop_alias else values.get(alias_key)
     if canonical_key not in values and alias_value is not None:
@@ -70,14 +86,33 @@ def _normalize_ttl_alias(
     return values
 
 
+PATH_QUERY_ALIASES = (
+    (MOTHERDUCK_SESSION_HINT_KEY, "session_hint"),
+    (MOTHERDUCK_ATTACH_MODE_KEY, "attach_mode"),
+    (MOTHERDUCK_SAAS_MODE_KEY, "saas_mode"),
+    (CACHE_BUST_ALIAS_KEY, "cache_buster"),
+    (MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY, DBINSTANCE_INACTIVITY_TTL_KEY),
+)
+
+
 def _normalize_path_query_aliases(path_query: Dict[str, Any]) -> Dict[str, Any]:
-    return _normalize_ttl_alias(
-        path_query,
-        canonical_key=DBINSTANCE_INACTIVITY_TTL_KEY,
-        alias_key=MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
-        warn_on_key=MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
-        drop_alias=True,
-    )
+    normalized = path_query
+    for alias_key, canonical_key in PATH_QUERY_ALIASES:
+        warn_on_alias = alias_key != MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY
+        if (
+            alias_key == MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY
+            and alias_key in normalized
+        ):
+            _warn_deprecated_ttl_alias()
+            warn_on_alias = False
+        normalized = _normalize_alias(
+            normalized,
+            canonical_key=canonical_key,
+            alias_key=alias_key,
+            warn_on_alias=warn_on_alias,
+            drop_alias=True,
+        )
+    return normalized
 
 
 def _normalize_path_query_mapping(
@@ -87,11 +122,13 @@ def _normalize_path_query_mapping(
 
 
 def _normalize_config_aliases(config: Dict[str, Any]) -> Dict[str, Any]:
-    return _normalize_ttl_alias(
+    if MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY in config:
+        _warn_deprecated_ttl_alias()
+    return _normalize_alias(
         config,
         canonical_key=MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
         alias_key=DBINSTANCE_INACTIVITY_TTL_KEY,
-        warn_on_key=MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
+        warn_on_alias=False,
     )
 
 
