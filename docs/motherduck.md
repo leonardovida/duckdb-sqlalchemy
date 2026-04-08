@@ -68,6 +68,10 @@ Parameters that are treated as part of the database string:
 - `saas_mode`
 - `cache_buster`
 
+For backward compatibility the dialect also accepts `motherduck_session_hint`,
+`motherduck_attach_mode`, `motherduck_saas_mode`, and `cachebust`, but it
+normalizes them to the canonical keys above and emits a `DeprecationWarning`.
+
 Example:
 
 ```

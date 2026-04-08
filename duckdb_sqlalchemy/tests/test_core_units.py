@@ -1063,6 +1063,36 @@ def test_motherduck_url_prefers_canonical_ttl_over_alias() -> None:
     assert url.database == "md:db?dbinstance_inactivity_ttl=15m"
 
 
+def test_motherduck_url_normalizes_deprecated_path_aliases() -> None:
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        url = md.MotherDuckURL(
+            database="md:db",
+            motherduck_session_hint="team-a",
+            motherduck_attach_mode="single",
+            motherduck_saas_mode=True,
+            cachebust="abc123",
+        )
+
+    assert url.database is not None
+    database, query = url.database.split("?", 1)
+    assert database == "md:db"
+    assert parse_qs(query) == {
+        "session_hint": ["team-a"],
+        "attach_mode": ["single"],
+        "saas_mode": ["true"],
+        "cache_buster": ["abc123"],
+    }
+    assert url.query == {}
+    messages = [str(w.message) for w in recorded]
+    assert messages == [
+        "`motherduck_session_hint` is deprecated; use `session_hint` instead.",
+        "`motherduck_attach_mode` is deprecated; use `attach_mode` instead.",
+        "`motherduck_saas_mode` is deprecated; use `saas_mode` instead.",
+        "`cachebust` is deprecated; use `cache_buster` instead.",
+    ]
+
+
 def test_split_url_query_partitions_and_ignores_dialect_keys() -> None:
     query = {
         "user": "alice",
@@ -1077,6 +1107,33 @@ def test_split_url_query_partitions_and_ignores_dialect_keys() -> None:
     assert path_query == {"user": "alice", "dbinstance_inactivity_ttl": "15m"}
     assert url_config == {"memory_limit": "1GB"}
     assert query["duckdb_sqlalchemy_pool"] == "queue"
+
+
+def test_split_url_query_normalizes_motherduck_setting_aliases() -> None:
+    query = {
+        "motherduck_session_hint": "team-a",
+        "motherduck_attach_mode": "single",
+        "motherduck_saas_mode": False,
+        "cachebust": "abc123",
+    }
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        path_query, url_config = md.split_url_query(query)
+
+    assert path_query == {
+        "session_hint": "team-a",
+        "attach_mode": "single",
+        "saas_mode": "false",
+        "cache_buster": "abc123",
+    }
+    assert url_config == {}
+    assert [str(w.message) for w in recorded] == [
+        "`motherduck_session_hint` is deprecated; use `session_hint` instead.",
+        "`motherduck_attach_mode` is deprecated; use `attach_mode` instead.",
+        "`motherduck_saas_mode` is deprecated; use `saas_mode` instead.",
+        "`cachebust` is deprecated; use `cache_buster` instead.",
+    ]
 
 
 def test_extract_path_query_from_config_mutates_and_normalizes_aliases() -> None:
@@ -1094,6 +1151,34 @@ def test_extract_path_query_from_config_mutates_and_normalizes_aliases() -> None
         "dbinstance_inactivity_ttl": "10m",
     }
     assert config == {"threads": 4}
+
+
+def test_extract_path_query_from_config_handles_motherduck_aliases() -> None:
+    config = {
+        "motherduck_session_hint": "team-a",
+        "motherduck_attach_mode": "workspace",
+        "motherduck_saas_mode": True,
+        "cachebust": "abc123",
+        "threads": 4,
+    }
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        path_query = md.extract_path_query_from_config(config)
+
+    assert path_query == {
+        "session_hint": "team-a",
+        "attach_mode": "workspace",
+        "saas_mode": "true",
+        "cache_buster": "abc123",
+    }
+    assert config == {"threads": 4}
+    assert [str(w.message) for w in recorded] == [
+        "`motherduck_session_hint` is deprecated; use `session_hint` instead.",
+        "`motherduck_attach_mode` is deprecated; use `attach_mode` instead.",
+        "`motherduck_saas_mode` is deprecated; use `saas_mode` instead.",
+        "`cachebust` is deprecated; use `cache_buster` instead.",
+    ]
 
 
 def test_merge_and_copy_connect_args() -> None:
