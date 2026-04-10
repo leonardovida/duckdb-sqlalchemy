@@ -27,6 +27,8 @@ engine = create_engine(
 ## Tokens
 
 Set `MOTHERDUCK_TOKEN` (or `motherduck_token`) in the environment and it will be picked up automatically when you connect to `md:` databases.
+If you authenticate with an OAuth flow instead, pass `motherduck_oauth_token` through the
+URL or `connect_args["config"]`.
 
 ```bash
 export MOTHERDUCK_TOKEN="..."
@@ -85,6 +87,7 @@ If you pass these in `connect_args["config"]`, the dialect will move them into t
 Other DuckDB settings can be passed as URL query params or via `connect_args["config"]`:
 
 - Any DuckDB `SET`-table config option (for example `memory_limit`, `threads`)
+- MotherDuck startup auth keys such as `motherduck_token` and `motherduck_oauth_token`
 
 ## Recommended defaults for apps/BI
 

@@ -29,6 +29,8 @@ MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY = "motherduck_dbinstance_inactivity_ttl
 MOTHERDUCK_ATTACH_MODE_KEY = "motherduck_attach_mode"
 MOTHERDUCK_SESSION_HINT_KEY = "motherduck_session_hint"
 MOTHERDUCK_SAAS_MODE_KEY = "motherduck_saas_mode"
+MOTHERDUCK_OAUTH_TOKEN_KEY = "motherduck_oauth_token"
+OAUTH_TOKEN_ALIAS_KEY = "oauth_token"
 CACHE_BUST_ALIAS_KEY = "cachebust"
 
 MOTHERDUCK_PATH_QUERY_KEYS = {
@@ -46,7 +48,11 @@ MOTHERDUCK_PATH_QUERY_KEYS = {
     CACHE_BUST_ALIAS_KEY,
 }
 
-MOTHERDUCK_CONFIG_KEYS = MOTHERDUCK_PATH_QUERY_KEYS | {"motherduck_token"}
+MOTHERDUCK_CONFIG_KEYS = MOTHERDUCK_PATH_QUERY_KEYS | {
+    "motherduck_token",
+    MOTHERDUCK_OAUTH_TOKEN_KEY,
+    OAUTH_TOKEN_ALIAS_KEY,
+}
 
 DIALECT_QUERY_KEYS = {"duckdb_sqlalchemy_pool", "pool"}
 CONNECT_ARG_MAPPING_KEYS = ("config", "url_config")
@@ -124,11 +130,18 @@ def _normalize_path_query_mapping(
 def _normalize_config_aliases(config: Dict[str, Any]) -> Dict[str, Any]:
     if MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY in config:
         _warn_deprecated_ttl_alias()
-    return _normalize_alias(
+    normalized = _normalize_alias(
         config,
         canonical_key=MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
         alias_key=DBINSTANCE_INACTIVITY_TTL_KEY,
         warn_on_alias=False,
+    )
+    return _normalize_alias(
+        normalized,
+        canonical_key=MOTHERDUCK_OAUTH_TOKEN_KEY,
+        alias_key=OAUTH_TOKEN_ALIAS_KEY,
+        warn_on_alias=False,
+        drop_alias=True,
     )
 
 
