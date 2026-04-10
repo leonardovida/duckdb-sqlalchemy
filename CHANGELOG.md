@@ -8,6 +8,12 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+## [1.5.1.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1.2...v1.5.1.3) (2026-04-10)
+
+### Versioning
+
+- release 1.5.1.3 with no runtime code changes; this cut only updates package metadata and release notes
+
 ## [1.5.1.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1.1...v1.5.1.2) (2026-04-08)
 
 ### Bug Fixes
