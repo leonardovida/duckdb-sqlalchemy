@@ -238,6 +238,8 @@ def test_get_core_config_includes_motherduck_keys() -> None:
 
     expected = {
         "motherduck_token",
+        "motherduck_oauth_token",
+        "oauth_token",
         "attach_mode",
         "saas_mode",
         "session_hint",
@@ -252,6 +254,7 @@ def test_looks_like_motherduck_detection() -> None:
     assert _looks_like_motherduck("md:db", {}) is True
     assert _looks_like_motherduck("motherduck:db", {}) is True
     assert _looks_like_motherduck("local.db", {"motherduck_token": "x"}) is True
+    assert _looks_like_motherduck("local.db", {"motherduck_oauth_token": "x"}) is True
     assert _looks_like_motherduck("local.db", {}) is False
 
 
@@ -303,6 +306,14 @@ def test_normalize_motherduck_config_warns_on_deprecated_alias() -> None:
         _normalize_motherduck_config(config)
 
     assert config["motherduck_dbinstance_inactivity_ttl"] == "1h"
+
+
+def test_normalize_motherduck_config_normalizes_oauth_alias() -> None:
+    config = {"oauth_token": "oauth123"}
+
+    _normalize_motherduck_config(config)
+
+    assert config == {"motherduck_oauth_token": "oauth123"}
 
 
 def test_has_comment_support_false_on_parser_exception(

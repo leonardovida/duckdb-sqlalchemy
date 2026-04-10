@@ -84,3 +84,36 @@ def test_motherduck_config_env_and_ttl(monkeypatch) -> None:
     assert database == "md:my_db"
     assert parse_qs(query)["dbinstance_inactivity_ttl"] == ["1h"]
     assert "motherduck_dbinstance_inactivity_ttl" not in captured["config"]
+
+
+def test_motherduck_oauth_token_stays_in_connect_config(monkeypatch) -> None:
+    get_core_config()
+
+    captured = {}
+
+    class DummyConn:
+        def execute(self, *args, **kwargs):
+            return self
+
+        def register_filesystem(self, filesystem):
+            return None
+
+        def close(self):
+            return None
+
+    def fake_connect(*cargs, **cparams):
+        captured.update(cparams)
+        return DummyConn()
+
+    import duckdb_sqlalchemy
+
+    monkeypatch.setattr(duckdb_sqlalchemy.duckdb, "connect", fake_connect)
+
+    dialect = Dialect()
+    dialect.connect(
+        database="md:my_db",
+        config={"oauth_token": "oauth123"},
+    )
+
+    assert captured["config"]["motherduck_oauth_token"] == "oauth123"
+    assert "oauth_token" not in captured["config"]

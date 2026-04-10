@@ -97,7 +97,7 @@ from sqlalchemy import create_engine
 engine = create_engine("duckdb:///md:my_db")
 ```
 
-MotherDuck uses the `md:` database prefix. Tokens are picked up from `MOTHERDUCK_TOKEN` (or `motherduck_token`) automatically. If your token has special characters, URL-escape it or pass it via `connect_args`.
+MotherDuck uses the `md:` database prefix. Access tokens are picked up from `MOTHERDUCK_TOKEN` (or `motherduck_token`) automatically. OAuth flows can pass `motherduck_oauth_token` through the URL or `connect_args["config"]`. If a token has special characters, URL-escape it or pass it via `connect_args`.
 
 ## Connection URLs
 

@@ -8,6 +8,16 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+## [1.5.1.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1.2...v1.5.1.3) (2026-04-10)
+
+### Bug Fixes
+
+- keep `motherduck_oauth_token` in the initial `duckdb.connect(..., config=...)` call so MotherDuck OAuth connections keep working after the upstream extension started requiring the registered startup option on DuckDB 1.5.1+
+
+### Tooling
+
+- validate the current development dependency set against Python 3.14 and refresh the lockfile to the latest non-breaking packages within the existing version caps
+
 ## [1.5.1.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1.1...v1.5.1.2) (2026-04-08)
 
 ### Bug Fixes
