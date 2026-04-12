@@ -1,6 +1,6 @@
 import warnings
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Optional, cast
 from urllib.parse import parse_qs
 
 import duckdb
@@ -623,6 +623,57 @@ def test_struct_or_union_requires_fields() -> None:
     assert rendered.startswith("(")
     assert rendered.endswith(")")
     assert '"first name"' in rendered
+
+
+def test_duckdb_reflection_filters_share_schema_database_builder() -> None:
+    dialect = Dialect()
+
+    stmt, params = dialect._duckdb_reflection_stmt(
+        "duckdb_tables",
+        "table_name",
+        schema='"analytics db"."reporting"',
+        filter_names=["orders"],
+        include_internal_filter=True,
+    )
+
+    assert "AND internal = false" in stmt.text
+    assert "AND schema_name = :schema_name" in stmt.text
+    assert "AND database_name = :database_name" in stmt.text
+    assert "AND table_name IN :filter_names" in stmt.text
+    assert params == {
+        "schema_name": "reporting",
+        "database_name": "analytics db",
+        "filter_names": ["orders"],
+    }
+
+    class DummyResult:
+        def first(self) -> tuple[int]:
+            return (1,)
+
+    class DummyConnection:
+        def __init__(self) -> None:
+            self.statement: Any = None
+            self.params: Optional[dict[str, Any]] = None
+
+        def execute(self, statement: Any, params: dict[str, Any]) -> DummyResult:
+            self.statement = statement
+            self.params = params
+            return DummyResult()
+
+    connection = DummyConnection()
+
+    assert dialect._duckdb_table_exists(
+        cast(Any, connection), "orders", '"analytics db"."reporting"'
+    )
+    assert connection.statement is not None
+    assert "AND table_name = :table_name" in connection.statement.text
+    assert "AND schema_name = :schema_name" in connection.statement.text
+    assert "AND database_name = :database_name" in connection.statement.text
+    assert connection.params == {
+        "table_name": "orders",
+        "schema_name": "reporting",
+        "database_name": "analytics db",
+    }
 
 
 def test_parse_duckdb_enum_labels_unquotes_escaped_strings() -> None:

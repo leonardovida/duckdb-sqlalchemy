@@ -956,16 +956,12 @@ class Dialect(PGDialect_psycopg2):
         sql = """
             SELECT 1
             FROM duckdb_tables()
-            WHERE table_name = :table_name
+            WHERE 1 = 1
             """
-        params: Dict[str, Any] = {"table_name": table_name}
-        if schema is not None:
-            database_name, schema_name = self.identifier_preparer._separate(schema)
-            sql += "AND schema_name = :schema_name\n"
-            params["schema_name"] = schema_name
-            if database_name is not None:
-                sql += "AND database_name = :database_name\n"
-                params["database_name"] = database_name
+        where_sql, params = self._build_query_where(
+            table_name=table_name, schema_name=schema
+        )
+        sql += where_sql
         return connection.execute(text(sql), params).first() is not None
 
     def _duckdb_columns(
@@ -995,12 +991,9 @@ class Dialect(PGDialect_psycopg2):
         if include_internal_filter:
             sql += "AND internal = false\n"
         if schema is not None:
-            database_name, schema_name = self.identifier_preparer._separate(schema)
-            sql += "AND schema_name = :schema_name\n"
-            params["schema_name"] = schema_name
-            if database_name is not None:
-                sql += "AND database_name = :database_name\n"
-                params["database_name"] = database_name
+            where_sql, where_params = self._build_query_where(schema_name=schema)
+            sql += where_sql
+            params.update(where_params)
         if filter_names is not None:
             names = list(filter_names)
             if not names:
