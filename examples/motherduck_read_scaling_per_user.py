@@ -3,16 +3,16 @@ from functools import lru_cache
 
 from sqlalchemy import text
 
-from duckdb_sqlalchemy import create_motherduck_engine, stable_session_hint
+from duckdb_sqlalchemy import create_motherduck_engine, stable_session_name
 
 
 @lru_cache(maxsize=128)
-def _engine_for_session(session_hint: str):
+def _engine_for_session(session_name: str):
     return create_motherduck_engine(
         database="md:my_db",
         attach_mode="single",
         access_mode="read_only",
-        session_hint=session_hint,
+        session_name=session_name,
         performance=True,
         pool_size=5,
         max_overflow=10,
@@ -21,8 +21,8 @@ def _engine_for_session(session_hint: str):
 
 def get_engine_for_user(user_id: str):
     salt = os.getenv("MOTHERDUCK_SESSION_SALT", "")
-    session_hint = stable_session_hint(user_id, salt=salt)
-    return _engine_for_session(session_hint)
+    session_name = stable_session_name(user_id, salt=salt)
+    return _engine_for_session(session_name)
 
 
 def main() -> None:

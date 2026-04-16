@@ -8,6 +8,16 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+### Features
+
+- prefer MotherDuck's new `session_name` connection parameter while keeping `session_hint`, `motherduck_session_hint`, and `motherduck_session_name` as deprecated aliases
+- add `stable_session_name()` and keep `stable_session_hint()` as a deprecated compatibility wrapper
+- reflect DuckDB `GEOMETRY` columns as a concrete dialect type on DuckDB 1.5.2+
+
+### Tooling
+
+- extend the DuckDB compatibility test matrix to include DuckDB 1.5.2
+
 ## [1.5.1.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1.3...v1.5.1.4) (2026-04-10)
 
 ### Versioning

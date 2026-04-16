@@ -70,7 +70,7 @@ Examples:
 duckdb:///:memory:
 duckdb:///analytics.db
 duckdb:////absolute/path/to/analytics.db
-duckdb:///md:my_db?attach_mode=single&access_mode=read_only&session_hint=team-a
+duckdb:///md:my_db?attach_mode=single&access_mode=read_only&session_name=team-a
 ```
 
 ## Next steps

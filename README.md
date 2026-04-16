@@ -52,7 +52,7 @@ Current direction in this repository:
 | --- | --- |
 | Python | 3.9+ |
 | SQLAlchemy | 2.0.45+ (CI-tested: 2.0.45, 2.0.49) |
-| DuckDB | 0.5.0+ (CI-tested currently: 1.1.3 to 1.5.1) |
+| DuckDB | 0.5.0+ (CI-tested currently: 1.1.3 to 1.5.2) |
 
 ## Install
 
@@ -113,7 +113,7 @@ Examples:
 duckdb:///:memory:
 duckdb:///analytics.db
 duckdb:////absolute/path/to/analytics.db
-duckdb:///md:my_db?attach_mode=single&access_mode=read_only&session_hint=team-a
+duckdb:///md:my_db?attach_mode=single&access_mode=read_only&session_name=team-a
 ```
 
 Use the URL helpers to build connection strings safely:
