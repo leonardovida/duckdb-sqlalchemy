@@ -646,6 +646,17 @@ def test_duckdb_reflection_filters_share_schema_database_builder() -> None:
         "filter_names": ["orders"],
     }
 
+    ordered_stmt, ordered_params = dialect._duckdb_reflection_stmt(
+        "duckdb_tables",
+        "table_name",
+        filter_names=["orders"],
+        suffix="ORDER BY table_name",
+    )
+
+    assert ordered_stmt.text.rstrip().endswith("ORDER BY table_name")
+    assert ordered_params == {"filter_names": ["orders"]}
+    assert ordered_stmt._bindparams["filter_names"].expanding
+
     class DummyResult:
         def first(self) -> tuple[int]:
             return (1,)

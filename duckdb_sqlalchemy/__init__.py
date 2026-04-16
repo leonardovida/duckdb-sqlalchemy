@@ -981,6 +981,7 @@ class Dialect(PGDialect_psycopg2):
         schema: Optional[str] = None,
         filter_names: Optional[Collection[str]] = None,
         include_internal_filter: bool = False,
+        suffix: str = "",
     ) -> Tuple[Any, Dict[str, Any]]:
         sql = f"""
             SELECT {columns}
@@ -1001,6 +1002,8 @@ class Dialect(PGDialect_psycopg2):
             else:
                 sql += "AND table_name IN :filter_names\n"
                 params["filter_names"] = names
+        if suffix:
+            sql += suffix
         stmt = text(sql)
         if params.get("filter_names"):
             stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
@@ -1021,11 +1024,8 @@ class Dialect(PGDialect_psycopg2):
             schema=schema,
             filter_names=filter_names,
             include_internal_filter=True,
+            suffix="ORDER BY table_name, column_index",
         )
-        sql = f"{stmt.text}ORDER BY table_name, column_index"
-        stmt = text(sql)
-        if params.get("filter_names"):
-            stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
         return [dict(row) for row in connection.execute(stmt, params).mappings()]
 
     def _duckdb_table_names(
@@ -1040,11 +1040,8 @@ class Dialect(PGDialect_psycopg2):
             schema=schema,
             filter_names=filter_names,
             include_internal_filter=True,
+            suffix="ORDER BY table_name",
         )
-        sql = f"{stmt.text}ORDER BY table_name"
-        stmt = text(sql)
-        if params.get("filter_names"):
-            stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
         return [row[0] for row in connection.execute(stmt, params)]
 
     def _duckdb_enum_rows(
@@ -1304,11 +1301,11 @@ class Dialect(PGDialect_psycopg2):
             "table_name, constraint_name, constraint_column_names",
             schema=schema,
             filter_names=filter_names,
+            suffix=(
+                "AND constraint_type = 'PRIMARY KEY'\n"
+                "ORDER BY table_name, constraint_index"
+            ),
         )
-        sql = f"{stmt.text}AND constraint_type = 'PRIMARY KEY'\nORDER BY table_name, constraint_index"
-        stmt = text(sql)
-        if params.get("filter_names"):
-            stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
         constraint_rows = list(connection.execute(stmt, params).mappings())
         constraints = {
             row["table_name"]: {
@@ -1426,11 +1423,8 @@ class Dialect(PGDialect_psycopg2):
             "table_name, index_name, expressions, is_unique",
             schema=schema,
             filter_names=filter_names,
+            suffix="ORDER BY table_name, index_name",
         )
-        sql = f"{stmt.text}ORDER BY table_name, index_name"
-        stmt = text(sql)
-        if params.get("filter_names"):
-            stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
         index_rows = list(connection.execute(stmt, params).mappings())
         indexes: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for row in index_rows:
