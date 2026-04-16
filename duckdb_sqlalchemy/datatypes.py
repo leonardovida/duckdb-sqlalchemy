@@ -258,6 +258,13 @@ class Variant(TypeEngine):
     cache_ok = True
 
 
+class Geometry(TypeEngine):
+    """Represents the DuckDB GEOMETRY type."""
+
+    __visit_name__ = "geometry"
+    cache_ok = True
+
+
 ISCHEMA_NAMES: Dict[str, Any] = {
     "bignum": sqltypes.Numeric,
     "hugeint": HugeInteger,
@@ -282,6 +289,7 @@ ISCHEMA_NAMES: Dict[str, Any] = {
     "enum": sqltypes.Enum,
     "bool": sqltypes.BOOLEAN,
     "variant": Variant,
+    "geometry": Geometry,
     "varchar": String,
 }
 if IS_GT_1:
@@ -320,6 +328,15 @@ def visit_variant(
     **kw: Any,
 ) -> str:
     return "VARIANT"
+
+
+@compiles(Geometry, "duckdb")  # type: ignore[misc]
+def visit_geometry(
+    instance: Geometry,
+    compiler: PGTypeCompiler,
+    **kw: Any,
+) -> str:
+    return "GEOMETRY"
 
 
 def struct_or_union(

@@ -27,7 +27,10 @@ from ._query import merge_query_mappings
 DBINSTANCE_INACTIVITY_TTL_KEY = "dbinstance_inactivity_ttl"
 MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY = "motherduck_dbinstance_inactivity_ttl"
 MOTHERDUCK_ATTACH_MODE_KEY = "motherduck_attach_mode"
+SESSION_HINT_KEY = "session_hint"
+SESSION_NAME_KEY = "session_name"
 MOTHERDUCK_SESSION_HINT_KEY = "motherduck_session_hint"
+MOTHERDUCK_SESSION_NAME_KEY = "motherduck_session_name"
 MOTHERDUCK_SAAS_MODE_KEY = "motherduck_saas_mode"
 MOTHERDUCK_OAUTH_TOKEN_KEY = "motherduck_oauth_token"
 OAUTH_TOKEN_ALIAS_KEY = "oauth_token"
@@ -35,7 +38,9 @@ CACHE_BUST_ALIAS_KEY = "cachebust"
 
 MOTHERDUCK_PATH_QUERY_KEYS = {
     "user",
-    "session_hint",
+    SESSION_NAME_KEY,
+    MOTHERDUCK_SESSION_NAME_KEY,
+    SESSION_HINT_KEY,
     MOTHERDUCK_SESSION_HINT_KEY,
     "attach_mode",
     MOTHERDUCK_ATTACH_MODE_KEY,
@@ -93,7 +98,9 @@ def _normalize_alias(
 
 
 PATH_QUERY_ALIASES = (
-    (MOTHERDUCK_SESSION_HINT_KEY, "session_hint"),
+    (SESSION_HINT_KEY, SESSION_NAME_KEY),
+    (MOTHERDUCK_SESSION_HINT_KEY, SESSION_NAME_KEY),
+    (MOTHERDUCK_SESSION_NAME_KEY, SESSION_NAME_KEY),
     (MOTHERDUCK_ATTACH_MODE_KEY, "attach_mode"),
     (MOTHERDUCK_SAAS_MODE_KEY, "saas_mode"),
     (CACHE_BUST_ALIAS_KEY, "cache_buster"),
@@ -211,7 +218,7 @@ def MotherDuckURL(
     return SAURL.create("duckdb", database=database_with_query, query=config_params)
 
 
-def stable_session_hint(
+def stable_session_name(
     value: Union[str, int],
     *,
     salt: Optional[str] = None,
@@ -224,6 +231,20 @@ def stable_session_hint(
         payload = f"{salt}:{payload}"
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return digest[:length]
+
+
+def stable_session_hint(
+    value: Union[str, int],
+    *,
+    salt: Optional[str] = None,
+    length: int = 16,
+) -> str:
+    warnings.warn(
+        "`stable_session_hint` is deprecated; use `stable_session_name` instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return stable_session_name(value, salt=salt, length=length)
 
 
 def create_motherduck_engine(
