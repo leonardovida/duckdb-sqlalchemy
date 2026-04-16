@@ -55,6 +55,7 @@ from .motherduck import (
     extract_path_query_from_config,
     split_url_query,
     stable_session_hint,
+    stable_session_name,
 )
 from .olap import read_csv, read_csv_auto, read_parquet, table_function
 from .url import URL, make_url
@@ -105,6 +106,7 @@ __all__ = [
     "create_motherduck_engine",
     "make_url",
     "stable_session_hint",
+    "stable_session_name",
     "table_function",
     "read_parquet",
     "read_csv",

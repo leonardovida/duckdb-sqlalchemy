@@ -62,7 +62,7 @@ string for MotherDuck connections.
 Parameters that are treated as part of the database string:
 
 - `user`
-- `session_hint` (read-scaling affinity)
+- `session_name` (read-scaling affinity)
 - `attach_mode` (`workspace` or `single`)
 - `access_mode` (`read_only` for read-scaling tokens)
 - `dbinstance_inactivity_ttl` (preferred; `motherduck_dbinstance_inactivity_ttl`
@@ -70,14 +70,15 @@ Parameters that are treated as part of the database string:
 - `saas_mode`
 - `cache_buster`
 
-For backward compatibility the dialect also accepts `motherduck_session_hint`,
+For backward compatibility the dialect also accepts `session_hint`,
+`motherduck_session_hint`, `motherduck_session_name`,
 `motherduck_attach_mode`, `motherduck_saas_mode`, and `cachebust`, but it
 normalizes them to the canonical keys above and emits a `DeprecationWarning`.
 
 Example:
 
 ```
-duckdb:///md:my_db?attach_mode=single&access_mode=read_only&session_hint=team-a
+duckdb:///md:my_db?attach_mode=single&access_mode=read_only&session_name=team-a
 ```
 
 If you pass these in `connect_args["config"]`, the dialect will move them into the database string automatically.
@@ -92,7 +93,7 @@ Other DuckDB settings can be passed as URL query params or via `connect_args["co
 ## Recommended defaults for apps/BI
 
 - Use `attach_mode=single` unless you need workspace-wide attach behavior.
-- For read scaling tokens, add `access_mode=read_only` and a stable `session_hint`.
+- For read scaling tokens, add `access_mode=read_only` and a stable `session_name`.
 
 ## Helpers
 
@@ -107,7 +108,7 @@ url = MotherDuckURL(
     database="md:my_db",
     attach_mode="single",
     access_mode="read_only",
-    session_hint="team-a",
+    session_name="team-a",
     query={"memory_limit": "1GB"},
 )
 ```
@@ -115,33 +116,33 @@ url = MotherDuckURL(
 ### Explicit read-scaling engine
 
 ```python
-from duckdb_sqlalchemy import create_motherduck_engine, stable_session_hint
+from duckdb_sqlalchemy import create_motherduck_engine, stable_session_name
 
 engine = create_motherduck_engine(
     database="md:analytics",
     attach_mode="single",
     access_mode="read_only",
-    session_hint=stable_session_hint("user-123", salt="org-1"),
+    session_name=stable_session_name("user-123", salt="org-1"),
     performance=True,
 )
 ```
 
-### Read scaling session hints
+### Read scaling session names
 
 Use a stable hash to keep per-user affinity:
 
 ```python
-from duckdb_sqlalchemy import stable_session_hint
+from duckdb_sqlalchemy import stable_session_name
 
-session_hint = stable_session_hint("user-123", salt="org-1")
+session_name = stable_session_name("user-123", salt="org-1")
 ```
 
 ### Read scaling consistency notes
 
 Read scaling routes queries to read replicas. If you need the freshest data,
 use a non-read-scaling token or route those queries to a separate writer
-engine. For per-user affinity, keep a stable `session_hint`; to refresh
-routing, rotate the `session_hint` or recycle the connection/pool.
+engine. For per-user affinity, keep a stable `session_name`; to refresh
+routing, rotate the `session_name` or recycle the connection/pool.
 
 ### Performance-first engine helper
 

@@ -28,6 +28,7 @@ from duckdb_sqlalchemy import (
     create_engine_from_paths,
     olap,
     stable_session_hint,
+    stable_session_name,
 )
 from duckdb_sqlalchemy import datatypes as dt
 from duckdb_sqlalchemy import motherduck as md
@@ -66,7 +67,7 @@ def test_create_connect_args_moves_user_query_param() -> None:
         database="md:my_db",
         query={
             "user": "alice",
-            "session_hint": "hint",
+            "session_name": "hint",
             "attach_mode": "single",
             "cache_buster": "123",
             "motherduck_dbinstance_inactivity_ttl": "15m",
@@ -82,7 +83,7 @@ def test_create_connect_args_moves_user_query_param() -> None:
     assert database == "md:my_db"
     assert parse_qs(query) == {
         "user": ["alice"],
-        "session_hint": ["hint"],
+        "session_name": ["hint"],
         "attach_mode": ["single"],
         "cache_buster": ["123"],
         "dbinstance_inactivity_ttl": ["15m"],
@@ -157,7 +158,7 @@ def test_motherduck_url_builder_moves_path_params() -> None:
     with pytest.warns(DeprecationWarning, match="dbinstance_inactivity_ttl"):
         url = MotherDuckURL(
             database="md:my_db",
-            session_hint="team-a",
+            session_name="team-a",
             attach_mode="single",
             motherduck_dbinstance_inactivity_ttl="15m",
             query={"memory_limit": "1GB"},
@@ -167,18 +168,25 @@ def test_motherduck_url_builder_moves_path_params() -> None:
     database, query = url.database.split("?", 1)
     assert database == "md:my_db"
     assert parse_qs(query) == {
-        "session_hint": ["team-a"],
+        "session_name": ["team-a"],
         "attach_mode": ["single"],
         "dbinstance_inactivity_ttl": ["15m"],
     }
     assert url.query == {"memory_limit": "1GB"}
 
 
-def test_stable_session_hint_is_deterministic() -> None:
-    hint1 = stable_session_hint("user-123", salt="salt", length=8)
-    hint2 = stable_session_hint("user-123", salt="salt", length=8)
-    assert hint1 == hint2
-    assert len(hint1) == 8
+def test_stable_session_name_is_deterministic() -> None:
+    name1 = stable_session_name("user-123", salt="salt", length=8)
+    name2 = stable_session_name("user-123", salt="salt", length=8)
+    assert name1 == name2
+    assert len(name1) == 8
+
+
+def test_stable_session_hint_warns_and_delegates() -> None:
+    with pytest.warns(DeprecationWarning, match="stable_session_name"):
+        hint = stable_session_hint("user-123", salt="salt", length=8)
+
+    assert hint == stable_session_name("user-123", salt="salt", length=8)
 
 
 def test_apply_config_uses_literal_processors() -> None:
@@ -242,7 +250,10 @@ def test_get_core_config_includes_motherduck_keys() -> None:
         "oauth_token",
         "attach_mode",
         "saas_mode",
+        "session_name",
+        "motherduck_session_name",
         "session_hint",
+        "motherduck_session_hint",
         "access_mode",
         "dbinstance_inactivity_ttl",
         "motherduck_dbinstance_inactivity_ttl",
@@ -1056,7 +1067,7 @@ def test_motherduck_helpers() -> None:
     url = md.MotherDuckURL(
         database="md:db",
         query={"memory_limit": "1GB"},
-        path_query={"user": "alice", "session_hint": "team"},
+        path_query={"user": "alice", "session_name": "team"},
     )
     assert url.database is not None
     assert url.database.startswith("md:db?")
@@ -1077,7 +1088,7 @@ def test_motherduck_url_coerces_path_and_query_values() -> None:
         database="md:db",
         query={"saas_mode": False, "token": None},
         path_query={
-            "session_hint": "team",
+            "session_name": "team",
             "attach_mode": ("single", "workspace"),
             "cache_buster": None,
         },
@@ -1086,7 +1097,7 @@ def test_motherduck_url_coerces_path_and_query_values() -> None:
     database, query = url.database.split("?", 1)
     assert database == "md:db"
     assert parse_qs(query) == {
-        "session_hint": ["team"],
+        "session_name": ["team"],
         "attach_mode": ["single", "workspace"],
     }
     assert url.query == {"saas_mode": "false"}
@@ -1096,8 +1107,8 @@ def test_motherduck_url_merges_and_overrides_across_inputs() -> None:
     url = md.MotherDuckURL(
         database="md:db",
         query={"memory_limit": "256MB", "saas_mode": True, "drop": None},
-        path_query={"session_hint": "old-team", "user": "alice"},
-        session_hint="new-team",
+        path_query={"session_name": "old-team", "user": "alice"},
+        session_name="new-team",
         attach_mode=("single", "workspace"),
         memory_limit="1GB",
         cache_buster=None,
@@ -1107,11 +1118,29 @@ def test_motherduck_url_merges_and_overrides_across_inputs() -> None:
     database, query = url.database.split("?", 1)
     assert database == "md:db"
     assert parse_qs(query) == {
-        "session_hint": ["new-team"],
+        "session_name": ["new-team"],
         "user": ["alice"],
         "attach_mode": ["single", "workspace"],
     }
     assert url.query == {"memory_limit": "1GB", "saas_mode": "true"}
+
+
+def test_motherduck_url_normalizes_deprecated_session_aliases() -> None:
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        url = md.MotherDuckURL(
+            database="md:db",
+            path_query={"session_hint": "old-team"},
+            motherduck_session_hint="legacy-team",
+            motherduck_session_name="prefixed-team",
+        )
+
+    assert url.database == "md:db?session_name=old-team"
+    assert [str(w.message) for w in recorded] == [
+        "`session_hint` is deprecated; use `session_name` instead.",
+        "`motherduck_session_hint` is deprecated; use `session_name` instead.",
+        "`motherduck_session_name` is deprecated; use `session_name` instead.",
+    ]
 
 
 def test_motherduck_url_prefers_canonical_ttl_over_alias() -> None:
@@ -1140,7 +1169,7 @@ def test_motherduck_url_normalizes_deprecated_path_aliases() -> None:
     database, query = url.database.split("?", 1)
     assert database == "md:db"
     assert parse_qs(query) == {
-        "session_hint": ["team-a"],
+        "session_name": ["team-a"],
         "attach_mode": ["single"],
         "saas_mode": ["true"],
         "cache_buster": ["abc123"],
@@ -1148,7 +1177,7 @@ def test_motherduck_url_normalizes_deprecated_path_aliases() -> None:
     assert url.query == {}
     messages = [str(w.message) for w in recorded]
     assert messages == [
-        "`motherduck_session_hint` is deprecated; use `session_hint` instead.",
+        "`motherduck_session_hint` is deprecated; use `session_name` instead.",
         "`motherduck_attach_mode` is deprecated; use `attach_mode` instead.",
         "`motherduck_saas_mode` is deprecated; use `saas_mode` instead.",
         "`cachebust` is deprecated; use `cache_buster` instead.",
@@ -1184,14 +1213,14 @@ def test_split_url_query_normalizes_motherduck_setting_aliases() -> None:
         path_query, url_config = md.split_url_query(query)
 
     assert path_query == {
-        "session_hint": "team-a",
+        "session_name": "team-a",
         "attach_mode": "single",
         "saas_mode": "false",
         "cache_buster": "abc123",
     }
     assert url_config == {}
     assert [str(w.message) for w in recorded] == [
-        "`motherduck_session_hint` is deprecated; use `session_hint` instead.",
+        "`motherduck_session_hint` is deprecated; use `session_name` instead.",
         "`motherduck_attach_mode` is deprecated; use `attach_mode` instead.",
         "`motherduck_saas_mode` is deprecated; use `saas_mode` instead.",
         "`cachebust` is deprecated; use `cache_buster` instead.",
@@ -1200,7 +1229,7 @@ def test_split_url_query_normalizes_motherduck_setting_aliases() -> None:
 
 def test_extract_path_query_from_config_mutates_and_normalizes_aliases() -> None:
     config = {
-        "session_hint": "team-a",
+        "session_name": "team-a",
         "motherduck_dbinstance_inactivity_ttl": "10m",
         "threads": 4,
     }
@@ -1209,7 +1238,7 @@ def test_extract_path_query_from_config_mutates_and_normalizes_aliases() -> None
         path_query = md.extract_path_query_from_config(config)
 
     assert path_query == {
-        "session_hint": "team-a",
+        "session_name": "team-a",
         "dbinstance_inactivity_ttl": "10m",
     }
     assert config == {"threads": 4}
@@ -1229,14 +1258,14 @@ def test_extract_path_query_from_config_handles_motherduck_aliases() -> None:
         path_query = md.extract_path_query_from_config(config)
 
     assert path_query == {
-        "session_hint": "team-a",
+        "session_name": "team-a",
         "attach_mode": "workspace",
         "saas_mode": "true",
         "cache_buster": "abc123",
     }
     assert config == {"threads": 4}
     assert [str(w.message) for w in recorded] == [
-        "`motherduck_session_hint` is deprecated; use `session_hint` instead.",
+        "`motherduck_session_hint` is deprecated; use `session_name` instead.",
         "`motherduck_attach_mode` is deprecated; use `attach_mode` instead.",
         "`motherduck_saas_mode` is deprecated; use `saas_mode` instead.",
         "`cachebust` is deprecated; use `cache_buster` instead.",

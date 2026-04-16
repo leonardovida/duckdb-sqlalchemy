@@ -40,6 +40,7 @@ def group(title: str) -> Generator[None, None, None]:
         "1.4.4",
         "1.5.0",
         "1.5.1",
+        "1.5.2",
     ],
 )
 @nox.parametrize("sqlalchemy", ["2.0.45", "2.0.49"])

@@ -76,7 +76,7 @@ url = MotherDuckURL(
     database="md:my_db",
     attach_mode="single",
     access_mode="read_only",
-    session_hint="team-a",
+    session_name="team-a",
     query={"memory_limit": "1GB"},
 )
 engine = create_engine(url)
