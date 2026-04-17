@@ -17,6 +17,7 @@ preserved from the upstream project for historical context.
 ### Tooling
 
 - extend the DuckDB compatibility test matrix to include DuckDB 1.5.2
+- refresh the locked development environment and update local `ty`/Ruff pre-commit pins after validation
 
 ## [1.5.1.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1.3...v1.5.1.4) (2026-04-10)
 
