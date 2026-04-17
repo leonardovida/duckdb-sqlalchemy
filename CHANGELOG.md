@@ -8,6 +8,8 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+## [1.5.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1.4...v1.5.2) (2026-04-17)
+
 ### Features
 
 - prefer MotherDuck's new `session_name` connection parameter while keeping `session_hint`, `motherduck_session_hint`, and `motherduck_session_name` as deprecated aliases
