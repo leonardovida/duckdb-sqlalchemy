@@ -1238,6 +1238,34 @@ class Dialect(PGDialect_psycopg2):
     def _reflection_schema_key(self, schema: Optional[str]) -> Optional[str]:
         return schema
 
+    def _get_single_reflection_result(
+        self,
+        connection: "Connection",
+        table_name: str,
+        schema: Optional[str],
+        get_multi: Any,
+        default_factory: Any,
+        **kw: Any,
+    ) -> Any:
+        scope = kw.pop("scope", None)
+        kind = kw.pop("kind", None)
+        reflected = dict(
+            get_multi(
+                connection,
+                schema=schema,
+                filter_names=[table_name],
+                scope=scope,
+                kind=kind,
+                **kw,
+            )
+        )
+        key = (self._reflection_schema_key(schema), table_name)
+        if key in reflected:
+            return reflected[key]
+        if self._duckdb_table_exists(connection, table_name, schema):
+            return default_factory()
+        raise NoSuchTableError(table_name)
+
     def has_table(
         self,
         connection: "Connection",
@@ -1267,24 +1295,14 @@ class Dialect(PGDialect_psycopg2):
         schema: Optional[str] = None,
         **kw: Any,
     ) -> "ReflectedPrimaryKeyConstraint":
-        scope = kw.pop("scope", None)
-        kind = kw.pop("kind", None)
-        constraints = dict(
-            self.get_multi_pk_constraint(
-                connection,
-                schema=schema,
-                filter_names=[table_name],
-                scope=scope,
-                kind=kind,
-                **kw,
-            )
+        return self._get_single_reflection_result(
+            connection,
+            table_name,
+            schema,
+            self.get_multi_pk_constraint,
+            ReflectionDefaults.pk_constraint,
+            **kw,
         )
-        key = (self._reflection_schema_key(schema), table_name)
-        if key in constraints:
-            return constraints[key]
-        if self._duckdb_table_exists(connection, table_name, schema):
-            return ReflectionDefaults.pk_constraint()
-        raise NoSuchTableError(table_name)
 
     def get_multi_pk_constraint(
         self,
@@ -1388,24 +1406,14 @@ class Dialect(PGDialect_psycopg2):
         schema: Optional[str] = None,
         **kw: Any,
     ) -> List["ReflectedIndex"]:  # type: ignore[override]
-        scope = kw.pop("scope", None)
-        kind = kw.pop("kind", None)
-        indexes = dict(
-            self.get_multi_indexes(
-                connection,
-                schema=schema,
-                filter_names=[table_name],
-                scope=scope,
-                kind=kind,
-                **kw,
-            )
+        return self._get_single_reflection_result(
+            connection,
+            table_name,
+            schema,
+            self.get_multi_indexes,
+            ReflectionDefaults.indexes,
+            **kw,
         )
-        key = (self._reflection_schema_key(schema), table_name)
-        if key in indexes:
-            return indexes[key]
-        if self._duckdb_table_exists(connection, table_name, schema):
-            return ReflectionDefaults.indexes()
-        raise NoSuchTableError(table_name)
 
     # the following methods are for SQLA2 compatibility
     def get_multi_indexes(

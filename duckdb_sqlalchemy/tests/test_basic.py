@@ -31,10 +31,10 @@ from sqlalchemy import (
     text,
     types,
 )
-from sqlalchemy.dialects import registry  # type: ignore
+from sqlalchemy.dialects import registry
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.reflection import Inspector
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 from sqlalchemy.pool import QueuePool, SingletonThreadPool
 
@@ -465,7 +465,7 @@ def test_sessions(session: Session) -> None:
 
     c2 = session.get(IntervalModel, 1)
     assert c2
-    c2.field = timedelta(days=5)
+    cast(Any, c2).field = timedelta(days=5)
     session.flush()
     session.commit()
 
@@ -575,7 +575,7 @@ def test_do_ping(tmp_path: Path, caplog: LogCaptureFixture) -> None:
         poolclass=QueuePool,
     )
 
-    logger = cast(logging.Logger, engine.pool.logger)  # type: ignore
+    logger = cast(logging.Logger, engine.pool.logger)
     logger.setLevel(logging.DEBUG)
 
     with caplog.at_level(logging.DEBUG, logger=logger.name):
@@ -637,7 +637,7 @@ def test_checkpoint_helper_without_commit_preserves_checkpoint_failure(
         conn.execute(text("create table t(i int)"))
         conn.execute(text("insert into t values (1)"))
 
-        with raises(sqlalchemy.exc.OperationalError):
+        with raises(OperationalError):
             checkpoint(conn, commit=False)
 
         conn.rollback()

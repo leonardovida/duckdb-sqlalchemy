@@ -1,15 +1,17 @@
+from typing import Any, Optional, cast
+
 from pyarrow import RecordBatch, RecordBatchReader
 from pyarrow import Table as ArrowTable
 from sqlalchemy import MetaData, Table, create_engine, text
 
 
-def _to_arrow_table(cursor):
+def _to_arrow_table(cursor: Any) -> Any:
     if hasattr(cursor, "to_arrow_table"):
         return cursor.to_arrow_table()
     return cursor.fetch_arrow_table()
 
 
-def _to_arrow_reader(cursor, batch_size=None):
+def _to_arrow_reader(cursor: Any, batch_size: Optional[int] = None) -> Any:
     if hasattr(cursor, "to_arrow_reader"):
         if batch_size is None:
             return cursor.to_arrow_reader()
@@ -35,7 +37,9 @@ def test_fetch_arrow() -> None:
 
     # rows
     with engine.begin() as con:
-        res = con.execute(stmt).cursor.fetchall()
+        cursor = con.execute(stmt).cursor
+        assert cursor is not None
+        res = cursor.fetchall()
         assert res == [("xx", -1.0), ("yy", 2.5), ("zz", 6.0)]
 
     # arrow table
@@ -70,7 +74,7 @@ def test_arrow_execution_option() -> None:
 
     with engine.connect().execution_options(duckdb_arrow=True) as con:
         result = con.execute(text("SELECT * FROM tbl ORDER BY label"))
-        table = result.arrow
+        table = cast(Any, result).arrow
         assert isinstance(table, ArrowTable)
         assert table == ArrowTable.from_pydict(
             {"label": ["aa", "bb"], "value": [1.0, 2.0]}

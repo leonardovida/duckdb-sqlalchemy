@@ -1,6 +1,6 @@
 import warnings
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional, Tuple, cast
 from urllib.parse import parse_qs
 
 import duckdb
@@ -499,8 +499,8 @@ def test_engine_connect_does_not_probe_isolation_level(
     def tracked_execute(
         self: CursorWrapper,
         statement: str,
-        parameters: tuple[Any, ...] | None = None,
-        context: Any | None = None,
+        parameters: Optional[Tuple[Any, ...]] = None,
+        context: Optional[Any] = None,
     ) -> None:
         calls.append(statement)
         return original_execute(self, statement, parameters, context)
@@ -539,7 +539,7 @@ def test_cursorwrapper_executemany_coerces_to_list() -> None:
     cursor = _cursor(conn)
     params = ({"a": 1}, {"a": 2})
 
-    cursor.executemany("insert", params)  # type: ignore[arg-type]
+    cursor.executemany("insert", cast(Any, params))
 
     assert conn.calls[0][0] == "insert"
     assert conn.calls[0][1] == list(params)
@@ -627,10 +627,10 @@ def test_struct_or_union_requires_fields() -> None:
     preparer = dialect.identifier_preparer
 
     with pytest.raises(sa_exc.CompileError):
-        dt.struct_or_union(dt.Struct(), cast(Any, compiler), preparer)
+        dt.struct_or_union(dt.Struct(), compiler, preparer)
 
     struct = dt.Struct({"first name": String, "age": Integer})
-    rendered = dt.struct_or_union(struct, cast(Any, compiler), preparer)
+    rendered = dt.struct_or_union(struct, compiler, preparer)
     assert rendered.startswith("(")
     assert rendered.endswith(")")
     assert '"first name"' in rendered
