@@ -10,7 +10,7 @@ import random
 from collections import OrderedDict
 from datetime import datetime, timezone
 from itertools import product
-from typing import Dict, List, Optional, Tuple, Union, cast
+from typing import Dict, List, Literal, Optional, Tuple, Union, cast
 
 import pandas as pd
 from pandas.testing import assert_frame_equal
@@ -37,9 +37,7 @@ args = {
     "read_sql": ["chunksize"],
 }
 params = {
-    k: list(
-        product(*(_v for _k, _v in _possible_args.items() if _k in args[k]))  # type: ignore
-    )
+    k: list(product(*(_v for _k, _v in _possible_args.items() if _k in args[k])))
     for k in args
 }
 params_strings = {k: (",".join([str(_k) for _k in args[k]])) for k in args}
@@ -68,7 +66,7 @@ sample_df: pd.DataFrame = pd.DataFrame(sample_data)
 @mark.parametrize(params_strings["to_sql"], params["to_sql"])
 def test_to_sql(
     chunksize: Optional[int],
-    if_exists: str,
+    if_exists: Literal["fail", "replace", "append"],
     method: Optional[str],
     index: bool = False,
 ) -> None:
