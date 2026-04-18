@@ -8,6 +8,7 @@ from functools import lru_cache
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Collection,
     Dict,
     Iterable,
@@ -966,6 +967,20 @@ class Dialect(PGDialect_psycopg2):
         sql += where_sql
         return connection.execute(text(sql), params).first() is not None
 
+    def _get_reflection_or_empty_for_existing_table(
+        self,
+        getter: Callable[[], List[Any]],
+        connection: "Connection",
+        table_name: str,
+        schema: Optional[str],
+    ) -> List[Any]:
+        try:
+            return getter()
+        except NoSuchTableError:
+            if self._duckdb_table_exists(connection, table_name, schema):
+                return []
+            raise
+
     def _duckdb_columns(
         self, connection: "Connection", table_name: str, schema: Optional[str]
     ) -> Optional[List[Dict[str, Any]]]:
@@ -1334,18 +1349,19 @@ class Dialect(PGDialect_psycopg2):
         postgresql_ignore_search_path: bool = False,
         **kw: Any,
     ) -> List["ReflectedForeignKeyConstraint"]:
-        try:
-            return super().get_foreign_keys(
+        super_get_foreign_keys = super().get_foreign_keys
+        return self._get_reflection_or_empty_for_existing_table(
+            lambda: super_get_foreign_keys(
                 connection,
                 table_name,
                 schema=schema,
                 postgresql_ignore_search_path=postgresql_ignore_search_path,
                 **kw,
-            )
-        except NoSuchTableError:
-            if self._duckdb_table_exists(connection, table_name, schema):
-                return []
-            raise
+            ),
+            connection,
+            table_name,
+            schema,
+        )
 
     @cache  # type: ignore[call-arg]
     def get_unique_constraints(
@@ -1355,14 +1371,15 @@ class Dialect(PGDialect_psycopg2):
         schema: Optional[str] = None,
         **kw: Any,
     ) -> List["ReflectedUniqueConstraint"]:
-        try:
-            return super().get_unique_constraints(
+        super_get_unique_constraints = super().get_unique_constraints
+        return self._get_reflection_or_empty_for_existing_table(
+            lambda: super_get_unique_constraints(
                 connection, table_name, schema=schema, **kw
-            )
-        except NoSuchTableError:
-            if self._duckdb_table_exists(connection, table_name, schema):
-                return []
-            raise
+            ),
+            connection,
+            table_name,
+            schema,
+        )
 
     @cache  # type: ignore[call-arg]
     def get_check_constraints(
@@ -1372,14 +1389,15 @@ class Dialect(PGDialect_psycopg2):
         schema: Optional[str] = None,
         **kw: Any,
     ) -> List["ReflectedCheckConstraint"]:
-        try:
-            return super().get_check_constraints(
+        super_get_check_constraints = super().get_check_constraints
+        return self._get_reflection_or_empty_for_existing_table(
+            lambda: super_get_check_constraints(
                 connection, table_name, schema=schema, **kw
-            )
-        except NoSuchTableError:
-            if self._duckdb_table_exists(connection, table_name, schema):
-                return []
-            raise
+            ),
+            connection,
+            table_name,
+            schema,
+        )
 
     def get_indexes(
         self,
