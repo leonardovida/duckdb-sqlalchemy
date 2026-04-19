@@ -872,6 +872,28 @@ def test_copy_from_rows_sequence_uses_explicit_columns_and_chunks() -> None:
     assert rows == [(1, "one"), (2, "two"), (3, "three")]
 
 
+def test_copy_rows_as_sequences_infers_mapping_columns() -> None:
+    rows, columns = duckdb_sqlalchemy.bulk._copy_rows_as_sequences(
+        {"id": 1, "label": "one"},
+        [{"id": 2, "label": "two"}],
+        None,
+    )
+
+    assert columns == ["id", "label"]
+    assert list(rows) == [[1, "one"], [2, "two"]]
+
+
+def test_copy_rows_as_sequences_uses_explicit_mapping_columns() -> None:
+    rows, columns = duckdb_sqlalchemy.bulk._copy_rows_as_sequences(
+        {"id": 1, "label": "one"},
+        [{"id": 2}],
+        ["label", "id"],
+    )
+
+    assert columns == ["label", "id"]
+    assert list(rows) == [["one", 1], [None, 2]]
+
+
 def test_copy_from_rows_closes_rotated_tempfiles(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
