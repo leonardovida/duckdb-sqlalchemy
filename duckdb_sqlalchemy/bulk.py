@@ -155,6 +155,27 @@ def _copy_rows_as_csv_chunks(
             _close_and_unlink_tempfile(tmp)
 
 
+def _copy_rows_as_sequences(
+    first: Union[Mapping[str, Any], Sequence[Any]],
+    rows: Iterable[Union[Mapping[str, Any], Sequence[Any]]],
+    columns: Optional[Sequence[str]],
+) -> Tuple[Iterable[Sequence[Any]], Optional[Sequence[str]]]:
+    if isinstance(first, Mapping):
+        if columns is None:
+            columns = [str(col) for col in cast(Mapping[str, Any], first).keys()]
+
+        def row_to_seq(row: Mapping[str, Any]) -> Sequence[Any]:
+            return [row.get(col) for col in columns or []]
+
+        first_row = row_to_seq(cast(Mapping[str, Any], first))
+        remaining_rows = (row_to_seq(cast(Mapping[str, Any], row)) for row in rows)
+        return chain((first_row,), remaining_rows), columns
+
+    first_row = cast(Sequence[Any], first)
+    remaining_rows = (cast(Sequence[Any], row) for row in rows)
+    return chain((first_row,), remaining_rows), columns
+
+
 def copy_from_parquet(
     connection: Any,
     table: TableLike,
@@ -227,20 +248,7 @@ def copy_from_rows(
 
     copy_options = {"header": include_header, **copy_options}
 
-    if isinstance(first, Mapping):
-        if columns is None:
-            columns = [str(col) for col in cast(Mapping[str, Any], first).keys()]
-
-        def row_to_seq(row: Mapping[str, Any]) -> Sequence[Any]:
-            return [row.get(col) for col in columns or []]
-
-        first_row = row_to_seq(cast(Mapping[str, Any], first))
-        remaining_rows = (row_to_seq(cast(Mapping[str, Any], row)) for row in iterator)
-    else:
-        first_row = cast(Sequence[Any], first)
-        remaining_rows = (cast(Sequence[Any], row) for row in iterator)
-
-    chunked_rows = chain((first_row,), remaining_rows)
+    chunked_rows, columns = _copy_rows_as_sequences(first, iterator, columns)
     _copy_rows_as_csv_chunks(
         connection,
         table,
