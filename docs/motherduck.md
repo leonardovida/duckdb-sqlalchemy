@@ -62,12 +62,13 @@ string for MotherDuck connections.
 Parameters that are treated as part of the database string:
 
 - `user`
+- `host`, `region_host`, `port`, `tls`, `grpc_local_subchannel_pool`
 - `session_name` (read-scaling affinity)
 - `attach_mode` (`workspace` or `single`)
 - `access_mode` (`read_only` for read-scaling tokens)
 - `dbinstance_inactivity_ttl` (preferred; `motherduck_dbinstance_inactivity_ttl`
   remains supported but is deprecated)
-- `saas_mode`
+- `saas_mode` (`pgendpoint` is supported when you need PG endpoint-compatible routing)
 - `cache_buster`
 
 For backward compatibility the dialect also accepts `session_hint`,
@@ -88,7 +89,15 @@ If you pass these in `connect_args["config"]`, the dialect will move them into t
 Other DuckDB settings can be passed as URL query params or via `connect_args["config"]`:
 
 - Any DuckDB `SET`-table config option (for example `memory_limit`, `threads`)
-- MotherDuck startup auth keys such as `motherduck_token` and `motherduck_oauth_token`
+- MotherDuck startup auth keys such as `motherduck_token`, `token`, `motherduck_oauth_token`, and `oauth_token`
+
+Example with a MotherDuck host override / PG endpoint-style routing:
+
+```python
+engine = create_engine(
+    "duckdb:///md:my_db?host=custom.motherduck.com&port=443&tls=true&saas_mode=pgendpoint"
+)
+```
 
 ## Recommended defaults for apps/BI
 
