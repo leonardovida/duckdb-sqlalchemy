@@ -5,31 +5,35 @@ IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 EXTENSION_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
-def validate_identifier(value: str, *, kind: str = "identifier") -> str:
+def _require_string(value: str, *, kind: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{kind} must be a string")
-    if not IDENTIFIER_RE.fullmatch(value):
-        raise ValueError(f"invalid {kind}: {value!r}")
     return value
+
+
+def _validate_pattern(value: str, *, kind: str, pattern: re.Pattern[str]) -> str:
+    validated = _require_string(value, kind=kind)
+    if not pattern.fullmatch(validated):
+        raise ValueError(f"invalid {kind}: {validated!r}")
+    return validated
+
+
+def validate_identifier(value: str, *, kind: str = "identifier") -> str:
+    return _validate_pattern(value, kind=kind, pattern=IDENTIFIER_RE)
 
 
 def validate_dotted_identifier(value: str, *, kind: str = "identifier") -> str:
-    if not isinstance(value, str):
-        raise ValueError(f"{kind} must be a string")
-    parts = value.split(".")
+    validated = _require_string(value, kind=kind)
+    parts = validated.split(".")
     if not parts or any(not part for part in parts):
-        raise ValueError(f"invalid {kind}: {value!r}")
+        raise ValueError(f"invalid {kind}: {validated!r}")
     for part in parts:
         validate_identifier(part, kind=kind)
-    return value
+    return validated
 
 
 def validate_extension_name(value: str) -> str:
-    if not isinstance(value, str):
-        raise ValueError("extension name must be a string")
-    if not EXTENSION_RE.fullmatch(value):
-        raise ValueError(f"invalid extension name: {value!r}")
-    return value
+    return _validate_pattern(value, kind="extension name", pattern=EXTENSION_RE)
 
 
 def validate_identifier_list(
