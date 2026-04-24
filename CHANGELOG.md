@@ -12,11 +12,14 @@ preserved from the upstream project for historical context.
 
 - treat MotherDuck transport overrides such as `host`, `region_host`, `port`, `tls`, and `grpc_local_subchannel_pool` as startup URL parameters so SQLAlchemy URLs and `connect_args["config"]` keep working with current MotherDuck routing behavior
 - derive `duckdb_sqlalchemy.__version__` from installed package metadata so the runtime version matches published package metadata and generated user agents
+- normalize legacy MotherDuck transport aliases such as `motherduck_host`, `motherduck_port`, `motherduck_use_tls`, `motherduck_region_host`, and `motherduck_grpc_local_subchannel_pool` into the startup URL parameters the current extension expects, while emitting deprecation warnings
+- restore the exported package version to `1.5.2` so the runtime version matches published package metadata
 
 ### Tooling
 
 - bump the local `ty` pin to `0.0.32` after validating the current checks against the latest non-breaking release
 - allow `pre-commit` 4.6.x in the devtools extra
+- refresh validated dev minimums for `nox` and `pytest-cov`
 
 ## [1.5.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1.4...v1.5.2) (2026-04-17)
 
