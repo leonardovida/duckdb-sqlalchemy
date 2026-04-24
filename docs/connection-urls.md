@@ -82,6 +82,17 @@ url = MotherDuckURL(
 engine = create_engine(url)
 ```
 
+Local or staging endpoint overrides belong in the same path-query bucket:
+
+```python
+url = MotherDuckURL(
+    database="md:my_db",
+    host="localhost",
+    port=1984,
+    tls="off",
+)
+```
+
 ## Manual escaping
 
 If you build URLs manually and your token contains special characters, escape it:

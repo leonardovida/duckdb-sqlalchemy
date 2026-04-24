@@ -5,6 +5,8 @@ import uuid
 import warnings
 from collections import defaultdict
 from functools import lru_cache
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -70,7 +72,10 @@ else:
         _pg_base, "PGExecutionContext", DefaultExecutionContext
     )
 
-__version__ = "1.5.1.4"
+try:
+    __version__ = package_version("duckdb-sqlalchemy")
+except PackageNotFoundError:  # pragma: no cover - source tree import fallback
+    __version__ = "1.5.2"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")

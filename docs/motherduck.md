@@ -62,6 +62,7 @@ string for MotherDuck connections.
 Parameters that are treated as part of the database string:
 
 - `user`
+- `host`, `port`, and `tls` for local or non-default MotherDuck endpoints
 - `session_name` (read-scaling affinity)
 - `attach_mode` (`workspace` or `single`)
 - `access_mode` (`read_only` for read-scaling tokens)
@@ -79,6 +80,13 @@ Example:
 
 ```
 duckdb:///md:my_db?attach_mode=single&access_mode=read_only&session_name=team-a
+```
+
+For local or staging routing, keep the endpoint override in the database string
+as well:
+
+```
+duckdb:///md:my_db?host=localhost&port=1984&tls=off
 ```
 
 If you pass these in `connect_args["config"]`, the dialect will move them into the database string automatically.

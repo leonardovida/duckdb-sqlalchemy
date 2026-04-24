@@ -38,6 +38,9 @@ CACHE_BUST_ALIAS_KEY = "cachebust"
 
 MOTHERDUCK_PATH_QUERY_KEYS = {
     "user",
+    "host",
+    "port",
+    "tls",
     SESSION_NAME_KEY,
     MOTHERDUCK_SESSION_NAME_KEY,
     SESSION_HINT_KEY,
