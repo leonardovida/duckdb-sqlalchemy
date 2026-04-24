@@ -68,9 +68,11 @@ def test_create_connect_args_moves_user_query_param() -> None:
         database="md:my_db",
         query={
             "user": "alice",
-            "host": "localhost",
-            "port": 1984,
-            "tls": "off",
+            "host": "custom.motherduck.com",
+            "region_host": "us-east-1.aws.motherduck.com",
+            "port": 443,
+            "tls": False,
+            "grpc_local_subchannel_pool": True,
             "session_name": "hint",
             "attach_mode": "single",
             "cache_buster": "123",
@@ -87,15 +89,67 @@ def test_create_connect_args_moves_user_query_param() -> None:
     assert database == "md:my_db"
     assert parse_qs(query) == {
         "user": ["alice"],
-        "host": ["localhost"],
-        "port": ["1984"],
-        "tls": ["off"],
+        "host": ["custom.motherduck.com"],
+        "region_host": ["us-east-1.aws.motherduck.com"],
+        "port": ["443"],
+        "tls": ["false"],
+        "grpc_local_subchannel_pool": ["true"],
         "session_name": ["hint"],
         "attach_mode": ["single"],
         "cache_buster": ["123"],
         "dbinstance_inactivity_ttl": ["15m"],
     }
     assert kwargs["url_config"] == {"memory_limit": "1GB"}
+
+
+def test_connect_keeps_token_in_config_and_moves_transport_options(monkeypatch) -> None:
+    captured = {}
+
+    class DummyConn:
+        def execute(self, *args, **kwargs):
+            return self
+
+        def register_filesystem(self, filesystem):
+            return None
+
+        def close(self):
+            return None
+
+    def fake_connect(*cargs, **cparams):
+        captured.update(cparams)
+        return DummyConn()
+
+    monkeypatch.setattr(duckdb_sqlalchemy.duckdb, "connect", fake_connect)
+    monkeypatch.setattr(
+        duckdb_sqlalchemy, "get_core_config", lambda: {"threads", "token"}
+    )
+
+    dialect = Dialect()
+    dialect.connect(
+        database="md:my_db",
+        config={
+            "host": "custom.motherduck.com",
+            "region_host": "us-east-1.aws.motherduck.com",
+            "port": 443,
+            "tls": False,
+            "grpc_local_subchannel_pool": True,
+            "token": "legacy-token",
+            "threads": 4,
+        },
+    )
+
+    database, query = captured["database"].split("?", 1)
+    assert database == "md:my_db"
+    assert parse_qs(query) == {
+        "host": ["custom.motherduck.com"],
+        "region_host": ["us-east-1.aws.motherduck.com"],
+        "port": ["443"],
+        "tls": ["false"],
+        "grpc_local_subchannel_pool": ["true"],
+    }
+    assert captured["config"]["token"] == "legacy-token"
+    assert captured["config"]["threads"] == 4
+    assert captured["config"]["custom_user_agent"].startswith("duckdb-sqlalchemy/1.5.2")
 
 
 def test_create_connect_args_defaults_to_memory_before_path_query() -> None:
@@ -258,9 +312,16 @@ def test_get_core_config_includes_motherduck_keys() -> None:
     core = get_core_config()
 
     expected = {
+        "token",
         "motherduck_token",
         "motherduck_oauth_token",
         "oauth_token",
+        "host",
+        "region_host",
+        "port",
+        "tls",
+        "grpc_local_subchannel_pool",
+        "slt",
         "attach_mode",
         "saas_mode",
         "session_name",
@@ -277,8 +338,10 @@ def test_get_core_config_includes_motherduck_keys() -> None:
 def test_looks_like_motherduck_detection() -> None:
     assert _looks_like_motherduck("md:db", {}) is True
     assert _looks_like_motherduck("motherduck:db", {}) is True
+    assert _looks_like_motherduck("local.db", {"token": "x"}) is True
     assert _looks_like_motherduck("local.db", {"motherduck_token": "x"}) is True
     assert _looks_like_motherduck("local.db", {"motherduck_oauth_token": "x"}) is True
+    assert _looks_like_motherduck("local.db", {"host": "custom.motherduck.com"}) is True
     assert _looks_like_motherduck("local.db", {}) is False
 
 
@@ -883,6 +946,28 @@ def test_copy_from_rows_sequence_uses_explicit_columns_and_chunks() -> None:
 
     rows = conn.execute("SELECT i, label FROM safe ORDER BY i").fetchall()
     assert rows == [(1, "one"), (2, "two"), (3, "three")]
+
+
+def test_copy_rows_as_sequences_infers_mapping_columns() -> None:
+    rows, columns = duckdb_sqlalchemy.bulk._copy_rows_as_sequences(
+        {"id": 1, "label": "one"},
+        [{"id": 2, "label": "two"}],
+        None,
+    )
+
+    assert columns == ["id", "label"]
+    assert list(rows) == [[1, "one"], [2, "two"]]
+
+
+def test_copy_rows_as_sequences_uses_explicit_mapping_columns() -> None:
+    rows, columns = duckdb_sqlalchemy.bulk._copy_rows_as_sequences(
+        {"id": 1, "label": "one"},
+        [{"id": 2}],
+        ["label", "id"],
+    )
+
+    assert columns == ["label", "id"]
+    assert list(rows) == [["one", 1], [None, 2]]
 
 
 def test_copy_from_rows_closes_rotated_tempfiles(

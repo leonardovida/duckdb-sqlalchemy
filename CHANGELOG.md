@@ -10,12 +10,12 @@ preserved from the upstream project for historical context.
 
 ### Bug Fixes
 
-- keep MotherDuck `host`, `port`, and `tls` routing overrides in the database path so local and non-default endpoints reuse the correct client instance/cache key
-- derive `duckdb_sqlalchemy.__version__` from installed package metadata so the runtime version and generated user agent stay aligned with published releases
+- treat MotherDuck transport overrides such as `host`, `region_host`, `port`, `tls`, and `grpc_local_subchannel_pool` as startup URL parameters so SQLAlchemy URLs and `connect_args["config"]` keep working with current MotherDuck routing behavior
+- derive `duckdb_sqlalchemy.__version__` from installed package metadata so the runtime version matches published package metadata and generated user agents
 
 ### Tooling
 
-- bump the pinned `ty` dependency to 0.0.32
+- bump the local `ty` pin to `0.0.32` after validating the current checks against the latest non-breaking release
 - allow `pre-commit` 4.6.x in the devtools extra
 
 ## [1.5.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.1.4...v1.5.2) (2026-04-17)

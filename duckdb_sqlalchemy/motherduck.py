@@ -27,20 +27,30 @@ from ._query import merge_query_mappings
 DBINSTANCE_INACTIVITY_TTL_KEY = "dbinstance_inactivity_ttl"
 MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY = "motherduck_dbinstance_inactivity_ttl"
 MOTHERDUCK_ATTACH_MODE_KEY = "motherduck_attach_mode"
+HOST_KEY = "host"
+REGION_HOST_KEY = "region_host"
+PORT_KEY = "port"
+TLS_KEY = "tls"
+GRPC_LOCAL_SUBCHANNEL_POOL_KEY = "grpc_local_subchannel_pool"
+SHORT_LIVED_TOKEN_KEY = "slt"
 SESSION_HINT_KEY = "session_hint"
 SESSION_NAME_KEY = "session_name"
 MOTHERDUCK_SESSION_HINT_KEY = "motherduck_session_hint"
 MOTHERDUCK_SESSION_NAME_KEY = "motherduck_session_name"
 MOTHERDUCK_SAAS_MODE_KEY = "motherduck_saas_mode"
+TOKEN_ALIAS_KEY = "token"
 MOTHERDUCK_OAUTH_TOKEN_KEY = "motherduck_oauth_token"
 OAUTH_TOKEN_ALIAS_KEY = "oauth_token"
 CACHE_BUST_ALIAS_KEY = "cachebust"
 
 MOTHERDUCK_PATH_QUERY_KEYS = {
     "user",
-    "host",
-    "port",
-    "tls",
+    HOST_KEY,
+    REGION_HOST_KEY,
+    PORT_KEY,
+    TLS_KEY,
+    GRPC_LOCAL_SUBCHANNEL_POOL_KEY,
+    SHORT_LIVED_TOKEN_KEY,
     SESSION_NAME_KEY,
     MOTHERDUCK_SESSION_NAME_KEY,
     SESSION_HINT_KEY,
@@ -57,6 +67,7 @@ MOTHERDUCK_PATH_QUERY_KEYS = {
 }
 
 MOTHERDUCK_CONFIG_KEYS = MOTHERDUCK_PATH_QUERY_KEYS | {
+    TOKEN_ALIAS_KEY,
     "motherduck_token",
     MOTHERDUCK_OAUTH_TOKEN_KEY,
     OAUTH_TOKEN_ALIAS_KEY,
