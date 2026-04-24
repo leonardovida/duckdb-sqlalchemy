@@ -62,7 +62,7 @@ dev = [
 devtools = [
     "nox>=2026.2.9,<2027.0.0",
     "pdbpp>=0.11.0,<0.13.0",
-    "pre-commit>=4.5.1,<4.6.0; python_version >= '3.10'",
+    "pre-commit>=4.6.0,<4.7.0; python_version >= '3.10'",
 ]
 
 [project.entry-points."sqlalchemy.dialects"]

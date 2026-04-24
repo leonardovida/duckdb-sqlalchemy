@@ -82,6 +82,13 @@ Example:
 duckdb:///md:my_db?attach_mode=single&access_mode=read_only&session_name=team-a
 ```
 
+For local or staging routing, keep the endpoint override in the database string
+as well:
+
+```
+duckdb:///md:my_db?host=localhost&port=1984&tls=off
+```
+
 If you pass these in `connect_args["config"]`, the dialect will move them into the database string automatically.
 
 ### Config parameters

@@ -1,3 +1,4 @@
+import importlib.metadata
 import warnings
 from pathlib import Path
 from typing import Any, Optional, Tuple, cast
@@ -247,6 +248,12 @@ def test_stable_session_hint_warns_and_delegates() -> None:
         hint = stable_session_hint("user-123", salt="salt", length=8)
 
     assert hint == stable_session_name("user-123", salt="salt", length=8)
+
+
+def test_runtime_version_matches_installed_metadata() -> None:
+    assert duckdb_sqlalchemy.__version__ == importlib.metadata.version(
+        "duckdb-sqlalchemy"
+    )
 
 
 def test_apply_config_uses_literal_processors() -> None:
@@ -1329,6 +1336,9 @@ def test_motherduck_url_normalizes_deprecated_path_aliases() -> None:
 def test_split_url_query_partitions_and_ignores_dialect_keys() -> None:
     query = {
         "user": "alice",
+        "host": "localhost",
+        "port": 1984,
+        "tls": "off",
         "motherduck_dbinstance_inactivity_ttl": "15m",
         "memory_limit": "1GB",
         "duckdb_sqlalchemy_pool": "queue",
@@ -1337,7 +1347,13 @@ def test_split_url_query_partitions_and_ignores_dialect_keys() -> None:
     with pytest.warns(DeprecationWarning, match="dbinstance_inactivity_ttl"):
         path_query, url_config = md.split_url_query(query)
 
-    assert path_query == {"user": "alice", "dbinstance_inactivity_ttl": "15m"}
+    assert path_query == {
+        "user": "alice",
+        "host": "localhost",
+        "port": "1984",
+        "tls": "off",
+        "dbinstance_inactivity_ttl": "15m",
+    }
     assert url_config == {"memory_limit": "1GB"}
     assert query["duckdb_sqlalchemy_pool"] == "queue"
 
@@ -1371,6 +1387,9 @@ def test_split_url_query_normalizes_motherduck_setting_aliases() -> None:
 
 def test_extract_path_query_from_config_mutates_and_normalizes_aliases() -> None:
     config = {
+        "host": "localhost",
+        "port": 1984,
+        "tls": "off",
         "session_name": "team-a",
         "motherduck_dbinstance_inactivity_ttl": "10m",
         "threads": 4,
@@ -1380,6 +1399,9 @@ def test_extract_path_query_from_config_mutates_and_normalizes_aliases() -> None
         path_query = md.extract_path_query_from_config(config)
 
     assert path_query == {
+        "host": "localhost",
+        "port": "1984",
+        "tls": "off",
         "session_name": "team-a",
         "dbinstance_inactivity_ttl": "10m",
     }
