@@ -1,3 +1,4 @@
+import warnings
 from urllib.parse import parse_qs
 
 import sqlalchemy
@@ -117,3 +118,57 @@ def test_motherduck_oauth_token_stays_in_connect_config(monkeypatch) -> None:
 
     assert captured["config"]["motherduck_oauth_token"] == "oauth123"
     assert "oauth_token" not in captured["config"]
+
+
+def test_motherduck_legacy_transport_aliases_move_to_startup_url(monkeypatch) -> None:
+    get_core_config()
+
+    captured = {}
+
+    class DummyConn:
+        def execute(self, *args, **kwargs):
+            return self
+
+        def register_filesystem(self, filesystem):
+            return None
+
+        def close(self):
+            return None
+
+    def fake_connect(*cargs, **cparams):
+        captured.update(cparams)
+        return DummyConn()
+
+    import duckdb_sqlalchemy
+
+    monkeypatch.setattr(duckdb_sqlalchemy.duckdb, "connect", fake_connect)
+
+    dialect = Dialect()
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        dialect.connect(
+            database="md:my_db",
+            config={
+                "motherduck_host": "api.staging.motherduck.com",
+                "motherduck_port": 443,
+                "motherduck_use_tls": True,
+                "threads": 4,
+            },
+        )
+
+    database, query = captured["database"].split("?", 1)
+    assert database == "md:my_db"
+    assert parse_qs(query) == {
+        "host": ["api.staging.motherduck.com"],
+        "port": ["443"],
+        "tls": ["true"],
+    }
+    assert captured["config"]["threads"] == 4
+    assert "motherduck_host" not in captured["config"]
+    assert "motherduck_port" not in captured["config"]
+    assert "motherduck_use_tls" not in captured["config"]
+    assert [str(w.message) for w in recorded] == [
+        "`motherduck_host` is deprecated; use `host` instead.",
+        "`motherduck_port` is deprecated; use `port` instead.",
+        "`motherduck_use_tls` is deprecated; use `tls` instead.",
+    ]

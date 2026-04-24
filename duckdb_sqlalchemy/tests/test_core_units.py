@@ -316,10 +316,15 @@ def test_get_core_config_includes_motherduck_keys() -> None:
         "motherduck_token",
         "motherduck_oauth_token",
         "oauth_token",
+        "motherduck_host",
         "host",
+        "motherduck_region_host",
         "region_host",
+        "motherduck_port",
         "port",
+        "motherduck_use_tls",
         "tls",
+        "motherduck_grpc_local_subchannel_pool",
         "grpc_local_subchannel_pool",
         "slt",
         "attach_mode",
@@ -341,6 +346,10 @@ def test_looks_like_motherduck_detection() -> None:
     assert _looks_like_motherduck("local.db", {"token": "x"}) is True
     assert _looks_like_motherduck("local.db", {"motherduck_token": "x"}) is True
     assert _looks_like_motherduck("local.db", {"motherduck_oauth_token": "x"}) is True
+    assert (
+        _looks_like_motherduck("local.db", {"motherduck_host": "api.motherduck.com"})
+        is True
+    )
     assert _looks_like_motherduck("local.db", {"host": "custom.motherduck.com"}) is True
     assert _looks_like_motherduck("local.db", {}) is False
 
@@ -1385,6 +1394,36 @@ def test_split_url_query_normalizes_motherduck_setting_aliases() -> None:
     ]
 
 
+def test_split_url_query_normalizes_legacy_motherduck_transport_aliases() -> None:
+    query = {
+        "motherduck_host": "api.staging.motherduck.com",
+        "motherduck_region_host": "regional-api.staging.motherduck.com",
+        "motherduck_port": 443,
+        "motherduck_use_tls": True,
+        "motherduck_grpc_local_subchannel_pool": False,
+    }
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        path_query, url_config = md.split_url_query(query)
+
+    assert path_query == {
+        "host": "api.staging.motherduck.com",
+        "region_host": "regional-api.staging.motherduck.com",
+        "port": "443",
+        "tls": "true",
+        "grpc_local_subchannel_pool": "false",
+    }
+    assert url_config == {}
+    assert [str(w.message) for w in recorded] == [
+        "`motherduck_host` is deprecated; use `host` instead.",
+        "`motherduck_region_host` is deprecated; use `region_host` instead.",
+        "`motherduck_port` is deprecated; use `port` instead.",
+        "`motherduck_use_tls` is deprecated; use `tls` instead.",
+        "`motherduck_grpc_local_subchannel_pool` is deprecated; use `grpc_local_subchannel_pool` instead.",
+    ]
+
+
 def test_extract_path_query_from_config_mutates_and_normalizes_aliases() -> None:
     config = {
         "host": "localhost",
@@ -1433,6 +1472,31 @@ def test_extract_path_query_from_config_handles_motherduck_aliases() -> None:
         "`motherduck_attach_mode` is deprecated; use `attach_mode` instead.",
         "`motherduck_saas_mode` is deprecated; use `saas_mode` instead.",
         "`cachebust` is deprecated; use `cache_buster` instead.",
+    ]
+
+
+def test_extract_path_query_from_config_handles_legacy_transport_aliases() -> None:
+    config = {
+        "motherduck_host": "api.staging.motherduck.com",
+        "motherduck_port": 443,
+        "motherduck_use_tls": True,
+        "threads": 4,
+    }
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        path_query = md.extract_path_query_from_config(config)
+
+    assert path_query == {
+        "host": "api.staging.motherduck.com",
+        "port": "443",
+        "tls": "true",
+    }
+    assert config == {"threads": 4}
+    assert [str(w.message) for w in recorded] == [
+        "`motherduck_host` is deprecated; use `host` instead.",
+        "`motherduck_port` is deprecated; use `port` instead.",
+        "`motherduck_use_tls` is deprecated; use `tls` instead.",
     ]
 
 
