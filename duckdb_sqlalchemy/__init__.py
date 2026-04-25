@@ -60,7 +60,7 @@ from .motherduck import (
     stable_session_hint,
     stable_session_name,
 )
-from .olap import read_csv, read_csv_auto, read_parquet, table_function
+from .olap import md_user_info, read_csv, read_csv_auto, read_parquet, table_function
 from .url import URL, make_url
 
 try:
@@ -117,6 +117,7 @@ __all__ = [
     "read_parquet",
     "read_csv",
     "read_csv_auto",
+    "md_user_info",
     "copy_from_parquet",
     "copy_from_csv",
     "copy_from_rows",
