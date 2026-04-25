@@ -8,6 +8,8 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+## [1.5.2.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.2...v1.5.2.1) (2026-04-25)
+
 ### Bug Fixes
 
 - treat MotherDuck transport overrides such as `host`, `region_host`, `port`, `tls`, and `grpc_local_subchannel_pool` as startup URL parameters so SQLAlchemy URLs and `connect_args["config"]` keep working with current MotherDuck routing behavior
