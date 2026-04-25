@@ -50,6 +50,25 @@ parquet = table_function(
 stmt = select(parquet.c.event_id, parquet.c.ts)
 ```
 
+## MotherDuck user metadata
+
+MotherDuck exposes `md_user_info()` for the current user and organization.
+The helper names the released columns so they are available through SQLAlchemy:
+
+```python
+from sqlalchemy import select
+from duckdb_sqlalchemy import md_user_info
+
+user_info = md_user_info()
+stmt = select(
+    user_info.c.user_id,
+    user_info.c.username,
+    user_info.c.org_id,
+    user_info.c.org_name,
+    user_info.c.org_type,
+)
+```
+
 ## Arrow results
 
 For large reads, you can request Arrow tables directly:

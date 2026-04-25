@@ -2,7 +2,21 @@ from typing import Any, Iterable, Optional
 
 from sqlalchemy import func
 
-__all__ = ["table_function", "read_parquet", "read_csv", "read_csv_auto"]
+MOTHERDUCK_USER_INFO_COLUMNS = (
+    "user_id",
+    "username",
+    "org_id",
+    "org_name",
+    "org_type",
+)
+
+__all__ = [
+    "table_function",
+    "read_parquet",
+    "read_csv",
+    "read_csv_auto",
+    "md_user_info",
+]
 
 
 def table_function(
@@ -37,3 +51,11 @@ def read_csv_auto(
     path: str, *, columns: Optional[Iterable[str]] = None, **kwargs: Any
 ) -> Any:
     return table_function("read_csv_auto", path, columns=columns, **kwargs)
+
+
+def md_user_info(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    return table_function(
+        "md_user_info",
+        columns=MOTHERDUCK_USER_INFO_COLUMNS if columns is None else columns,
+        **kwargs,
+    )

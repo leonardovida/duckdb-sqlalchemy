@@ -527,6 +527,18 @@ def test_table_function_returns_function_call(monkeypatch: pytest.MonkeyPatch) -
     assert called["kwargs"] == {"header": True}
 
 
+def test_md_user_info_uses_released_motherduck_columns() -> None:
+    user_info = olap.md_user_info()
+
+    assert list(user_info.c.keys()) == [
+        "user_id",
+        "username",
+        "org_id",
+        "org_name",
+        "org_type",
+    ]
+
+
 def test_cursorwrapper_execute_basic_paths() -> None:
     class DummyConn:
         def __init__(self) -> None:
