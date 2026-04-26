@@ -41,6 +41,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import bindparam
 from sqlalchemy.sql.selectable import Select
 
+from ._bulk_insert import build_bulk_insert_data as _build_bulk_insert_data
 from ._supports import has_comment_support
 from ._validation import validate_extension_name
 from .bulk import copy_from_csv, copy_from_parquet, copy_from_rows
@@ -354,49 +355,6 @@ def _normalize_execution_options(execution_options: Dict[str, Any]) -> Dict[str,
             "duckdb_insertmanyvalues_page_size"
         ]
     return execution_options
-
-
-def _build_bulk_insert_dataframe(
-    rows: Sequence[Any], column_names: Sequence[str]
-) -> Any:
-    try:
-        import pandas as pd  # type: ignore[import-not-found]
-    except Exception:
-        return None
-
-    try:
-        if isinstance(rows[0], dict):
-            return pd.DataFrame.from_records(rows, columns=column_names)
-        return pd.DataFrame(rows, columns=cast(Any, column_names))
-    except Exception:
-        return None
-
-
-def _build_bulk_insert_arrow_table(
-    rows: Sequence[Any], column_names: Sequence[str]
-) -> Any:
-    try:
-        import pyarrow as pa  # type: ignore[import-not-found]
-    except Exception:
-        return None
-
-    try:
-        if isinstance(rows[0], dict):
-            table = pa.Table.from_pylist(rows)
-            if column_names:
-                return table.select(column_names)
-            return table
-        columns = list(zip(*rows)) if rows else [[] for _ in column_names]
-        return pa.Table.from_arrays(columns, names=column_names)
-    except Exception:
-        return None
-
-
-def _build_bulk_insert_data(rows: Sequence[Any], column_names: Sequence[str]) -> Any:
-    data = _build_bulk_insert_dataframe(rows, column_names)
-    if data is not None:
-        return data
-    return _build_bulk_insert_arrow_table(rows, column_names)
 
 
 class DuckDBArrowResult:
