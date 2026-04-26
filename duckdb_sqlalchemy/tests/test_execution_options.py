@@ -53,3 +53,21 @@ def test_build_bulk_insert_data_handles_positional_rows() -> None:
             {"id": 1, "name": "Ada"},
             {"id": 2, "name": "Grace"},
         ]
+
+
+def test_build_bulk_insert_data_handles_mapping_rows() -> None:
+    if (
+        importlib.util.find_spec("pandas") is None
+        and importlib.util.find_spec("pyarrow") is None
+    ):
+        pytest.skip("pandas or pyarrow is required for bulk insert fast path")
+
+    rows = [{"id": 1, "name": "Ada"}, {"id": 2, "name": "Grace"}]
+    data = _build_bulk_insert_data(rows, ["id", "name"])
+
+    assert data is not None
+    if hasattr(data, "to_pydict"):
+        assert data.to_pydict() == {"id": [1, 2], "name": ["Ada", "Grace"]}
+    else:
+        assert list(data.columns) == ["id", "name"]
+        assert data.to_dict(orient="records") == rows
