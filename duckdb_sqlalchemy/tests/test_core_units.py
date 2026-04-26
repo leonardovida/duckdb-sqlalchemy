@@ -366,6 +366,18 @@ def test_apply_motherduck_defaults_env_token(monkeypatch: pytest.MonkeyPatch) ->
     assert config["motherduck_token"] == "token123"
 
 
+def test_apply_motherduck_defaults_prefers_standard_env_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = {}
+    monkeypatch.setenv("MOTHERDUCK_TOKEN", "standard-token")
+    monkeypatch.setenv("motherduck_token", "legacy-token")
+
+    _apply_motherduck_defaults(config, "md:my_db")
+
+    assert config["motherduck_token"] == "standard-token"
+
+
 def test_apply_motherduck_defaults_skips_non_md(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
