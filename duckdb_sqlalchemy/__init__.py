@@ -587,7 +587,7 @@ def _default_pool_class_for_database(
 
 def _apply_motherduck_defaults(config: Dict[str, Any], database: Optional[str]) -> None:
     if "motherduck_token" not in config:
-        token = os.getenv("motherduck_token") or os.getenv("MOTHERDUCK_TOKEN")
+        token = os.getenv("MOTHERDUCK_TOKEN") or os.getenv("motherduck_token")
         if token and _looks_like_motherduck(database, config):
             config["motherduck_token"] = token
 

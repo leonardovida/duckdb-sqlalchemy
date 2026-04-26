@@ -8,6 +8,14 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+### Bug Fixes
+
+- prefer the documented `MOTHERDUCK_TOKEN` environment variable over the lowercase fallback when both are set
+
+### Tooling
+
+- refresh the locked development dependency set to the latest non-breaking releases within existing version caps
+
 ## [1.5.2.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.2...v1.5.2.1) (2026-04-25)
 
 ### Bug Fixes
