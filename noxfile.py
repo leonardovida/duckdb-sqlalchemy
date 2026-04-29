@@ -87,8 +87,6 @@ def ty(session: nox.Session) -> None:
         "check",
         "--ignore",
         "unresolved-import",
-        "--ignore",
-        "unused-type-ignore-comment",
         "--exclude",
         "duckdb_sqlalchemy/tests/**",
         "duckdb_sqlalchemy/",
