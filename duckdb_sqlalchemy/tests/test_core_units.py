@@ -426,6 +426,23 @@ def test_normalize_motherduck_config_normalizes_oauth_alias() -> None:
     assert config == {"motherduck_oauth_token": "oauth123"}
 
 
+def test_normalize_motherduck_config_normalizes_pgcompat_aliases() -> None:
+    config = {
+        "compatibility_mode": "looker",
+        "nested_types_as": "json",
+        "ignore_nanoseconds": True,
+        "pgcompat_ignore_nanoseconds": False,
+    }
+
+    _normalize_motherduck_config(config)
+
+    assert config == {
+        "pgcompat_compatibility_mode": "looker",
+        "pgcompat_nested_types_as": "json",
+        "pgcompat_ignore_nanoseconds": False,
+    }
+
+
 def test_has_comment_support_false_on_parser_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

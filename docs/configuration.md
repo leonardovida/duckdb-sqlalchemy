@@ -49,6 +49,10 @@ engine = create_engine("duckdb:///analytics.db", connect_args={"read_only": True
   SQL fragments or punctuation in key names are rejected with `ValueError`.
 - Unknown but syntactically valid keys are forwarded to DuckDB and may fail with
   DuckDB's native "unrecognized configuration parameter" error.
+- PostgreSQL compatibility aliases from MotherDuck's PG endpoint are normalized
+  before `SET`: `compatibility_mode`, `nested_types_as`, and
+  `ignore_nanoseconds` become their `pgcompat_*` setting names. Preload the
+  relevant extension before using these settings.
 - MotherDuck path-query options (`attach_mode`, `session_name`, `access_mode`,
   and related keys) are handled specially for `md:` URLs. See
   [motherduck.md](motherduck) and [connection-urls.md](connection-urls).
