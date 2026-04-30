@@ -75,10 +75,6 @@ For backward compatibility the dialect also accepts `session_hint`,
 `motherduck_session_hint`, `motherduck_session_name`,
 `motherduck_attach_mode`, `motherduck_saas_mode`, and `cachebust`, but it
 normalizes them to the canonical keys above and emits a `DeprecationWarning`.
-PG compatibility config aliases released by MotherDuck's PG endpoint
-(`compatibility_mode`, `nested_types_as`, and `ignore_nanoseconds`) are also
-accepted in URL query params or `connect_args["config"]` and normalized to their
-`pgcompat_*` setting names.
 
 Example:
 
