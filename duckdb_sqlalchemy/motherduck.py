@@ -83,6 +83,12 @@ MOTHERDUCK_CONFIG_KEYS = MOTHERDUCK_PATH_QUERY_KEYS | {
     OAUTH_TOKEN_ALIAS_KEY,
 }
 
+PGCOMPAT_CONFIG_ALIASES = (
+    ("compatibility_mode", "pgcompat_compatibility_mode"),
+    ("nested_types_as", "pgcompat_nested_types_as"),
+    ("ignore_nanoseconds", "pgcompat_ignore_nanoseconds"),
+)
+
 DIALECT_QUERY_KEYS = {"duckdb_sqlalchemy_pool", "pool"}
 CONNECT_ARG_MAPPING_KEYS = ("config", "url_config")
 
@@ -172,13 +178,22 @@ def _normalize_config_aliases(config: Dict[str, Any]) -> Dict[str, Any]:
         alias_key=DBINSTANCE_INACTIVITY_TTL_KEY,
         warn_on_alias=False,
     )
-    return _normalize_alias(
+    normalized = _normalize_alias(
         normalized,
         canonical_key=MOTHERDUCK_OAUTH_TOKEN_KEY,
         alias_key=OAUTH_TOKEN_ALIAS_KEY,
         warn_on_alias=False,
         drop_alias=True,
     )
+    for alias_key, canonical_key in PGCOMPAT_CONFIG_ALIASES:
+        normalized = _normalize_alias(
+            normalized,
+            canonical_key=canonical_key,
+            alias_key=alias_key,
+            warn_on_alias=False,
+            drop_alias=True,
+        )
+    return normalized
 
 
 def _partition_query(
