@@ -6,6 +6,7 @@ title: MotherDuck
 # MotherDuck
 
 MotherDuck connections use the `md:` database prefix.
+Database names may not contain commas.
 
 ```python
 from sqlalchemy import create_engine

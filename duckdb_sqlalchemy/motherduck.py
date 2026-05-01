@@ -47,6 +47,7 @@ TOKEN_ALIAS_KEY = "token"
 MOTHERDUCK_OAUTH_TOKEN_KEY = "motherduck_oauth_token"
 OAUTH_TOKEN_ALIAS_KEY = "oauth_token"
 CACHE_BUST_ALIAS_KEY = "cachebust"
+MOTHERDUCK_DATABASE_PREFIXES = ("md:", "motherduck:")
 
 MOTHERDUCK_PATH_QUERY_KEYS = {
     "user",
@@ -227,6 +228,17 @@ def append_query_to_database(
     return f"{database}{separator}{query_string}"
 
 
+def validate_motherduck_database_name(database: Optional[str]) -> None:
+    if database is None:
+        return
+    for prefix in MOTHERDUCK_DATABASE_PREFIXES:
+        if database.startswith(prefix):
+            database_name = database.split("?", 1)[0][len(prefix) :]
+            if "," in database_name:
+                raise ValueError("MotherDuck database names cannot contain commas")
+            return
+
+
 def MotherDuckURL(
     *,
     database: str,
@@ -238,6 +250,8 @@ def MotherDuckURL(
     Build a SQLAlchemy URL for MotherDuck, ensuring routing/cache parameters
     live in the database string.
     """
+
+    validate_motherduck_database_name(database)
 
     path_kwargs, config_kwargs = _partition_query(kwargs)
     path_params = _normalize_path_query_mapping(path_query, path_kwargs)

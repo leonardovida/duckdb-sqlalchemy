@@ -1287,6 +1287,13 @@ def test_motherduck_url_coerces_path_and_query_values() -> None:
     assert url.query == {"saas_mode": "false"}
 
 
+def test_motherduck_url_rejects_database_names_with_commas() -> None:
+    with pytest.raises(
+        ValueError, match="MotherDuck database names cannot contain commas"
+    ):
+        md.MotherDuckURL(database="md:analytics,staging")
+
+
 def test_motherduck_url_merges_and_overrides_across_inputs() -> None:
     url = md.MotherDuckURL(
         database="md:db",
@@ -1391,6 +1398,26 @@ def test_split_url_query_partitions_and_ignores_dialect_keys() -> None:
     }
     assert url_config == {"memory_limit": "1GB"}
     assert query["duckdb_sqlalchemy_pool"] == "queue"
+
+
+def test_create_connect_args_rejects_motherduck_database_names_with_commas() -> None:
+    dialect = Dialect()
+    url = URL(database="md:analytics,staging")
+
+    with pytest.raises(
+        ValueError, match="MotherDuck database names cannot contain commas"
+    ):
+        dialect.create_connect_args(url)
+
+
+def test_create_connect_args_allows_local_paths_with_commas() -> None:
+    dialect = Dialect()
+    url = URL(database="/tmp/analytics,staging.db", query={"threads": 4})
+
+    _, kwargs = dialect.create_connect_args(url)
+
+    assert kwargs["database"] == "/tmp/analytics,staging.db"
+    assert kwargs["url_config"] == {"threads": "4"}
 
 
 def test_split_url_query_normalizes_motherduck_setting_aliases() -> None:
