@@ -60,6 +60,7 @@ from .motherduck import (
     split_url_query,
     stable_session_hint,
     stable_session_name,
+    validate_motherduck_database_name,
 )
 from .olap import md_user_info, read_csv, read_csv_auto, read_parquet, table_function
 from .url import URL, make_url
@@ -716,6 +717,7 @@ class Dialect(PGDialect_psycopg2):
             cparams["database"] = append_query_to_database(
                 cparams.get("database"), path_query
             )
+        validate_motherduck_database_name(cparams.get("database"))
         _normalize_motherduck_config(config)
 
         ext = {k: config.pop(k) for k in list(config) if k not in core_keys}
@@ -1444,6 +1446,7 @@ class Dialect(PGDialect_psycopg2):
         database = opts.get("database")
         if database in {None, ""}:
             database = ":memory:"
+        validate_motherduck_database_name(database)
         opts["database"] = append_query_to_database(database, path_query)
         return (), opts
 
