@@ -596,6 +596,39 @@ def test_cursorwrapper_execute_show_isolation_level() -> None:
     assert conn.calls == ["select 'read committed' as transaction_isolation"]
 
 
+def test_cursorwrapper_execute_postgres_compatibility_statements() -> None:
+    class DummyConn:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def begin(self) -> None:
+            self.calls.append(("begin",))
+
+        def execute(self, statement: str) -> None:
+            self.calls.append(("execute", statement))
+
+    conn = DummyConn()
+    cursor = _cursor(conn)
+
+    cursor.execute("SET extra_float_digits = 3")
+    cursor.execute("SET SESSION statement_timeout TO '5000'")
+    cursor.execute("SET LOCAL statement_timeout = '5s'")
+    cursor.execute(
+        "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED"
+    )
+    cursor.execute("BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED")
+    cursor.execute("SHOW standard_conforming_strings")
+
+    assert conn.calls == [
+        ("execute", ""),
+        ("execute", ""),
+        ("execute", ""),
+        ("execute", ""),
+        ("begin",),
+        ("execute", "select 'on' as standard_conforming_strings"),
+    ]
+
+
 def test_get_default_isolation_level_is_not_implemented() -> None:
     with pytest.raises(NotImplementedError):
         Dialect().get_default_isolation_level(object())

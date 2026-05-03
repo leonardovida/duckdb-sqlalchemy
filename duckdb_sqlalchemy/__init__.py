@@ -211,6 +211,26 @@ class ConnectionWrapper:
 
 _REGISTER_NAME_KEYS = ("name", "view_name", "table")
 _REGISTER_DATA_KEYS = ("df", "dataframe", "relation", "data")
+_IGNORED_POSTGRES_CONFIG_SETTINGS = frozenset(
+    {
+        "extra_float_digits",
+        "application_name",
+        "standard_conforming_strings",
+        "client_min_messages",
+        "datestyle",
+        "ssl_renegotiation_limit",
+        "statement_timeout",
+    }
+)
+_SET_POSTGRES_CONFIG_RE = re.compile(r"^set\s+(?:session\s+|local\s+)?(\w+)\b")
+_SET_TRANSACTION_ISOLATION_RE = re.compile(
+    r"^set\s+(?:session\s+characteristics\s+as\s+)?transaction\s+isolation\s+level\s+"
+    r"(?:serializable|repeatable\s+read|read\s+committed|read\s+uncommitted)$"
+)
+_BEGIN_TRANSACTION_ISOLATION_RE = re.compile(
+    r"^begin\s+(?:transaction\s+)?isolation\s+level\s+"
+    r"(?:serializable|repeatable\s+read|read\s+committed|read\s+uncommitted)$"
+)
 
 
 def _parse_register_params(parameters: Optional[Any]) -> Tuple[str, Any]:
@@ -245,6 +265,9 @@ class CursorWrapper:
         self.__c = c
         self.__connection_wrapper = connection_wrapper
 
+    def _clear_result(self) -> None:
+        self.__c.execute("")
+
     def executemany(
         self,
         statement: str,
@@ -269,11 +292,19 @@ class CursorWrapper:
             norm = statement.strip().lower().rstrip(";")
             if norm == "commit":  # this is largely for ipython-sql
                 self.__c.commit()
+            elif _BEGIN_TRANSACTION_ISOLATION_RE.fullmatch(norm):
+                self.__c.begin()
+            elif _SET_TRANSACTION_ISOLATION_RE.fullmatch(norm):
+                self._clear_result()
+            elif _is_ignored_postgres_config_set(norm):
+                self._clear_result()
             elif norm.startswith("register"):
                 view_name, df = _parse_register_params(parameters)
                 self.__c.register(view_name, df)
             elif norm == "show transaction isolation level":
                 self.__c.execute("select 'read committed' as transaction_isolation")
+            elif norm == "show standard_conforming_strings":
+                self.__c.execute("select 'on' as standard_conforming_strings")
             elif parameters is None:
                 self.__c.execute(statement)
             else:
@@ -323,6 +354,13 @@ class CursorWrapper:
             return self.__c.fetchmany()
         else:
             return self.__c.fetchmany(size)
+
+
+def _is_ignored_postgres_config_set(statement: str) -> bool:
+    match = _SET_POSTGRES_CONFIG_RE.match(statement)
+    if match is None:
+        return False
+    return match.group(1) in _IGNORED_POSTGRES_CONFIG_SETTINGS
 
 
 class DuckDBEngineWarning(Warning):
