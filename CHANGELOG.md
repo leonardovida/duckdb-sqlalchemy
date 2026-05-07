@@ -14,6 +14,7 @@ preserved from the upstream project for historical context.
 
 ### Tooling
 
+- bump the local `ty` pin to `0.0.34` after validating the current checks against the latest non-breaking release
 - refresh the locked development dependency set to the latest non-breaking releases within existing version caps
 
 ## [1.5.2.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.2...v1.5.2.1) (2026-04-25)

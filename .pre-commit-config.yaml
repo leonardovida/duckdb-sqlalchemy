@@ -23,7 +23,7 @@ repos:
         language: python
         files: ^duckdb_sqlalchemy/(?!tests/).*\.py$
         additional_dependencies:
-          - "ty==0.0.33"
+          - "ty==0.0.34"
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
     rev: 'v0.15.11'
