@@ -947,6 +947,21 @@ class Dialect(PGDialect_psycopg2):
                 return []
             raise
 
+    def _get_super_reflection_or_empty(
+        self,
+        getter: Callable[..., List[Any]],
+        connection: "Connection",
+        table_name: str,
+        schema: Optional[str],
+        **kw: Any,
+    ) -> List[Any]:
+        return self._get_reflection_or_empty_for_existing_table(
+            lambda: getter(connection, table_name, schema=schema, **kw),
+            connection,
+            table_name,
+            schema,
+        )
+
     def _duckdb_columns(
         self, connection: "Connection", table_name: str, schema: Optional[str]
     ) -> Optional[List[Dict[str, Any]]]:
@@ -1333,18 +1348,13 @@ class Dialect(PGDialect_psycopg2):
         postgresql_ignore_search_path: bool = False,
         **kw: Any,
     ) -> List["ReflectedForeignKeyConstraint"]:
-        super_get_foreign_keys = super().get_foreign_keys
-        return self._get_reflection_or_empty_for_existing_table(
-            lambda: super_get_foreign_keys(
-                connection,
-                table_name,
-                schema=schema,
-                postgresql_ignore_search_path=postgresql_ignore_search_path,
-                **kw,
-            ),
+        return self._get_super_reflection_or_empty(
+            super().get_foreign_keys,
             connection,
             table_name,
             schema,
+            postgresql_ignore_search_path=postgresql_ignore_search_path,
+            **kw,
         )
 
     @cache  # type: ignore[call-arg]
@@ -1355,14 +1365,12 @@ class Dialect(PGDialect_psycopg2):
         schema: Optional[str] = None,
         **kw: Any,
     ) -> List["ReflectedUniqueConstraint"]:
-        super_get_unique_constraints = super().get_unique_constraints
-        return self._get_reflection_or_empty_for_existing_table(
-            lambda: super_get_unique_constraints(
-                connection, table_name, schema=schema, **kw
-            ),
+        return self._get_super_reflection_or_empty(
+            super().get_unique_constraints,
             connection,
             table_name,
             schema,
+            **kw,
         )
 
     @cache  # type: ignore[call-arg]
@@ -1373,14 +1381,12 @@ class Dialect(PGDialect_psycopg2):
         schema: Optional[str] = None,
         **kw: Any,
     ) -> List["ReflectedCheckConstraint"]:
-        super_get_check_constraints = super().get_check_constraints
-        return self._get_reflection_or_empty_for_existing_table(
-            lambda: super_get_check_constraints(
-                connection, table_name, schema=schema, **kw
-            ),
+        return self._get_super_reflection_or_empty(
+            super().get_check_constraints,
             connection,
             table_name,
             schema,
+            **kw,
         )
 
     def get_indexes(
