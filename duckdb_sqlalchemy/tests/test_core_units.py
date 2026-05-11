@@ -150,7 +150,7 @@ def test_connect_keeps_token_in_config_and_moves_transport_options(monkeypatch) 
     assert captured["config"]["token"] == "legacy-token"
     assert captured["config"]["threads"] == 4
     assert captured["config"]["custom_user_agent"].startswith(
-        "duckdb-sqlalchemy/1.5.2.1"
+        "duckdb-sqlalchemy/1.5.2.2"
     )
 
 

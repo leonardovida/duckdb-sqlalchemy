@@ -8,14 +8,25 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+## [1.5.2.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.2.1...v1.5.2.2) (2026-05-11)
+
+### Features
+
+- add `md_user_info()` for querying MotherDuck user and organization metadata through SQLAlchemy table-valued functions
+
 ### Bug Fixes
 
 - prefer the documented `MOTHERDUCK_TOKEN` environment variable over the lowercase fallback when both are set
+- reject MotherDuck database names containing commas before building SQLAlchemy URLs
+- ignore common PostgreSQL session setup statements and transaction isolation declarations emitted by PostgreSQL-oriented clients
 
 ### Tooling
 
+- extract bulk insert builder logic into a focused helper module without changing the public execution option behavior
+- revert unreleased PostgreSQL compatibility-mode aliases before publishing them
 - bump the local `ty` pin to `0.0.34` after validating the current checks against the latest non-breaking release
 - refresh the locked development dependency set to the latest non-breaking releases within existing version caps
+- deduplicate reflection fallback wrapper handling
 
 ## [1.5.2.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.2...v1.5.2.1) (2026-04-25)
 
