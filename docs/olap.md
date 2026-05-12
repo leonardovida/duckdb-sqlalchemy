@@ -50,23 +50,29 @@ parquet = table_function(
 stmt = select(parquet.c.event_id, parquet.c.ts)
 ```
 
-## MotherDuck user metadata
+## MotherDuck metadata
 
-MotherDuck exposes `md_user_info()` for the current user and organization.
-The helper names the released columns so they are available through SQLAlchemy:
+MotherDuck exposes table functions for account and Dive metadata. The helpers
+name the released columns so they are available through SQLAlchemy:
 
 ```python
 from sqlalchemy import select
-from duckdb_sqlalchemy import md_user_info
+from duckdb_sqlalchemy import md_access_tokens, md_list_dives, md_user_info
 
 user_info = md_user_info()
-stmt = select(
+user_stmt = select(
     user_info.c.user_id,
     user_info.c.username,
     user_info.c.org_id,
     user_info.c.org_name,
     user_info.c.org_type,
 )
+
+dives = md_list_dives()
+dives_stmt = select(dives.c.id, dives.c.title, dives.c.required_resources)
+
+tokens = md_access_tokens()
+tokens_stmt = select(tokens.c.token_name, tokens.c.token_type, tokens.c.expire_at)
 ```
 
 ## Arrow results

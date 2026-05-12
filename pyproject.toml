@@ -46,7 +46,7 @@ dev = [
     "nox>=2026.4.10,<2027.0.0",
     "pyarrow>=22.0.0; python_version >= '3.10'",
     "pytest>=8.0.0,<10.0.0",
-    "ty==0.0.34",
+    "ty==0.0.35",
     "hypothesis>=6.75.2,<7.0.0",
     "github-action-utils>=1.1.0,<2.0.0",
     "pandas>=1,<2.0; python_version < '3.12'",

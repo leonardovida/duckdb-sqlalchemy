@@ -4,9 +4,9 @@ from urllib.parse import parse_qs
 import sqlalchemy
 from packaging.version import Version
 from pytest import raises
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
 
-from duckdb_sqlalchemy import URL, Dialect, make_url, read_parquet
+from duckdb_sqlalchemy import URL, Dialect, make_url, read_csv_auto, read_parquet
 from duckdb_sqlalchemy.config import get_core_config
 
 
@@ -46,6 +46,18 @@ def test_read_parquet_helper() -> None:
     stmt = select(parquet.c.event_id).select_from(parquet)
     sql = str(stmt.compile(dialect=Dialect(), compile_kwargs={"literal_binds": True}))
     assert "read_parquet" in sql
+
+
+def test_read_csv_auto_helper_executes_named_parameters(tmp_path) -> None:
+    csv_path = tmp_path / "events.csv"
+    csv_path.write_text("event_id\n1\n2\n")
+
+    csv = read_csv_auto(str(csv_path), columns=["event_id"], header=True)
+    stmt = select(csv.c.event_id).select_from(csv)
+
+    engine = create_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        assert conn.execute(stmt).scalars().all() == [1, 2]
 
 
 def test_motherduck_config_env_and_ttl(monkeypatch) -> None:
