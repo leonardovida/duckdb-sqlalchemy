@@ -6,7 +6,7 @@ from urllib.parse import parse_qs
 
 import duckdb
 import pytest
-from sqlalchemy import Integer, String, create_engine, pool, text
+from sqlalchemy import Integer, String, create_engine, pool, select, text
 from sqlalchemy import exc as sa_exc
 from sqlalchemy.engine import URL as SAURL
 
@@ -535,8 +535,34 @@ def test_table_function_returns_function_call(monkeypatch: pytest.MonkeyPatch) -
 
     assert result == "ok"
     assert called["name"] == "read_csv"
-    assert called["args"] == ("file.csv",)
-    assert called["kwargs"] == {"header": True}
+    assert called["args"][0] == "file.csv"
+    assert "header" in str(called["args"][1])
+    assert called["kwargs"] == {}
+
+
+def test_table_function_renders_duckdb_named_parameters() -> None:
+    csv = olap.read_csv_auto(
+        "file.csv",
+        columns=["value"],
+        header=True,
+        sample_size=10,
+    )
+
+    stmt = select(csv.c.value).select_from(csv)
+    compiled = stmt.compile(dialect=Dialect())
+
+    sql = str(compiled)
+    assert "read_csv_auto" in sql
+    assert "header :=" in sql
+    assert "sample_size :=" in sql
+    assert compiled.params["header_1"] is True
+    assert compiled.params["sample_size_1"] == 10
+
+
+def test_table_function_rejects_invalid_named_parameter() -> None:
+    kwargs: dict[str, Any] = {"bad-name": True}
+    with pytest.raises(ValueError, match="invalid table function parameter"):
+        olap.table_function("read_csv", "file.csv", **kwargs)
 
 
 def test_md_user_info_uses_released_motherduck_columns() -> None:
@@ -548,6 +574,33 @@ def test_md_user_info_uses_released_motherduck_columns() -> None:
         "org_id",
         "org_name",
         "org_type",
+    ]
+
+
+def test_md_list_dives_uses_released_motherduck_columns() -> None:
+    dives = olap.md_list_dives()
+
+    assert list(dives.c.keys()) == [
+        "id",
+        "title",
+        "description",
+        "owner_id",
+        "current_version",
+        "created_at",
+        "updated_at",
+        "owner_name",
+        "required_resources",
+    ]
+
+
+def test_md_access_tokens_uses_released_motherduck_columns() -> None:
+    tokens = olap.md_access_tokens()
+
+    assert list(tokens.c.keys()) == [
+        "token_name",
+        "token_type",
+        "created_ts",
+        "expire_at",
     ]
 
 
