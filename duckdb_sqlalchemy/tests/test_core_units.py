@@ -553,10 +553,23 @@ def test_table_function_renders_duckdb_named_parameters() -> None:
 
     sql = str(compiled)
     assert "read_csv_auto" in sql
-    assert "header :=" in sql
-    assert "sample_size :=" in sql
+    assert '"header" :=' in sql
+    assert '"sample_size" :=' in sql
     assert compiled.params["header_1"] is True
     assert compiled.params["sample_size_1"] == 10
+
+
+def test_table_function_quotes_reserved_named_parameters() -> None:
+    jobs = olap.md_jobs(limit=1, offset=0)
+
+    stmt = select(jobs.c.job_id).select_from(jobs)
+    compiled = stmt.compile(dialect=Dialect())
+
+    sql = str(compiled)
+    assert '"limit" :=' in sql
+    assert '"offset" :=' in sql
+    assert compiled.params["limit_1"] == 1
+    assert compiled.params["offset_1"] == 0
 
 
 def test_table_function_rejects_invalid_named_parameter() -> None:
@@ -610,6 +623,55 @@ def test_motherduck_metadata_helpers_allow_custom_columns() -> None:
     assert list(olap.md_access_tokens(columns=["token_name"]).c.keys()) == [
         "token_name"
     ]
+
+
+def test_motherduck_job_helpers_use_released_columns() -> None:
+    assert list(olap.md_jobs().c.keys()) == [
+        "job_id",
+        "job_name",
+        "schedule_cron",
+        "schedule_status",
+        "status",
+        "current_version",
+        "created_at",
+        "updated_at",
+    ]
+    assert list(olap.md_create_job().c.keys()) == list(olap.md_jobs().c.keys())
+    assert list(olap.md_get_job().c.keys()) == list(olap.md_jobs().c.keys())
+    assert list(olap.md_update_job().c.keys()) == list(olap.md_jobs().c.keys())
+    assert list(olap.md_delete_job().c.keys()) == ["deleted_count"]
+    assert list(olap.md_cancel_job_run().c.keys()) == ["canceled_count"]
+    assert list(olap.md_run_job().c.keys()) == [
+        "run_id",
+        "job_id",
+        "job_name",
+        "job_version",
+        "run_number",
+        "is_scheduled",
+        "status",
+        "created_at",
+        "started_at",
+        "ended_at",
+        "scheduled_at",
+        "cancelled_at",
+        "exit_code",
+    ]
+    assert list(olap.md_job_runs().c.keys()) == list(olap.md_run_job().c.keys())
+    assert list(olap.md_job_run_logs().c.keys()) == ["logs"]
+    assert list(olap.md_job_versions().c.keys()) == [
+        "version_id",
+        "job_id",
+        "version",
+        "created_at",
+        "md_token_name",
+        "md_secret_names",
+        "config",
+        "source_code",
+        "requirements_txt",
+    ]
+    assert list(olap.md_get_job_version().c.keys()) == list(
+        olap.md_job_versions().c.keys()
+    )
 
 
 def test_cursorwrapper_execute_basic_paths() -> None:

@@ -8,6 +8,18 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+### Features
+
+- add MotherDuck job table-function helpers for job metadata, versions, runs, logs, and job lifecycle operations
+
+### Bug Fixes
+
+- quote validated table-function named parameters so reserved names such as `limit` and `offset` work with SQLAlchemy helpers
+
+### Tooling
+
+- refresh the locked development dependency set to the latest non-breaking releases within existing version caps
+
 ## [1.5.2.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.2.1...v1.5.2.2) (2026-05-11)
 
 ### Features
