@@ -604,6 +604,14 @@ def test_md_access_tokens_uses_released_motherduck_columns() -> None:
     ]
 
 
+def test_motherduck_metadata_helpers_allow_custom_columns() -> None:
+    assert list(olap.md_user_info(columns=["username"]).c.keys()) == ["username"]
+    assert list(olap.md_list_dives(columns=["title"]).c.keys()) == ["title"]
+    assert list(olap.md_access_tokens(columns=["token_name"]).c.keys()) == [
+        "token_name"
+    ]
+
+
 def test_cursorwrapper_execute_basic_paths() -> None:
     class DummyConn:
         def __init__(self) -> None:
