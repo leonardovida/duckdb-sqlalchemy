@@ -82,25 +82,42 @@ def read_csv_auto(
     return table_function("read_csv_auto", path, columns=columns, **kwargs)
 
 
-def md_user_info(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+def _motherduck_metadata_function(
+    name: str,
+    default_columns: Iterable[str],
+    *,
+    columns: Optional[Iterable[str]] = None,
+    **kwargs: Any,
+) -> Any:
     return table_function(
+        name,
+        columns=default_columns if columns is None else columns,
+        **kwargs,
+    )
+
+
+def md_user_info(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    return _motherduck_metadata_function(
         "md_user_info",
-        columns=MOTHERDUCK_USER_INFO_COLUMNS if columns is None else columns,
+        MOTHERDUCK_USER_INFO_COLUMNS,
+        columns=columns,
         **kwargs,
     )
 
 
 def md_list_dives(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
-    return table_function(
+    return _motherduck_metadata_function(
         "md_list_dives",
-        columns=MOTHERDUCK_LIST_DIVES_COLUMNS if columns is None else columns,
+        MOTHERDUCK_LIST_DIVES_COLUMNS,
+        columns=columns,
         **kwargs,
     )
 
 
 def md_access_tokens(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
-    return table_function(
+    return _motherduck_metadata_function(
         "md_access_tokens",
-        columns=MOTHERDUCK_ACCESS_TOKENS_COLUMNS if columns is None else columns,
+        MOTHERDUCK_ACCESS_TOKENS_COLUMNS,
+        columns=columns,
         **kwargs,
     )
