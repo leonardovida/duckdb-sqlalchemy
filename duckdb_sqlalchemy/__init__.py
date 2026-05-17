@@ -42,6 +42,11 @@ from sqlalchemy.sql import bindparam
 from sqlalchemy.sql.selectable import Select
 
 from ._bulk_insert import build_bulk_insert_data as _build_bulk_insert_data
+from ._statements import (
+    DISCONNECT_ERROR_PATTERNS,
+    _is_idempotent_statement,
+    _is_transient_error,
+)
 from ._supports import has_comment_support
 from ._validation import validate_extension_name
 from .bulk import copy_from_csv, copy_from_parquet, copy_from_rows
@@ -535,81 +540,6 @@ def _looks_like_motherduck(database: Optional[str], config: Dict[str, Any]) -> b
     ):
         return True
     return any(k in config for k in MOTHERDUCK_CONFIG_KEYS)
-
-
-DISCONNECT_ERROR_PATTERNS = (
-    "connection closed",
-    "connection reset",
-    "connection refused",
-    "broken pipe",
-    "socket",
-    "network is unreachable",
-    "timed out",
-    "timeout",
-    "could not connect",
-    "failed to connect",
-)
-
-TRANSIENT_ERROR_PATTERNS = (
-    "temporarily unavailable",
-    "service unavailable",
-    "http error: 429",
-    "http error: 503",
-    "http error: 504",
-    "rate limit",
-)
-
-IDEMPOTENT_STATEMENT_PREFIXES = (
-    "select",
-    "show",
-    "describe",
-    "pragma",
-    "explain",
-    "values",
-)
-MUTATING_STATEMENT_PATTERN = re.compile(
-    r"\b("
-    r"insert|update|delete|merge|copy|create|alter|drop|grant|revoke|truncate|"
-    r"call|attach|detach"
-    r")\b"
-)
-
-
-def _strip_leading_sql_comments(statement: str) -> str:
-    sql = statement.lstrip()
-    while sql:
-        if sql.startswith("--"):
-            newline_index = sql.find("\n")
-            if newline_index == -1:
-                return ""
-            sql = sql[newline_index + 1 :].lstrip()
-            continue
-        if sql.startswith("/*"):
-            comment_end = sql.find("*/", 2)
-            if comment_end == -1:
-                return ""
-            sql = sql[comment_end + 2 :].lstrip()
-            continue
-        break
-    return sql
-
-
-def _is_idempotent_statement(statement: str) -> bool:
-    normalized = _strip_leading_sql_comments(statement).lower()
-    if not normalized:
-        return False
-    if normalized.startswith(IDEMPOTENT_STATEMENT_PREFIXES):
-        return True
-    if not normalized.startswith("with"):
-        return False
-    return MUTATING_STATEMENT_PATTERN.search(normalized) is None
-
-
-def _is_transient_error(error: BaseException) -> bool:
-    message = str(error).lower()
-    if any(pattern in message for pattern in DISCONNECT_ERROR_PATTERNS):
-        return False
-    return any(pattern in message for pattern in TRANSIENT_ERROR_PATTERNS)
 
 
 def _pool_override_from_url(url: SAURL) -> Optional[str]:
