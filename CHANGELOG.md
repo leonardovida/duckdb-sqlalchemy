@@ -11,6 +11,7 @@ preserved from the upstream project for historical context.
 ### Features
 
 - add MotherDuck job table-function helpers for job metadata, versions, runs, logs, and job lifecycle operations
+- add MotherDuck Dive table-function helpers for Dives-as-code create, update, fetch, versioning, and cleanup workflows
 
 ### Bug Fixes
 
@@ -19,6 +20,7 @@ preserved from the upstream project for historical context.
 ### Tooling
 
 - refresh the locked development dependency set to the latest non-breaking releases within existing version caps
+- bump the local `ty` pin to `0.0.37` after validating the current checks against the latest non-breaking release
 
 ## [1.5.2.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.2.1...v1.5.2.2) (2026-05-11)
 

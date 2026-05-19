@@ -67,6 +67,27 @@ MOTHERDUCK_JOB_RUN_COLUMNS = (
 MOTHERDUCK_JOB_RUN_LOG_COLUMNS = ("logs",)
 MOTHERDUCK_DELETE_JOB_COLUMNS = ("deleted_count",)
 MOTHERDUCK_CANCEL_JOB_RUN_COLUMNS = ("canceled_count",)
+MOTHERDUCK_DIVE_VERSION_COLUMNS = (
+    "id",
+    "version",
+    "storage_url",
+    "description",
+    "created_at",
+    "api_version",
+    "required_resources",
+)
+MOTHERDUCK_CREATE_DIVE_COLUMNS = (
+    *MOTHERDUCK_LIST_DIVES_COLUMNS,
+    "version_id",
+    "version_storage_url",
+    "version_description",
+    "version_created_at",
+    "version_api_version",
+    "version_required_resources",
+)
+MOTHERDUCK_GET_DIVE_COLUMNS = (*MOTHERDUCK_CREATE_DIVE_COLUMNS, "content")
+MOTHERDUCK_GET_DIVE_VERSION_COLUMNS = (*MOTHERDUCK_DIVE_VERSION_COLUMNS, "content")
+MOTHERDUCK_DELETE_DIVE_COLUMNS = ("success",)
 
 __all__ = [
     "table_function",
@@ -87,6 +108,13 @@ __all__ = [
     "md_job_run_logs",
     "md_job_versions",
     "md_get_job_version",
+    "md_create_dive",
+    "md_update_dive_metadata",
+    "md_update_dive_content",
+    "md_get_dive",
+    "md_list_dive_versions",
+    "md_get_dive_version",
+    "md_delete_dive",
 ]
 
 
@@ -273,6 +301,77 @@ def md_get_job_version(
     return _motherduck_metadata_function(
         "md_get_job_version",
         MOTHERDUCK_JOB_VERSION_COLUMNS,
+        columns=columns,
+        **kwargs,
+    )
+
+
+def md_create_dive(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    return _motherduck_metadata_function(
+        "md_create_dive",
+        MOTHERDUCK_CREATE_DIVE_COLUMNS,
+        columns=columns,
+        **kwargs,
+    )
+
+
+def md_update_dive_metadata(
+    *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+) -> Any:
+    return _motherduck_metadata_function(
+        "md_update_dive_metadata",
+        MOTHERDUCK_LIST_DIVES_COLUMNS,
+        columns=columns,
+        **kwargs,
+    )
+
+
+def md_update_dive_content(
+    *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+) -> Any:
+    return _motherduck_metadata_function(
+        "md_update_dive_content",
+        MOTHERDUCK_DIVE_VERSION_COLUMNS,
+        columns=columns,
+        **kwargs,
+    )
+
+
+def md_get_dive(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    return _motherduck_metadata_function(
+        "md_get_dive",
+        MOTHERDUCK_GET_DIVE_COLUMNS,
+        columns=columns,
+        **kwargs,
+    )
+
+
+def md_list_dive_versions(
+    *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+) -> Any:
+    return _motherduck_metadata_function(
+        "md_list_dive_versions",
+        MOTHERDUCK_DIVE_VERSION_COLUMNS,
+        columns=columns,
+        **kwargs,
+    )
+
+
+def md_get_dive_version(
+    *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+) -> Any:
+    return _motherduck_metadata_function(
+        "md_get_dive_version",
+        MOTHERDUCK_GET_DIVE_VERSION_COLUMNS,
+        columns=columns,
+        **kwargs,
+    )
+
+
+def md_delete_dive(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    return _motherduck_metadata_function(
+        "md_delete_dive",
+        MOTHERDUCK_DELETE_DIVE_COLUMNS,
         columns=columns,
         **kwargs,
     )

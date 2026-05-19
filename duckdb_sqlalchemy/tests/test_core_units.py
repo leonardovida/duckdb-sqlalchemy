@@ -674,6 +674,73 @@ def test_motherduck_job_helpers_use_released_columns() -> None:
     )
 
 
+def test_motherduck_dive_helpers_use_released_columns() -> None:
+    assert list(olap.md_create_dive().c.keys()) == [
+        "id",
+        "title",
+        "description",
+        "owner_id",
+        "current_version",
+        "created_at",
+        "updated_at",
+        "owner_name",
+        "required_resources",
+        "version_id",
+        "version_storage_url",
+        "version_description",
+        "version_created_at",
+        "version_api_version",
+        "version_required_resources",
+    ]
+    assert list(olap.md_update_dive_metadata().c.keys()) == list(
+        olap.md_list_dives().c.keys()
+    )
+    assert list(olap.md_get_dive().c.keys()) == [
+        *list(olap.md_create_dive().c.keys()),
+        "content",
+    ]
+    assert list(olap.md_update_dive_content().c.keys()) == [
+        "id",
+        "version",
+        "storage_url",
+        "description",
+        "created_at",
+        "api_version",
+        "required_resources",
+    ]
+    assert list(olap.md_list_dive_versions().c.keys()) == list(
+        olap.md_update_dive_content().c.keys()
+    )
+    assert list(olap.md_get_dive_version().c.keys()) == [
+        *list(olap.md_update_dive_content().c.keys()),
+        "content",
+    ]
+    assert list(olap.md_delete_dive().c.keys()) == ["success"]
+
+
+def test_motherduck_dive_helpers_render_named_parameters() -> None:
+    create_dive = olap.md_create_dive(
+        title="Sales",
+        content="export default function Dive() { return null }",
+        api_version=1,
+        required_resources=[{"url": "md:analytics", "alias": "analytics"}],
+    )
+    stmt = select(create_dive.c.id).select_from(create_dive)
+    compiled = stmt.compile(dialect=Dialect())
+
+    sql = str(compiled)
+    assert "md_create_dive" in sql
+    assert '"title" :=' in sql
+    assert '"content" :=' in sql
+    assert '"api_version" :=' in sql
+    assert '"required_resources" :=' in sql
+    assert compiled.params["title_1"] == "Sales"
+    assert compiled.params["api_version_1"] == 1
+    assert compiled.params["required_resources_1"] == [
+        {"url": "md:analytics", "alias": "analytics"}
+    ]
+
+
 def test_cursorwrapper_execute_basic_paths() -> None:
     class DummyConn:
         def __init__(self) -> None:

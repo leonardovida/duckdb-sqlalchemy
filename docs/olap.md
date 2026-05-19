@@ -75,6 +75,41 @@ tokens = md_access_tokens()
 tokens_stmt = select(tokens.c.token_name, tokens.c.token_type, tokens.c.expire_at)
 ```
 
+## MotherDuck Dives as code
+
+Dive helpers expose the SQL functions MotherDuck provides for managing Dives
+from a SQL client or deployment script:
+
+```python
+from sqlalchemy import select
+from duckdb_sqlalchemy import (
+    md_create_dive,
+    md_get_dive,
+    md_list_dive_versions,
+    md_update_dive_content,
+)
+
+created = md_create_dive(
+    title="Sales overview",
+    content="export default function Dive() { return null }",
+    api_version=1,
+    required_resources=[{"url": "md:analytics", "alias": "analytics"}],
+)
+create_stmt = select(created.c.id, created.c.version_id)
+
+dive = md_get_dive(id="00000000-0000-0000-0000-000000000000")
+dive_stmt = select(dive.c.title, dive.c.content)
+
+updated = md_update_dive_content(
+    id="00000000-0000-0000-0000-000000000000",
+    content="export default function Dive() { return null }",
+)
+update_stmt = select(updated.c.version, updated.c.storage_url)
+
+versions = md_list_dive_versions(id="00000000-0000-0000-0000-000000000000")
+versions_stmt = select(versions.c.version, versions.c.created_at)
+```
+
 ## MotherDuck jobs
 
 MotherDuck also exposes preview table functions for job metadata. The read-only
