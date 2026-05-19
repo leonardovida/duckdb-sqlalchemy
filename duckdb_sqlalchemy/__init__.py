@@ -42,6 +42,9 @@ from sqlalchemy.sql import bindparam
 from sqlalchemy.sql.selectable import Select
 
 from ._bulk_insert import build_bulk_insert_data as _build_bulk_insert_data
+from ._bulk_insert import (
+    infer_bulk_insert_column_keys as _infer_bulk_insert_column_keys,
+)
 from ._statements import (
     DISCONNECT_ERROR_PATTERNS,
     _is_idempotent_statement,
@@ -1488,8 +1491,8 @@ class Dialect(PGDialect_psycopg2):
         column_keys = getattr(compiled, "column_keys", None)
         if not column_keys:
             column_keys = getattr(compiled, "positiontup", None)
-        if not column_keys and isinstance(parameters[0], dict):
-            column_keys = list(parameters[0].keys())
+        if not column_keys:
+            column_keys = _infer_bulk_insert_column_keys(parameters)
         if not column_keys:
             return False
 
