@@ -1,10 +1,17 @@
 from __future__ import annotations
 
-from typing import Any, Sequence, cast
+from collections.abc import Mapping
+from typing import Any, Optional, Sequence, cast
 
 
 def _rows_use_mapping_shape(rows: Sequence[Any]) -> bool:
-    return bool(rows) and isinstance(rows[0], dict)
+    return bool(rows) and isinstance(rows[0], Mapping)
+
+
+def infer_bulk_insert_column_keys(rows: Sequence[Any]) -> Optional[list[str]]:
+    if not _rows_use_mapping_shape(rows):
+        return None
+    return [str(key) for key in cast(Mapping[str, Any], rows[0]).keys()]
 
 
 def build_bulk_insert_dataframe(

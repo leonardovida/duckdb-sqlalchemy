@@ -1,9 +1,11 @@
 import importlib.util
+from collections import UserDict
 
 import pytest
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, select
 
 from duckdb_sqlalchemy import _build_bulk_insert_data
+from duckdb_sqlalchemy._bulk_insert import infer_bulk_insert_column_keys
 
 
 def test_bulk_insert_register_path() -> None:
@@ -71,3 +73,10 @@ def test_build_bulk_insert_data_handles_mapping_rows() -> None:
     else:
         assert list(data.columns) == ["id", "name"]
         assert data.to_dict(orient="records") == rows
+
+
+def test_infer_bulk_insert_column_keys_handles_mapping_rows() -> None:
+    rows = [UserDict({"id": 1, "name": "Ada"})]
+
+    assert infer_bulk_insert_column_keys(rows) == ["id", "name"]
+    assert infer_bulk_insert_column_keys([(1, "Ada")]) is None
