@@ -94,6 +94,7 @@ __all__ = [
     "read_parquet",
     "read_csv",
     "read_csv_auto",
+    "quack_query",
     "md_user_info",
     "md_list_dives",
     "md_access_tokens",
@@ -162,6 +163,16 @@ def read_csv_auto(
     path: str, *, columns: Optional[Iterable[str]] = None, **kwargs: Any
 ) -> Any:
     return table_function("read_csv_auto", path, columns=columns, **kwargs)
+
+
+def quack_query(
+    uri: str,
+    query: str,
+    *,
+    columns: Optional[Iterable[str]] = None,
+    **kwargs: Any,
+) -> Any:
+    return table_function("quack_query", uri, query, columns=columns, **kwargs)
 
 
 def _motherduck_metadata_function(

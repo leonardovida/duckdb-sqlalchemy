@@ -108,6 +108,15 @@ engine = create_engine(f"duckdb:///md:my_db?motherduck_token={escaped}")
 
 See [motherduck.md](motherduck) for MotherDuck-specific examples and options.
 
+## Quack remotes
+
+DuckDB 1.5.3 ships Quack as a core extension for remote DuckDB access. Quack is
+normally used from SQL with `ATTACH 'quack:host' AS name (...)` or the
+`quack_query` table function; keep the SQLAlchemy engine connected to a local
+DuckDB database and attach the remote from that session.
+
+See [olap.md](olap) for `quack_query` and `ATTACH` examples.
+
 ## Pool defaults
 
 Pooling behavior is described in [configuration.md](configuration)
