@@ -1,12 +1,21 @@
+import socket
 import warnings
 from urllib.parse import parse_qs
 
+import pytest
 import sqlalchemy
 from packaging.version import Version
 from pytest import raises
 from sqlalchemy import create_engine, select
 
-from duckdb_sqlalchemy import URL, Dialect, make_url, read_csv_auto, read_parquet
+from duckdb_sqlalchemy import (
+    URL,
+    Dialect,
+    make_url,
+    quack_query,
+    read_csv_auto,
+    read_parquet,
+)
 from duckdb_sqlalchemy.config import get_core_config
 
 
@@ -58,6 +67,40 @@ def test_read_csv_auto_helper_executes_named_parameters(tmp_path) -> None:
     engine = create_engine("duckdb:///:memory:")
     with engine.connect() as conn:
         assert conn.execute(stmt).scalars().all() == [1, 2]
+
+
+def test_quack_query_helper_executes_against_local_server() -> None:
+    duckdb = pytest.importorskip("duckdb", minversion="1.5.3")
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    uri = f"quack:127.0.0.1:{port}"
+    token = "MY_QUACK_TOKEN_01234567890ABCDEF"
+    server = duckdb.connect()
+    server_started = False
+    try:
+        server.execute("CREATE TABLE hello AS SELECT 'world' AS value")
+        try:
+            server.execute("CALL quack_serve(?, token = ?)", [uri, token]).fetchall()
+        except Exception as exc:
+            pytest.skip(f"quack extension unavailable: {exc}")
+        server_started = True
+
+        remote = quack_query(
+            uri,
+            "SELECT value FROM hello",
+            columns=["value"],
+            token=token,
+        )
+        engine = create_engine("duckdb:///:memory:")
+        with engine.connect() as conn:
+            assert conn.execute(select(remote.c.value)).scalars().all() == ["world"]
+    finally:
+        if server_started:
+            server.execute("CALL quack_stop(?)", [uri])
+        server.close()
 
 
 def test_motherduck_config_env_and_ttl(monkeypatch) -> None:
