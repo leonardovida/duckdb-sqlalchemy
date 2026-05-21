@@ -50,6 +50,24 @@ parquet = table_function(
 stmt = select(parquet.c.event_id, parquet.c.ts)
 ```
 
+## Quack remote queries
+
+DuckDB 1.5.3 ships Quack as a core extension. Use `quack_query` for stateless
+remote queries and name the returned columns for SQLAlchemy:
+
+```python
+from sqlalchemy import select
+from duckdb_sqlalchemy import quack_query
+
+remote = quack_query(
+    "quack:localhost",
+    "SELECT 42 AS answer",
+    columns=["answer"],
+    token="MY_QUACK_TOKEN_01234567890ABCDEF",
+)
+stmt = select(remote.c.answer)
+```
+
 ## MotherDuck metadata
 
 MotherDuck exposes table functions for account and Dive metadata. The helpers
@@ -224,6 +242,18 @@ from sqlalchemy import create_engine, text
 conn = create_engine("duckdb:///local.duckdb").connect()
 conn.execute(text("ATTACH 'analytics.duckdb' AS analytics"))
 rows = conn.execute(text("SELECT * FROM analytics.events LIMIT 10")).fetchall()
+```
+
+Quack remotes can be attached the same way when a Quack server is available:
+
+```python
+conn.execute(
+    text(
+        "ATTACH 'quack:localhost' AS remote_db "
+        "(TOKEN 'MY_QUACK_TOKEN_01234567890ABCDEF')"
+    )
+)
+rows = conn.execute(text("SELECT * FROM remote_db.events LIMIT 10")).fetchall()
 ```
 
 ## Notes

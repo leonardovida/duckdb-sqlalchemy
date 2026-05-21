@@ -578,6 +578,28 @@ def test_table_function_rejects_invalid_named_parameter() -> None:
         olap.table_function("read_csv", "file.csv", **kwargs)
 
 
+def test_quack_query_renders_stateless_remote_query() -> None:
+    remote = olap.quack_query(
+        "quack:localhost",
+        "select 42 as answer",
+        columns=["answer"],
+        token="secret",
+        disable_ssl=True,
+    )
+
+    stmt = select(remote.c.answer).select_from(remote)
+    compiled = stmt.compile(dialect=Dialect())
+
+    sql = str(compiled)
+    assert "quack_query" in sql
+    assert '"token" :=' in sql
+    assert '"disable_ssl" :=' in sql
+    assert compiled.params["quack_query_1"] == "quack:localhost"
+    assert compiled.params["quack_query_2"] == "select 42 as answer"
+    assert compiled.params["token_1"] == "secret"
+    assert compiled.params["disable_ssl_1"] is True
+
+
 def test_md_user_info_uses_released_motherduck_columns() -> None:
     user_info = olap.md_user_info()
 
