@@ -23,14 +23,10 @@ def group(title: str) -> Generator[None, None, None]:
 
 # TODO: "0.5.1", "0.6.1", "0.7.1", "0.8.1"
 @nox.session(py=["3.10", "3.11", "3.12", "3.13", "3.14"])
-# Keep the matrix aligned with the DuckDB and SQLAlchemy release lines we validate.
+# Keep the matrix aligned with the active DuckDB and SQLAlchemy release lines we validate.
 @nox.parametrize(
     "duckdb",
     [
-        "1.1.3",
-        "1.2.0",
-        "1.2.1",
-        "1.2.2",
         "1.3.0",
         "1.3.1",
         "1.3.2",

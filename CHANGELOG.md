@@ -20,6 +20,7 @@ preserved from the upstream project for historical context.
 
 ### Tooling
 
+- focus the nox compatibility matrix on active DuckDB release lines while keeping the runtime dependency floor unchanged
 - extend the DuckDB compatibility test matrix to include DuckDB 1.5.3
 - refresh the locked development dependency set to the latest non-breaking releases within existing version caps
 - bump the local `ty` pin to `0.0.37` after validating the current checks against the latest non-breaking release
