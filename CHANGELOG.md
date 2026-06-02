@@ -8,6 +8,8 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+## [1.5.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.2.2...v1.5.3) (2026-06-02)
+
 ### Features
 
 - add `quack_query()` for stateless DuckDB Quack remote queries on DuckDB 1.5.3+
