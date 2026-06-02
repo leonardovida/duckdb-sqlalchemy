@@ -27,7 +27,7 @@ preserved from the upstream project for historical context.
 - extend the DuckDB compatibility test matrix to include DuckDB 1.5.3
 - update the SQLAlchemy compatibility matrix to include SQLAlchemy 2.0.50
 - refresh the locked development dependency set to the latest non-breaking releases within existing version caps
-- bump the local `ty` pin to `0.0.37` after validating the current checks against the latest non-breaking release
+- bump the local `ty` pin to `0.0.38` after validating the current checks against the latest non-breaking release
 
 ## [1.5.2.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.2.1...v1.5.2.2) (2026-05-11)
 
