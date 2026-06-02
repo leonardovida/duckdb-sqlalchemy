@@ -621,6 +621,13 @@ def _normalize_motherduck_config(config: Dict[str, Any]) -> None:
     _normalize_config_aliases(config)
 
 
+def _pop_application_name(config: Dict[str, Any]) -> Optional[str]:
+    application_name = config.pop("application_name", None)
+    if application_name is None:
+        return None
+    return str(application_name)
+
+
 class DuckDBIdentifierPreparer(PGIdentifierPreparer):
     def __init__(self, dialect: "Dialect", **kwargs: Any) -> None:
         super().__init__(dialect, **kwargs)
@@ -740,12 +747,15 @@ class Dialect(PGDialect_psycopg2):
             )
         validate_motherduck_database_name(cparams.get("database"))
         _normalize_motherduck_config(config)
+        application_name = _pop_application_name(config)
 
         ext = {k: config.pop(k) for k in list(config) if k not in core_keys}
         if supports_user_agent:
             user_agent = (
                 f"duckdb-sqlalchemy/{__version__}(sqlalchemy/{sqlalchemy_version})"
             )
+            if application_name:
+                user_agent = f"{user_agent} application_name({application_name})"
             if "custom_user_agent" in config:
                 user_agent = f"{user_agent} {config['custom_user_agent']}"
             config["custom_user_agent"] = user_agent

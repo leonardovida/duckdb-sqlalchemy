@@ -152,6 +152,47 @@ def test_connect_keeps_token_in_config_and_moves_transport_options(monkeypatch) 
     assert captured["config"]["custom_user_agent"].startswith("duckdb-sqlalchemy/1.5.3")
 
 
+def test_connect_moves_application_name_to_user_agent(monkeypatch) -> None:
+    captured = {}
+
+    class DummyConn:
+        def execute(self, *args, **kwargs):
+            return self
+
+        def register_filesystem(self, filesystem):
+            return None
+
+        def close(self):
+            return None
+
+    def fake_connect(*cargs, **cparams):
+        captured.update(cparams)
+        return DummyConn()
+
+    monkeypatch.setattr(duckdb_sqlalchemy.duckdb, "connect", fake_connect)
+    monkeypatch.setattr(
+        duckdb_sqlalchemy, "get_core_config", lambda: {"custom_user_agent", "threads"}
+    )
+
+    dialect = Dialect()
+    dialect.connect(
+        database="md:my_db",
+        config={
+            "application_name": "Analytics Worker",
+            "custom_user_agent": "service/2",
+            "threads": 4,
+        },
+    )
+
+    assert "application_name" not in captured["config"]
+    assert captured["config"]["threads"] == 4
+    assert captured["config"]["custom_user_agent"].startswith("duckdb-sqlalchemy/1.5.3")
+    assert (
+        "application_name(Analytics Worker)" in captured["config"]["custom_user_agent"]
+    )
+    assert captured["config"]["custom_user_agent"].endswith("service/2")
+
+
 def test_create_connect_args_defaults_to_memory_before_path_query() -> None:
     dialect = Dialect()
     url = SAURL.create("duckdb", query={"access_mode": "read_only", "threads": "4"})
