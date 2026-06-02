@@ -50,6 +50,21 @@ parquet = table_function(
 stmt = select(parquet.c.event_id, parquet.c.ts)
 ```
 
+## Storage metadata
+
+Use `pragma_storage_info` to inspect DuckDB table storage through SQLAlchemy:
+
+```python
+from sqlalchemy import select
+from duckdb_sqlalchemy import pragma_storage_info
+
+storage = pragma_storage_info("events")
+stmt = select(storage.c.column_name, storage.c.segment_type, storage.c.compression)
+```
+
+The helper names DuckDB's released columns by default. On engines that support
+the optional segment-info argument, pass `include_segment_info=True`.
+
 ## Quack remote queries
 
 DuckDB 1.5.3 ships Quack as a core extension. Use `quack_query` for stateless

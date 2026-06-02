@@ -11,6 +11,7 @@ preserved from the upstream project for historical context.
 ### Features
 
 - add `quack_query()` for stateless DuckDB Quack remote queries on DuckDB 1.5.3+
+- add `pragma_storage_info()` for SQLAlchemy access to DuckDB storage metadata
 - add MotherDuck job table-function helpers for job metadata, versions, runs, logs, and job lifecycle operations
 - add MotherDuck Dive table-function helpers for Dives-as-code create, update, fetch, versioning, and cleanup workflows
 
@@ -22,6 +23,7 @@ preserved from the upstream project for historical context.
 
 - focus the nox compatibility matrix on active DuckDB release lines while keeping the runtime dependency floor unchanged
 - extend the DuckDB compatibility test matrix to include DuckDB 1.5.3
+- update the SQLAlchemy compatibility matrix to include SQLAlchemy 2.0.50
 - refresh the locked development dependency set to the latest non-breaking releases within existing version caps
 - bump the local `ty` pin to `0.0.37` after validating the current checks against the latest non-breaking release
 

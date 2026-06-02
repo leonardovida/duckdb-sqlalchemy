@@ -88,12 +88,31 @@ MOTHERDUCK_CREATE_DIVE_COLUMNS = (
 MOTHERDUCK_GET_DIVE_COLUMNS = (*MOTHERDUCK_CREATE_DIVE_COLUMNS, "content")
 MOTHERDUCK_GET_DIVE_VERSION_COLUMNS = (*MOTHERDUCK_DIVE_VERSION_COLUMNS, "content")
 MOTHERDUCK_DELETE_DIVE_COLUMNS = ("success",)
+PRAGMA_STORAGE_INFO_COLUMNS = (
+    "row_group_id",
+    "column_name",
+    "column_id",
+    "column_path",
+    "segment_id",
+    "segment_type",
+    "start",
+    "count",
+    "compression",
+    "stats",
+    "has_updates",
+    "persistent",
+    "block_id",
+    "block_offset",
+    "segment_info",
+    "additional_block_ids",
+)
 
 __all__ = [
     "table_function",
     "read_parquet",
     "read_csv",
     "read_csv_auto",
+    "pragma_storage_info",
     "quack_query",
     "md_user_info",
     "md_list_dives",
@@ -163,6 +182,23 @@ def read_csv_auto(
     path: str, *, columns: Optional[Iterable[str]] = None, **kwargs: Any
 ) -> Any:
     return table_function("read_csv_auto", path, columns=columns, **kwargs)
+
+
+def pragma_storage_info(
+    table_name: str,
+    *,
+    include_segment_info: Optional[bool] = None,
+    columns: Optional[Iterable[str]] = None,
+    **kwargs: Any,
+) -> Any:
+    if include_segment_info is not None:
+        kwargs["include_segment_info"] = include_segment_info
+    return table_function(
+        "pragma_storage_info",
+        table_name,
+        columns=PRAGMA_STORAGE_INFO_COLUMNS if columns is None else columns,
+        **kwargs,
+    )
 
 
 def quack_query(

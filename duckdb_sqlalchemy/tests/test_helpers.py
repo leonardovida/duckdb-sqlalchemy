@@ -12,6 +12,7 @@ from duckdb_sqlalchemy import (
     URL,
     Dialect,
     make_url,
+    pragma_storage_info,
     quack_query,
     read_csv_auto,
     read_parquet,
@@ -67,6 +68,30 @@ def test_read_csv_auto_helper_executes_named_parameters(tmp_path) -> None:
     engine = create_engine("duckdb:///:memory:")
     with engine.connect() as conn:
         assert conn.execute(stmt).scalars().all() == [1, 2]
+
+
+def test_pragma_storage_info_helper_executes_with_default_columns() -> None:
+    storage_info = pragma_storage_info("events")
+    stmt = select(storage_info.c.column_name, storage_info.c.segment_type).select_from(
+        storage_info
+    )
+
+    engine = create_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        conn.exec_driver_sql("CREATE TABLE events AS SELECT 1 AS event_id")
+        conn.commit()
+        rows = conn.execute(stmt).all()
+
+    assert ("event_id", "INTEGER") in rows
+
+
+def test_pragma_storage_info_helper_compiles_include_segment_info() -> None:
+    storage_info = pragma_storage_info("events", include_segment_info=True)
+    stmt = select(storage_info.c.segment_info).select_from(storage_info)
+    sql = str(stmt.compile(dialect=Dialect(), compile_kwargs={"literal_binds": True}))
+
+    assert "pragma_storage_info" in sql
+    assert '"include_segment_info" := true' in sql
 
 
 def test_quack_query_helper_executes_against_local_server() -> None:
