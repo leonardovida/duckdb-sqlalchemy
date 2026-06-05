@@ -8,6 +8,10 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+### Tooling
+
+- bump the local `ty` pin to `0.0.44` and the Ruff pre-commit hook to `0.15.16` after validating the current checks against the latest non-breaking releases
+
 ## [1.5.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.2.2...v1.5.3) (2026-06-02)
 
 ### Features
