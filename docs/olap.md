@@ -143,28 +143,33 @@ versions = md_list_dive_versions(id="00000000-0000-0000-0000-000000000000")
 versions_stmt = select(versions.c.version, versions.c.created_at)
 ```
 
-## MotherDuck jobs
+## MotherDuck Flights
 
-MotherDuck also exposes preview table functions for job metadata. The read-only
-helpers are useful for listing jobs, runs, logs, and versions:
+MotherDuck also exposes preview table functions for Flight metadata. The
+read-only helpers are useful for listing Flights, runs, logs, and versions:
 
 ```python
 from sqlalchemy import select
-from duckdb_sqlalchemy import md_job_runs, md_job_versions, md_jobs
+from duckdb_sqlalchemy import md_flight_runs, md_flight_versions, md_flights
 
-jobs = md_jobs(limit=10)
-jobs_stmt = select(jobs.c.job_id, jobs.c.job_name, jobs.c.status)
+flights = md_flights(limit=10)
+flights_stmt = select(flights.c.flight_id, flights.c.flight_name, flights.c.status)
 
-runs = md_job_runs(job_id="00000000-0000-0000-0000-000000000000", limit=10)
+runs = md_flight_runs(flight_id="00000000-0000-0000-0000-000000000000", limit=10)
 runs_stmt = select(runs.c.run_number, runs.c.status, runs.c.started_at)
 
-versions = md_job_versions(job_id="00000000-0000-0000-0000-000000000000")
-versions_stmt = select(versions.c.version, versions.c.requirements_txt)
+versions = md_flight_versions(flight_id="00000000-0000-0000-0000-000000000000")
+versions_stmt = select(versions.c.flight_version, versions.c.requirements_txt)
 ```
 
-Mutating job functions are available as helpers too:
-`md_create_job`, `md_update_job`, `md_delete_job`, `md_run_job`, and
-`md_cancel_job_run`. They only execute when the SQLAlchemy statement is run.
+Mutating Flight functions are available as helpers too:
+`md_create_flight`, `md_update_flight`, `md_delete_flight`, `md_run_flight`,
+and `md_cancel_flight_run`. They only execute when the SQLAlchemy statement is
+run.
+
+The older `md_*job*` helper names remain as deprecated compatibility aliases.
+They compile through the current Flight functions while preserving legacy
+`job_*` column access where possible.
 
 ## Arrow results
 

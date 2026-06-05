@@ -558,9 +558,9 @@ def test_table_function_renders_duckdb_named_parameters() -> None:
 
 
 def test_table_function_quotes_reserved_named_parameters() -> None:
-    jobs = olap.md_jobs(limit=1, offset=0)
+    flights = olap.md_flights(limit=1, offset=0)
 
-    stmt = select(jobs.c.job_id).select_from(jobs)
+    stmt = select(flights.c.flight_id).select_from(flights)
     compiled = stmt.compile(dialect=Dialect())
 
     sql = str(compiled)
@@ -645,10 +645,10 @@ def test_motherduck_metadata_helpers_allow_custom_columns() -> None:
     ]
 
 
-def test_motherduck_job_helpers_use_released_columns() -> None:
-    assert list(olap.md_jobs().c.keys()) == [
-        "job_id",
-        "job_name",
+def test_motherduck_flight_helpers_use_released_columns() -> None:
+    assert list(olap.md_flights().c.keys()) == [
+        "flight_id",
+        "flight_name",
         "schedule_cron",
         "schedule_status",
         "status",
@@ -656,16 +656,16 @@ def test_motherduck_job_helpers_use_released_columns() -> None:
         "created_at",
         "updated_at",
     ]
-    assert list(olap.md_create_job().c.keys()) == list(olap.md_jobs().c.keys())
-    assert list(olap.md_get_job().c.keys()) == list(olap.md_jobs().c.keys())
-    assert list(olap.md_update_job().c.keys()) == list(olap.md_jobs().c.keys())
-    assert list(olap.md_delete_job().c.keys()) == ["deleted_count"]
-    assert list(olap.md_cancel_job_run().c.keys()) == ["canceled_count"]
-    assert list(olap.md_run_job().c.keys()) == [
+    assert list(olap.md_create_flight().c.keys()) == list(olap.md_flights().c.keys())
+    assert list(olap.md_get_flight().c.keys()) == list(olap.md_flights().c.keys())
+    assert list(olap.md_update_flight().c.keys()) == list(olap.md_flights().c.keys())
+    assert list(olap.md_delete_flight().c.keys()) == ["deleted_count"]
+    assert list(olap.md_cancel_flight_run().c.keys()) == ["canceled_count"]
+    assert list(olap.md_run_flight().c.keys()) == [
         "run_id",
-        "job_id",
-        "job_name",
-        "job_version",
+        "flight_id",
+        "flight_name",
+        "flight_version",
         "run_number",
         "is_scheduled",
         "status",
@@ -676,22 +676,104 @@ def test_motherduck_job_helpers_use_released_columns() -> None:
         "cancelled_at",
         "exit_code",
     ]
-    assert list(olap.md_job_runs().c.keys()) == list(olap.md_run_job().c.keys())
-    assert list(olap.md_job_run_logs().c.keys()) == ["logs"]
-    assert list(olap.md_job_versions().c.keys()) == [
+    assert list(olap.md_flight_runs().c.keys()) == list(olap.md_run_flight().c.keys())
+    assert list(olap.md_flight_logs().c.keys()) == ["logs"]
+    assert list(olap.md_flight_versions().c.keys()) == [
         "version_id",
-        "job_id",
-        "version",
+        "flight_id",
+        "flight_version",
         "created_at",
-        "md_token_name",
-        "md_secret_names",
+        "access_token_name",
+        "flight_secret_names",
         "config",
         "source_code",
         "requirements_txt",
     ]
-    assert list(olap.md_get_job_version().c.keys()) == list(
-        olap.md_job_versions().c.keys()
+    assert list(olap.md_get_flight_version().c.keys()) == list(
+        olap.md_flight_versions().c.keys()
     )
+
+
+def test_deprecated_motherduck_job_helpers_alias_flight_columns() -> None:
+    with pytest.warns(DeprecationWarning, match="md_jobs"):
+        jobs = olap.md_jobs(limit=1)
+    assert list(jobs.c.keys()) == [
+        "job_id",
+        "job_name",
+        "schedule_cron",
+        "schedule_status",
+        "status",
+        "current_version",
+        "created_at",
+        "updated_at",
+    ]
+
+    stmt = select(jobs.c.job_id, jobs.c.job_name).select_from(jobs)
+    compiled = stmt.compile(dialect=Dialect())
+    sql = str(compiled)
+
+    assert "md_flights" in sql
+    assert "md_jobs" not in sql
+    assert compiled.params["limit_1"] == 1
+
+    with pytest.warns(DeprecationWarning, match="md_create_job"):
+        assert list(olap.md_create_job().c.keys()) == list(jobs.c.keys())
+    with pytest.warns(DeprecationWarning, match="md_get_job"):
+        assert list(olap.md_get_job().c.keys()) == list(jobs.c.keys())
+    with pytest.warns(DeprecationWarning, match="md_update_job"):
+        assert list(olap.md_update_job().c.keys()) == list(jobs.c.keys())
+    with pytest.warns(DeprecationWarning, match="md_delete_job"):
+        assert list(olap.md_delete_job().c.keys()) == ["deleted_count"]
+    with pytest.warns(DeprecationWarning, match="md_cancel_job_run"):
+        assert list(olap.md_cancel_job_run().c.keys()) == ["canceled_count"]
+    with pytest.warns(DeprecationWarning, match="md_run_job"):
+        run_job_columns = list(olap.md_run_job().c.keys())
+        assert run_job_columns == [
+            "run_id",
+            "job_id",
+            "job_name",
+            "job_version",
+            "run_number",
+            "is_scheduled",
+            "status",
+            "created_at",
+            "started_at",
+            "ended_at",
+            "scheduled_at",
+            "cancelled_at",
+            "exit_code",
+        ]
+    with pytest.warns(DeprecationWarning, match="md_job_runs"):
+        assert list(olap.md_job_runs().c.keys()) == run_job_columns
+    with pytest.warns(DeprecationWarning, match="md_job_run_logs"):
+        assert list(olap.md_job_run_logs().c.keys()) == ["logs"]
+    with pytest.warns(DeprecationWarning, match="md_job_versions"):
+        assert list(olap.md_job_versions().c.keys()) == [
+            "version_id",
+            "job_id",
+            "version",
+            "created_at",
+            "md_token_name",
+            "md_secret_names",
+            "config",
+            "source_code",
+            "requirements_txt",
+        ]
+
+
+def test_deprecated_motherduck_job_helpers_translate_parameters() -> None:
+    with pytest.warns(DeprecationWarning, match="md_get_job_version"):
+        version = olap.md_get_job_version(
+            job_id="00000000-0000-0000-0000-000000000000",
+            version=2,
+        )
+
+    stmt = select(version.c.job_id, version.c.version).select_from(version)
+    compiled = stmt.compile(dialect=Dialect())
+
+    assert "md_get_flight_version" in str(compiled)
+    assert compiled.params["flight_id_1"] == "00000000-0000-0000-0000-000000000000"
+    assert compiled.params["version_number_1"] == 2
 
 
 def test_motherduck_dive_helpers_use_released_columns() -> None:
