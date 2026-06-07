@@ -1633,6 +1633,28 @@ def test_motherduck_helpers() -> None:
     assert normalized.database == "md:db"
 
 
+def test_database_with_path_query_normalizes_and_appends() -> None:
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        database = md._database_with_path_query(
+            "md:db?user=alice",
+            {"motherduck_host": "api.staging.motherduck.com"},
+            {"tls": False},
+        )
+
+    assert database is not None
+    database_name, query = database.split("?", 1)
+    assert database_name == "md:db"
+    assert parse_qs(query) == {
+        "user": ["alice"],
+        "host": ["api.staging.motherduck.com"],
+        "tls": ["false"],
+    }
+    assert [str(w.message) for w in recorded] == [
+        "`motherduck_host` is deprecated; use `host` instead.",
+    ]
+
+
 def test_motherduck_url_coerces_path_and_query_values() -> None:
     url = md.MotherDuckURL(
         database="md:db",

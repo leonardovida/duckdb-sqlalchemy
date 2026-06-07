@@ -60,6 +60,7 @@ from .motherduck import (
     DIALECT_QUERY_KEYS,
     MOTHERDUCK_CONFIG_KEYS,
     MotherDuckURL,
+    _database_with_path_query,
     _normalize_config_aliases,
     append_query_to_database,
     create_engine_from_paths,
@@ -157,12 +158,14 @@ __all__ = [
     "insert",  # reexport of sqlalchemy.dialects.postgresql.insert
     "MotherDuckURL",
     "URL",
+    "append_query_to_database",
     "create_engine_from_paths",
     "create_motherduck_engine",
     "make_url",
     "stable_session_hint",
     "stable_session_name",
     "table_function",
+    "validate_motherduck_database_name",
     "read_parquet",
     "read_csv",
     "read_csv_auto",
@@ -763,11 +766,9 @@ class Dialect(PGDialect_psycopg2):
             cparams["database"] = ":memory:"
         _apply_motherduck_defaults(config, cparams.get("database"))
         path_query = extract_path_query_from_config(config)
-        if path_query:
-            cparams["database"] = append_query_to_database(
-                cparams.get("database"), path_query
-            )
-        validate_motherduck_database_name(cparams.get("database"))
+        cparams["database"] = _database_with_path_query(
+            cparams.get("database"), path_query
+        )
         _normalize_motherduck_config(config)
         application_name = _pop_application_name(config)
 
@@ -1505,8 +1506,7 @@ class Dialect(PGDialect_psycopg2):
         database = opts.get("database")
         if database in {None, ""}:
             database = ":memory:"
-        validate_motherduck_database_name(database)
-        opts["database"] = append_query_to_database(database, path_query)
+        opts["database"] = _database_with_path_query(database, path_query)
         return (), opts
 
     @classmethod
