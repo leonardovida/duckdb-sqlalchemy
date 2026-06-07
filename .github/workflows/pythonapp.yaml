@@ -66,4 +66,5 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           env_vars: PYTHON
           fail_ci_if_error: true
+          use_pypi: true
           verbose: true
