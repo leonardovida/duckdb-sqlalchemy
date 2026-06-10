@@ -11,6 +11,7 @@ MOTHERDUCK_USER_INFO_COLUMNS = (
     "org_id",
     "org_name",
     "org_type",
+    "region",
 )
 MOTHERDUCK_LIST_DIVES_COLUMNS = (
     "id",
@@ -55,6 +56,7 @@ MOTHERDUCK_JOB_RUN_COLUMNS = (
     "job_id",
     "job_name",
     "job_version",
+    "config",
     "run_number",
     "is_scheduled",
     "status",
@@ -94,6 +96,7 @@ MOTHERDUCK_FLIGHT_RUN_COLUMNS = (
     "flight_id",
     "flight_name",
     "flight_version",
+    "config",
     "run_number",
     "is_scheduled",
     "status",

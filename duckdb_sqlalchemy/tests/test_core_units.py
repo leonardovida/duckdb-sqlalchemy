@@ -648,6 +648,7 @@ def test_md_user_info_uses_released_motherduck_columns() -> None:
         "org_id",
         "org_name",
         "org_type",
+        "region",
     ]
 
 
@@ -707,6 +708,7 @@ def test_motherduck_flight_helpers_use_released_columns() -> None:
         "flight_id",
         "flight_name",
         "flight_version",
+        "config",
         "run_number",
         "is_scheduled",
         "status",
@@ -733,6 +735,18 @@ def test_motherduck_flight_helpers_use_released_columns() -> None:
     assert list(olap.md_get_flight_version().c.keys()) == list(
         olap.md_flight_versions().c.keys()
     )
+
+    run = olap.md_run_flight(
+        flight_id="00000000-0000-0000-0000-000000000000",
+        config={"MODE": "dry_run"},
+    )
+    stmt = select(run.c.run_id, run.c.config).select_from(run)
+    compiled = stmt.compile(dialect=Dialect())
+
+    assert "md_run_flight" in str(compiled)
+    assert '"config" :=' in str(compiled)
+    assert compiled.params["flight_id_1"] == "00000000-0000-0000-0000-000000000000"
+    assert compiled.params["config_1"] == {"MODE": "dry_run"}
 
 
 def test_deprecated_motherduck_job_helpers_alias_flight_columns() -> None:
@@ -774,6 +788,7 @@ def test_deprecated_motherduck_job_helpers_alias_flight_columns() -> None:
             "job_id",
             "job_name",
             "job_version",
+            "config",
             "run_number",
             "is_scheduled",
             "status",
