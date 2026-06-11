@@ -99,6 +99,7 @@ user_stmt = select(
     user_info.c.org_id,
     user_info.c.org_name,
     user_info.c.org_type,
+    user_info.c.region,
 )
 
 dives = md_list_dives()
@@ -156,7 +157,7 @@ flights = md_flights(limit=10)
 flights_stmt = select(flights.c.flight_id, flights.c.flight_name, flights.c.status)
 
 runs = md_flight_runs(flight_id="00000000-0000-0000-0000-000000000000", limit=10)
-runs_stmt = select(runs.c.run_number, runs.c.status, runs.c.started_at)
+runs_stmt = select(runs.c.run_number, runs.c.status, runs.c.config, runs.c.started_at)
 
 versions = md_flight_versions(flight_id="00000000-0000-0000-0000-000000000000")
 versions_stmt = select(versions.c.flight_version, versions.c.requirements_txt)
@@ -165,7 +166,8 @@ versions_stmt = select(versions.c.flight_version, versions.c.requirements_txt)
 Mutating Flight functions are available as helpers too:
 `md_create_flight`, `md_update_flight`, `md_delete_flight`, `md_run_flight`,
 and `md_cancel_flight_run`. They only execute when the SQLAlchemy statement is
-run.
+run. `md_run_flight` accepts a `config` map to override a Flight's config for
+that run only; run result helpers expose the effective `config` column.
 
 The older `md_*job*` helper names remain as deprecated compatibility aliases.
 They compile through the current Flight functions while preserving legacy
