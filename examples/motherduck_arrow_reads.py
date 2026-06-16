@@ -1,4 +1,5 @@
 import os
+from typing import Any, cast
 
 from sqlalchemy import create_engine, text
 
@@ -12,7 +13,7 @@ def main() -> None:
 
     with engine.connect().execution_options(duckdb_arrow=True) as conn:
         result = conn.execute(text("select 1 as value"))
-        arrow_table = result.arrow
+        arrow_table = cast(Any, result).arrow
         print(arrow_table)
         print(arrow_table.to_pandas())
 
