@@ -167,7 +167,8 @@ Mutating Flight functions are available as helpers too:
 `md_create_flight`, `md_update_flight`, `md_delete_flight`, `md_run_flight`,
 and `md_cancel_flight_run`. They only execute when the SQLAlchemy statement is
 run. `md_run_flight` accepts a `config` map to override a Flight's config for
-that run only; run result helpers expose the effective `config` column.
+that run only; run result helpers expose the effective `config` column. Config
+map keys must be non-empty.
 
 The older `md_*job*` helper names remain as deprecated compatibility aliases.
 They compile through the current Flight functions while preserving legacy

@@ -279,6 +279,14 @@ def _motherduck_metadata_function(
     )
 
 
+def _validate_flight_config(kwargs: Mapping[str, Any]) -> None:
+    config = kwargs.get("config")
+    if not isinstance(config, Mapping):
+        return
+    if "" in config:
+        raise ValueError("MotherDuck Flight config keys must not be empty")
+
+
 def _warn_deprecated_job_helper(helper_name: str) -> None:
     replacements = {
         "md_create_job": "md_create_flight",
@@ -381,6 +389,7 @@ def md_access_tokens(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) 
 
 
 def md_create_flight(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    _validate_flight_config(kwargs)
     return _motherduck_metadata_function(
         "md_create_flight",
         MOTHERDUCK_FLIGHT_SUMMARY_COLUMNS,
@@ -408,6 +417,7 @@ def md_get_flight(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> 
 
 
 def md_update_flight(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    _validate_flight_config(kwargs)
     return _motherduck_metadata_function(
         "md_update_flight",
         MOTHERDUCK_FLIGHT_SUMMARY_COLUMNS,
@@ -426,6 +436,7 @@ def md_delete_flight(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) 
 
 
 def md_run_flight(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    _validate_flight_config(kwargs)
     return _motherduck_metadata_function(
         "md_run_flight",
         MOTHERDUCK_FLIGHT_RUN_COLUMNS,
