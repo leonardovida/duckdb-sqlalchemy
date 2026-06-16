@@ -749,6 +749,15 @@ def test_motherduck_flight_helpers_use_released_columns() -> None:
     assert compiled.params["config_1"] == {"MODE": "dry_run"}
 
 
+@pytest.mark.parametrize(
+    "helper",
+    [olap.md_create_flight, olap.md_update_flight, olap.md_run_flight],
+)
+def test_motherduck_flight_helpers_reject_empty_config_keys(helper) -> None:
+    with pytest.raises(ValueError, match="Flight config keys must not be empty"):
+        helper(config={"": "dry_run"})
+
+
 def test_deprecated_motherduck_job_helpers_alias_flight_columns() -> None:
     with pytest.warns(DeprecationWarning, match="md_jobs"):
         jobs = olap.md_jobs(limit=1)
