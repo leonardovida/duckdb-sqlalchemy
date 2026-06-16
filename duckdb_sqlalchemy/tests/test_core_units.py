@@ -25,6 +25,7 @@ from duckdb_sqlalchemy import (
     _normalize_motherduck_config,
     _parse_register_params,
     _pool_override_from_url,
+    _prepare_connection_params,
     _supports,
     create_engine_from_paths,
     olap,
@@ -150,6 +151,36 @@ def test_connect_keeps_token_in_config_and_moves_transport_options(monkeypatch) 
     assert captured["config"]["token"] == "legacy-token"
     assert captured["config"]["threads"] == 4
     assert captured["config"]["custom_user_agent"].startswith("duckdb-sqlalchemy/1.5.3")
+
+
+def test_prepare_connection_params_normalizes_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MOTHERDUCK_TOKEN", raising=False)
+    monkeypatch.delenv("motherduck_token", raising=False)
+    cparams = {
+        "database": "md:my_db",
+        "config": {
+            "host": "custom.motherduck.com",
+            "threads": 4,
+            "application_name": "analytics-app",
+            "custom_setting": "value",
+        },
+        "url_config": {
+            "memory_limit": "1GB",
+            "duckdb_sqlalchemy_pool": "queue",
+        },
+    }
+
+    ext, application_name = _prepare_connection_params(cparams, {"threads"})
+
+    database, query = cparams["database"].split("?", 1)
+    assert database == "md:my_db"
+    assert parse_qs(query) == {"host": ["custom.motherduck.com"]}
+    assert cparams["config"] == {"threads": 4}
+    assert ext == {"custom_setting": "value", "memory_limit": "1GB"}
+    assert application_name == "analytics-app"
+    assert "url_config" not in cparams
 
 
 def test_connect_moves_application_name_to_user_agent(monkeypatch) -> None:

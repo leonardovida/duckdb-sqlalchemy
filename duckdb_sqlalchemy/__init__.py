@@ -616,6 +616,25 @@ def _pop_application_name(config: Dict[str, Any]) -> Optional[str]:
     return str(application_name)
 
 
+def _prepare_connection_params(
+    cparams: Dict[str, Any], core_keys: Collection[str]
+) -> Tuple[Dict[str, Any], Optional[str]]:
+    config = dict(cparams.get("config", {}))
+    cparams["config"] = config
+    config.update(cparams.pop("url_config", {}))
+    for key in DIALECT_QUERY_KEYS:
+        config.pop(key, None)
+    if cparams.get("database") in {None, ""}:
+        cparams["database"] = ":memory:"
+    _apply_motherduck_defaults(config, cparams.get("database"))
+    path_query = extract_path_query_from_config(config)
+    cparams["database"] = _database_with_path_query(cparams.get("database"), path_query)
+    _normalize_motherduck_config(config)
+    application_name = _pop_application_name(config)
+    ext = {k: config.pop(k) for k in list(config) if k not in core_keys}
+    return ext, application_name
+
+
 class DuckDBIdentifierPreparer(PGIdentifierPreparer):
     def __init__(self, dialect: "Dialect", **kwargs: Any) -> None:
         super().__init__(dialect, **kwargs)
@@ -720,22 +739,8 @@ class Dialect(PGDialect_psycopg2):
     def connect(self, *cargs: Any, **cparams: Any) -> Any:
         core_keys = get_core_config()
         preload_extensions = cparams.pop("preload_extensions", [])
-        config = dict(cparams.get("config", {}))
-        cparams["config"] = config
-        config.update(cparams.pop("url_config", {}))
-        for key in DIALECT_QUERY_KEYS:
-            config.pop(key, None)
-        if cparams.get("database") in {None, ""}:
-            cparams["database"] = ":memory:"
-        _apply_motherduck_defaults(config, cparams.get("database"))
-        path_query = extract_path_query_from_config(config)
-        cparams["database"] = _database_with_path_query(
-            cparams.get("database"), path_query
-        )
-        _normalize_motherduck_config(config)
-        application_name = _pop_application_name(config)
-
-        ext = {k: config.pop(k) for k in list(config) if k not in core_keys}
+        ext, application_name = _prepare_connection_params(cparams, core_keys)
+        config = cparams["config"]
         if supports_user_agent:
             user_agent = (
                 f"duckdb-sqlalchemy/{__version__}(sqlalchemy/{sqlalchemy_version})"
