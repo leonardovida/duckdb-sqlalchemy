@@ -287,6 +287,30 @@ def test_retry_on_transient_select() -> None:
     assert cursor.calls == 2
 
 
+def test_retry_on_transient_select_without_params() -> None:
+    dialect = Dialect()
+
+    class DummyCursor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, statement):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("HTTP Error: 503 Service Unavailable")
+            return None
+
+    class DummyContext:
+        execution_options = {
+            "duckdb_retry_on_transient": True,
+            "duckdb_retry_count": 1,
+        }
+
+    cursor = DummyCursor()
+    dialect.do_execute_no_params(cursor, "select 1", context=DummyContext())
+    assert cursor.calls == 2
+
+
 def test_motherduck_url_builder_moves_path_params() -> None:
     with pytest.warns(DeprecationWarning, match="dbinstance_inactivity_ttl"):
         url = MotherDuckURL(
