@@ -283,8 +283,21 @@ def _validate_flight_config(kwargs: Mapping[str, Any]) -> None:
     config = kwargs.get("config")
     if not isinstance(config, Mapping):
         return
-    if "" in config:
-        raise ValueError("MotherDuck Flight config keys must not be empty")
+    for key, value in config.items():
+        if not isinstance(key, str):
+            raise ValueError("MotherDuck Flight config keys must be strings")
+        if key == "":
+            raise ValueError("MotherDuck Flight config keys must not be empty")
+        if "=" in key:
+            raise ValueError('MotherDuck Flight config keys must not contain "="')
+        if "\0" in key:
+            raise ValueError("MotherDuck Flight config keys must not contain NUL bytes")
+        if value is not None and not isinstance(value, str):
+            raise ValueError("MotherDuck Flight config values must be strings or None")
+        if isinstance(value, str) and "\0" in value:
+            raise ValueError(
+                "MotherDuck Flight config values must not contain NUL bytes"
+            )
 
 
 def _warn_deprecated_job_helper(helper_name: str) -> None:

@@ -16,6 +16,7 @@ preserved from the upstream project for historical context.
 ### Bug Fixes
 
 - reject empty MotherDuck Flight config keys before compiling Flight helper calls
+- reject invalid MotherDuck Flight config map keys and NUL-containing values before compiling Flight helper calls
 
 ### Tooling
 

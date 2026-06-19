@@ -813,6 +813,31 @@ def test_motherduck_flight_helpers_reject_empty_config_keys(helper) -> None:
         helper(config={"": "dry_run"})
 
 
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        ({1: "dry_run"}, "Flight config keys must be strings"),
+        ({"MODE=DEBUG": "1"}, 'Flight config keys must not contain "="'),
+        ({"MODE\0DEBUG": "1"}, "Flight config keys must not contain NUL bytes"),
+        ({"MODE": 1}, "Flight config values must be strings or None"),
+        ({"MODE": "dry\0run"}, "Flight config values must not contain NUL bytes"),
+    ],
+)
+def test_motherduck_flight_helpers_reject_invalid_config_maps(config, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        olap.md_run_flight(config=config)
+
+
+def test_motherduck_flight_helpers_allow_null_config_values() -> None:
+    run = olap.md_run_flight(
+        flight_id="00000000-0000-0000-0000-000000000000",
+        config={"MODE": None},
+    )
+    compiled = select(run.c.run_id).select_from(run).compile(dialect=Dialect())
+
+    assert compiled.params["config_1"] == {"MODE": None}
+
+
 def test_deprecated_motherduck_job_helpers_alias_flight_columns() -> None:
     with pytest.warns(DeprecationWarning, match="md_jobs"):
         jobs = olap.md_jobs(limit=1)
