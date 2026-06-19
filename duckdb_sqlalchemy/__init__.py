@@ -1566,11 +1566,9 @@ class Dialect(PGDialect_psycopg2):
 
     def _execute_with_retry(
         self,
-        cursor: Any,
         statement: str,
-        parameters: Any,
         context: Optional[Any],
-        executor: Any,
+        executor: Callable[[], Any],
     ) -> Any:
         options = self._get_execution_options(context)
         retry_count = int(options.get("duckdb_retry_count", 0) or 0)
@@ -1602,7 +1600,7 @@ class Dialect(PGDialect_psycopg2):
                 self, cursor, statement, parameters, context
             )
 
-        self._execute_with_retry(cursor, statement, parameters, context, executor)
+        self._execute_with_retry(statement, context, executor)
 
     def do_execute_no_params(
         self, cursor: Any, statement: str, context: Optional[Any] = None
@@ -1610,7 +1608,7 @@ class Dialect(PGDialect_psycopg2):
         def executor() -> Any:
             return DefaultDialect.do_execute_no_params(self, cursor, statement, context)
 
-        self._execute_with_retry(cursor, statement, None, context, executor)
+        self._execute_with_retry(statement, context, executor)
 
     def _pg_class_filter_scope_schema(
         self,
