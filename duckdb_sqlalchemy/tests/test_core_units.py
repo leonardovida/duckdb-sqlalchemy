@@ -1187,9 +1187,28 @@ def test_struct_or_union_requires_fields() -> None:
 
     struct = dt.Struct({"first name": String, "age": Integer})
     rendered = dt.struct_or_union(struct, compiler, preparer)
-    assert rendered.startswith("(")
-    assert rendered.endswith(")")
-    assert '"first name"' in rendered
+    assert rendered == '("first name" VARCHAR, "age" INTEGER)'
+
+
+@pytest.mark.parametrize(
+    ("field_type", "expected"),
+    [
+        (
+            dt.Struct({"first name": String, "age": Integer}),
+            'STRUCT("first name" VARCHAR, "age" INTEGER)',
+        ),
+        (
+            dt.Union({"name": String, "age": Integer}),
+            'UNION("name" VARCHAR, "age" INTEGER)',
+        ),
+    ],
+)
+def test_field_type_compilers_render_normalized_fields(
+    field_type: Any, expected: str
+) -> None:
+    dialect = Dialect()
+
+    assert dialect.type_compiler.process(field_type) == expected
 
 
 def test_duckdb_reflection_filters_share_schema_database_builder() -> None:

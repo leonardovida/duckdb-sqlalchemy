@@ -13,10 +13,11 @@ from typing import Any, Dict, Optional, Tuple, Type
 import duckdb
 from packaging.version import Version
 from sqlalchemy import exc, util
-from sqlalchemy.dialects.postgresql.base import PGIdentifierPreparer, PGTypeCompiler
+from sqlalchemy.dialects.postgresql.base import PGTypeCompiler
 from sqlalchemy.engine import Dialect
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import sqltypes, type_api
+from sqlalchemy.sql.compiler import IdentifierPreparer
 from sqlalchemy.sql.type_api import TypeEngine
 from sqlalchemy.types import BigInteger, Integer, SmallInteger, String
 
@@ -305,20 +306,18 @@ def register_extension_types() -> None:
 def visit_struct(
     instance: Struct,
     compiler: PGTypeCompiler,
-    identifier_preparer: PGIdentifierPreparer,
     **kw: Any,
 ) -> str:
-    return "STRUCT" + struct_or_union(instance, compiler, identifier_preparer, **kw)
+    return "STRUCT" + struct_or_union(instance, compiler, **kw)
 
 
 @compiles(Union, "duckdb")  # type: ignore[misc]
 def visit_union(
     instance: Union,
     compiler: PGTypeCompiler,
-    identifier_preparer: PGIdentifierPreparer,
     **kw: Any,
 ) -> str:
-    return "UNION" + struct_or_union(instance, compiler, identifier_preparer, **kw)
+    return "UNION" + struct_or_union(instance, compiler, **kw)
 
 
 @compiles(Variant, "duckdb")  # type: ignore[misc]
@@ -342,25 +341,15 @@ def visit_geometry(
 def struct_or_union(
     instance: typing.Union[Union, Struct],
     compiler: PGTypeCompiler,
-    identifier_preparer: PGIdentifierPreparer,
+    identifier_preparer: Optional[IdentifierPreparer] = None,
     **kw: Any,
 ) -> str:
-    fields = getattr(instance, "_fields", None)
-    if fields is None:
-        fields = _normalize_fields(instance.fields)
+    fields = instance._fields
     if fields is None:
         raise exc.CompileError(f"DuckDB {repr(instance)} type requires fields")
-    return "({})".format(
-        ", ".join(
-            "{} {}".format(
-                identifier_preparer.quote_identifier(key),
-                process_type(
-                    value, compiler, identifier_preparer=identifier_preparer, **kw
-                ),
-            )
-            for key, value in (fields.items() if isinstance(fields, dict) else fields)
-        )
-    )
+    if identifier_preparer is None:
+        identifier_preparer = compiler.dialect.identifier_preparer
+    return _render_struct_or_union_fields(fields, compiler, identifier_preparer, **kw)
 
 
 def process_type(
@@ -369,6 +358,24 @@ def process_type(
     **kw: Any,
 ) -> str:
     return compiler.process(type_api.to_instance(value), **kw)
+
+
+def _render_struct_or_union_fields(
+    fields: Tuple[Tuple[str, TypeEngine], ...],
+    compiler: PGTypeCompiler,
+    identifier_preparer: IdentifierPreparer,
+    **kw: Any,
+) -> str:
+    rendered_fields = (
+        "{} {}".format(
+            identifier_preparer.quote_identifier(key),
+            process_type(
+                value, compiler, identifier_preparer=identifier_preparer, **kw
+            ),
+        )
+        for key, value in fields
+    )
+    return "({})".format(", ".join(rendered_fields))
 
 
 @compiles(Map, "duckdb")  # type: ignore[misc]
