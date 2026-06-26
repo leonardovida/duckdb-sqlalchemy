@@ -1,6 +1,6 @@
 [project]
 name = "duckdb-sqlalchemy"
-version = "1.5.3"
+version = "1.5.4"
 description = "DuckDB SQLAlchemy dialect for DuckDB and MotherDuck"
 authors = [
     {name = "Leonardo Vida", email = "lleonardovida@gmail.com"},
@@ -27,7 +27,8 @@ classifiers = [
 ]
 dependencies = [
     "duckdb>=0.5.0",
-    "sqlalchemy>=2.0.45",
+    "sqlalchemy>=2.0.0; python_version < '3.14'",
+    "sqlalchemy>=2.0.45; python_version >= '3.14'",
     "packaging>=21",
 ]
 

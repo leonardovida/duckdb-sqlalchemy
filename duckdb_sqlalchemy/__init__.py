@@ -126,7 +126,7 @@ else:
 try:
     __version__ = package_version("duckdb-sqlalchemy")
 except PackageNotFoundError:  # pragma: no cover - source tree import fallback
-    __version__ = "1.5.3"
+    __version__ = "1.5.4"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -1177,6 +1177,79 @@ class Dialect(PGDialect_psycopg2):
                 column_names.append(None)
         return expressions, column_names
 
+    def _reflect_pg_type_compat(
+        self,
+        format_type: Optional[str],
+        *,
+        type_description: str,
+    ) -> Any:
+        reflect_type = getattr(super(), "_reflect_type", None)
+        if reflect_type is not None:
+            return reflect_type(
+                format_type,
+                {},
+                {},
+                type_description=type_description,
+                collation=None,
+            )
+
+        if format_type is None:
+            util.warn(
+                "PostgreSQL format_type() returned NULL for %s" % type_description
+            )
+            return sqltypes.NULLTYPE
+
+        args_match = re.search(r"\((.*)\)$", format_type)
+        type_args: List[str]
+        if args_match and args_match.group(1):
+            type_args = [part.strip() for part in args_match.group(1).split(",")]
+        else:
+            type_args = []
+
+        type_name = re.sub(r"\(.*\)$", "", format_type).strip().lower()
+        schema_type = self.ischema_names.get(type_name)
+        args: Tuple[Any, ...] = ()
+        kwargs: Dict[str, Any] = {}
+
+        if type_name == "numeric" and len(type_args) == 2:
+            args = (int(type_args[0]), int(type_args[1]))
+        elif type_name == "double precision":
+            args = (53,)
+        elif type_name in (
+            "timestamp with time zone",
+            "time with time zone",
+        ):
+            kwargs["timezone"] = True
+            if len(type_args) == 1:
+                kwargs["precision"] = int(type_args[0])
+        elif type_name in (
+            "timestamp without time zone",
+            "time without time zone",
+            "time",
+        ):
+            kwargs["timezone"] = False
+            if len(type_args) == 1:
+                kwargs["precision"] = int(type_args[0])
+        elif type_name == "bit varying":
+            kwargs["varying"] = True
+            if len(type_args) == 1:
+                args = (int(type_args[0]),)
+        else:
+            try:
+                charlen = int(type_args[0])
+            except (IndexError, ValueError):
+                args = tuple(type_args)
+            else:
+                args = (charlen, *type_args[1:])
+
+        if schema_type is None:
+            util.warn(
+                "Did not recognize type '%s' of %s" % (type_name, type_description)
+            )
+            return sqltypes.NULLTYPE
+
+        return schema_type(*args, **kwargs)
+
     def _reflect_duckdb_data_type(
         self,
         data_type: str,
@@ -1214,12 +1287,9 @@ class Dialect(PGDialect_psycopg2):
         elif upper.startswith(("STRUCT(", "MAP(", "UNION(")):
             reflected = sqltypes.NULLTYPE
         else:
-            reflected = self._reflect_type(  # type: ignore[attr-defined]
+            reflected = self._reflect_pg_type_compat(
                 normalized,
-                {},
-                {},
                 type_description=type_description,
-                collation=None,
             )
 
         if dimensions:

@@ -20,5 +20,5 @@ Docs:
 
 Compatibility:
 - Python 3.9+
-- SQLAlchemy 1.3.22+ (2.x recommended)
+- SQLAlchemy 2.0.0+ on Python <3.14; 2.0.45+ on Python 3.14+
 - DuckDB 1.3.0+ (1.4.4 recommended)

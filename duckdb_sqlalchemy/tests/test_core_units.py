@@ -150,7 +150,7 @@ def test_connect_keeps_token_in_config_and_moves_transport_options(monkeypatch) 
     }
     assert captured["config"]["token"] == "legacy-token"
     assert captured["config"]["threads"] == 4
-    assert captured["config"]["custom_user_agent"].startswith("duckdb-sqlalchemy/1.5.3")
+    assert captured["config"]["custom_user_agent"].startswith("duckdb-sqlalchemy/1.5.4")
 
 
 def test_prepare_connection_params_normalizes_config(
@@ -217,7 +217,7 @@ def test_connect_moves_application_name_to_user_agent(monkeypatch) -> None:
 
     assert "application_name" not in captured["config"]
     assert captured["config"]["threads"] == 4
-    assert captured["config"]["custom_user_agent"].startswith("duckdb-sqlalchemy/1.5.3")
+    assert captured["config"]["custom_user_agent"].startswith("duckdb-sqlalchemy/1.5.4")
     assert (
         "application_name(Analytics Worker)" in captured["config"]["custom_user_agent"]
     )

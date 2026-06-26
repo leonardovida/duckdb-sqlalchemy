@@ -592,13 +592,14 @@ wheels = [
 
 [[package]]
 name = "duckdb-sqlalchemy"
-version = "1.5.3"
+version = "1.5.4"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb", version = "1.4.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "duckdb", version = "1.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "packaging" },
-    { name = "sqlalchemy" },
+    { name = "sqlalchemy", marker = "python_full_version < '3.14'" },
+    { name = "sqlalchemy", version = "2.0.51", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
 ]
 
 [package.optional-dependencies]
@@ -653,7 +654,8 @@ requires-dist = [
     { name = "pytest-remotedata", marker = "extra == 'dev'", specifier = ">=0.4.0,<0.5.0" },
     { name = "pytest-snapshot", marker = "extra == 'dev'", specifier = ">=0.9.0,<1.0.0" },
     { name = "pytz", marker = "python_full_version >= '3.12' and extra == 'dev'", specifier = ">=2024.2" },
-    { name = "sqlalchemy", specifier = ">=2.0.45" },
+    { name = "sqlalchemy", marker = "python_full_version < '3.14'", specifier = ">=2.0.0" },
+    { name = "sqlalchemy", marker = "python_full_version >= '3.14'", specifier = ">=2.0.45" },
     { name = "toml", marker = "extra == 'dev'", specifier = ">=0.10.2,<0.11.0" },
     { name = "ty", marker = "extra == 'dev'", specifier = "==0.0.54" },
 ]
