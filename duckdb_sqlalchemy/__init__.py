@@ -1525,7 +1525,9 @@ class Dialect(PGDialect_psycopg2):
         view_name = f"__duckdb_sa_bulk_{uuid.uuid4().hex}"
         dbapi_conn = cursor.connection
         dbapi_conn.register(view_name, data)
-        preparer = getattr(context, "identifier_preparer", self.identifier_preparer)
+        preparer: Any = getattr(
+            context, "identifier_preparer", self.identifier_preparer
+        )
         target = preparer.format_table(table)
         columns = ", ".join(preparer.quote(col) for col in column_names)
         insert_sql = (

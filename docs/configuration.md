@@ -50,7 +50,8 @@ engine = create_engine("duckdb:///analytics.db", connect_args={"read_only": True
 - Unknown but syntactically valid keys are forwarded to DuckDB and may fail with
   DuckDB's native "unrecognized configuration parameter" error.
 - MotherDuck path-query options (`attach_mode`, `session_name`, `access_mode`,
-  and related keys) are handled specially for `md:` URLs. See
+  `motherduck_enable_server_side_temp_tables`, and related keys) are handled
+  specially for `md:` URLs. See
   [motherduck.md](motherduck) and [connection-urls.md](connection-urls).
 
 ## Preload extensions

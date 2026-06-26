@@ -425,6 +425,7 @@ def test_get_core_config_includes_motherduck_keys() -> None:
         "slt",
         "attach_mode",
         "saas_mode",
+        "motherduck_enable_server_side_temp_tables",
         "session_name",
         "motherduck_session_name",
         "session_hint",
@@ -1812,6 +1813,7 @@ def test_motherduck_url_merges_and_overrides_across_inputs() -> None:
         path_query={"session_name": "old-team", "user": "alice"},
         session_name="new-team",
         attach_mode=("single", "workspace"),
+        motherduck_enable_server_side_temp_tables=True,
         memory_limit="1GB",
         cache_buster=None,
     )
@@ -1823,6 +1825,7 @@ def test_motherduck_url_merges_and_overrides_across_inputs() -> None:
         "session_name": ["new-team"],
         "user": ["alice"],
         "attach_mode": ["single", "workspace"],
+        "motherduck_enable_server_side_temp_tables": ["true"],
     }
     assert url.query == {"memory_limit": "1GB", "saas_mode": "true"}
 
@@ -1995,6 +1998,7 @@ def test_extract_path_query_from_config_mutates_and_normalizes_aliases() -> None
         "tls": "off",
         "session_name": "team-a",
         "motherduck_dbinstance_inactivity_ttl": "10m",
+        "motherduck_enable_server_side_temp_tables": True,
         "threads": 4,
     }
 
@@ -2007,6 +2011,7 @@ def test_extract_path_query_from_config_mutates_and_normalizes_aliases() -> None
         "tls": "off",
         "session_name": "team-a",
         "dbinstance_inactivity_ttl": "10m",
+        "motherduck_enable_server_side_temp_tables": "true",
     }
     assert config == {"threads": 4}
 

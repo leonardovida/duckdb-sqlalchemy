@@ -38,9 +38,10 @@ def group(title: str) -> Generator[None, None, None]:
         "1.5.1",
         "1.5.2",
         "1.5.3",
+        "1.5.4",
     ],
 )
-@nox.parametrize("sqlalchemy", ["2.0.45", "2.0.50"])
+@nox.parametrize("sqlalchemy", ["2.0.45", "2.0.51"])
 def tests(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
     tests_core(session, duckdb, sqlalchemy)
 
@@ -48,7 +49,7 @@ def tests(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
 @nox.session(py=["3.9"])
 def nightly(session: nox.Session) -> None:
     session.skip("DuckDB nightly installs are broken right now")
-    tests_core(session, "master", "2.0.50")
+    tests_core(session, "master", "2.0.51")
 
 
 def tests_core(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
