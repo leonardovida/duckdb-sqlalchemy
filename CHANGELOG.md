@@ -8,6 +8,8 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+## [1.5.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.3...v1.5.4) (2026-06-26)
+
 ### Features
 
 - expose MotherDuck `md_user_info().c.region` and Flight run `config` columns in the SQLAlchemy table-function helpers
@@ -16,6 +18,7 @@ preserved from the upstream project for historical context.
 
 ### Bug Fixes
 
+- restore SQLAlchemy 2.0.0+ compatibility by using a reflection fallback on early 2.0 releases
 - reject empty MotherDuck Flight config keys before compiling Flight helper calls
 - reject invalid MotherDuck Flight config map keys and NUL-containing values before compiling Flight helper calls
 
