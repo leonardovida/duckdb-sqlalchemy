@@ -70,6 +70,7 @@ Parameters that are treated as part of the database string:
 - `dbinstance_inactivity_ttl` (preferred; `motherduck_dbinstance_inactivity_ttl`
   remains supported but is deprecated)
 - `saas_mode` (`pgendpoint` is supported when you need PG endpoint-compatible routing)
+- `motherduck_enable_server_side_temp_tables`
 - `cache_buster`
 
 For backward compatibility the dialect also accepts `session_hint`,

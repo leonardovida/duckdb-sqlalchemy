@@ -51,8 +51,8 @@ Current direction in this repository:
 | Component | Supported versions |
 | --- | --- |
 | Python | 3.9+ |
-| SQLAlchemy | 2.0.45+ (CI-tested: 2.0.45, 2.0.50) |
-| DuckDB | 0.5.0+ (CI-tested currently: 1.3.0 to 1.5.3) |
+| SQLAlchemy | 2.0.45+ (CI-tested: 2.0.45, 2.0.51) |
+| DuckDB | 0.5.0+ (CI-tested currently: 1.3.0 to 1.5.4) |
 
 ## Install
 

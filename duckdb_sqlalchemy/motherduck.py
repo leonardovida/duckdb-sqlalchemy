@@ -43,6 +43,9 @@ SESSION_NAME_KEY = "session_name"
 MOTHERDUCK_SESSION_HINT_KEY = "motherduck_session_hint"
 MOTHERDUCK_SESSION_NAME_KEY = "motherduck_session_name"
 MOTHERDUCK_SAAS_MODE_KEY = "motherduck_saas_mode"
+MOTHERDUCK_ENABLE_SERVER_SIDE_TEMP_TABLES_KEY = (
+    "motherduck_enable_server_side_temp_tables"
+)
 TOKEN_ALIAS_KEY = "token"
 MOTHERDUCK_OAUTH_TOKEN_KEY = "motherduck_oauth_token"
 OAUTH_TOKEN_ALIAS_KEY = "oauth_token"
@@ -73,6 +76,7 @@ MOTHERDUCK_PATH_QUERY_KEYS = {
     MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
     "saas_mode",
     MOTHERDUCK_SAAS_MODE_KEY,
+    MOTHERDUCK_ENABLE_SERVER_SIDE_TEMP_TABLES_KEY,
     "cache_buster",
     CACHE_BUST_ALIAS_KEY,
 }

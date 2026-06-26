@@ -12,6 +12,7 @@ preserved from the upstream project for historical context.
 
 - expose MotherDuck `md_user_info().c.region` and Flight run `config` columns in the SQLAlchemy table-function helpers
 - document one-off `md_run_flight(config=...)` overrides and selecting effective Flight run config
+- route `motherduck_enable_server_side_temp_tables` through the MotherDuck startup URL parameter bucket
 
 ### Bug Fixes
 
@@ -20,7 +21,8 @@ preserved from the upstream project for historical context.
 
 ### Tooling
 
-- bump the local `ty` pin to `0.0.49` and the Ruff pre-commit hook to `0.15.17` after validating the current checks against the latest non-breaking releases
+- extend the validated compatibility matrix to DuckDB 1.5.4 and SQLAlchemy 2.0.51
+- bump the local `ty` pin to `0.0.54` and the Ruff pre-commit hook to `0.15.20` after validating the current checks against the latest non-breaking releases
 - refresh the locked development dependency set to the latest non-breaking transitive releases within existing version caps
 
 ## [1.5.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.2.2...v1.5.3) (2026-06-02)
