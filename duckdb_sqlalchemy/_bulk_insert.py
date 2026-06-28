@@ -1,17 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any, Optional, Sequence, cast
 
-
-def _rows_use_mapping_shape(rows: Sequence[Any]) -> bool:
-    return bool(rows) and isinstance(rows[0], Mapping)
+from ._row_shape import infer_mapping_column_keys, rows_use_mapping_shape
 
 
 def infer_bulk_insert_column_keys(rows: Sequence[Any]) -> Optional[list[str]]:
-    if not _rows_use_mapping_shape(rows):
-        return None
-    return [str(key) for key in cast(Mapping[str, Any], rows[0]).keys()]
+    return infer_mapping_column_keys(rows)
 
 
 def build_bulk_insert_dataframe(
@@ -23,7 +18,7 @@ def build_bulk_insert_dataframe(
         return None
 
     try:
-        if _rows_use_mapping_shape(rows):
+        if rows_use_mapping_shape(rows):
             return pd.DataFrame.from_records(rows, columns=column_names)
         return pd.DataFrame(rows, columns=cast(Any, column_names))
     except Exception:
@@ -39,7 +34,7 @@ def build_bulk_insert_arrow_table(
         return None
 
     try:
-        if _rows_use_mapping_shape(rows):
+        if rows_use_mapping_shape(rows):
             table = pa.Table.from_pylist(rows)
             if column_names:
                 return table.select(column_names)

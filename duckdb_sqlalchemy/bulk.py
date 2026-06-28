@@ -1,9 +1,9 @@
 import csv
 import tempfile
-from itertools import chain
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple, Union, cast
+from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple, Union
 
+from ._row_shape import rows_as_sequences
 from ._validation import (
     validate_dotted_identifier,
     validate_identifier,
@@ -160,20 +160,7 @@ def _copy_rows_as_sequences(
     rows: Iterable[Union[Mapping[str, Any], Sequence[Any]]],
     columns: Optional[Sequence[str]],
 ) -> Tuple[Iterable[Sequence[Any]], Optional[Sequence[str]]]:
-    if isinstance(first, Mapping):
-        if columns is None:
-            columns = [str(col) for col in cast(Mapping[str, Any], first).keys()]
-
-        def row_to_seq(row: Mapping[str, Any]) -> Sequence[Any]:
-            return [row.get(col) for col in columns or []]
-
-        first_row = row_to_seq(cast(Mapping[str, Any], first))
-        remaining_rows = (row_to_seq(cast(Mapping[str, Any], row)) for row in rows)
-        return chain((first_row,), remaining_rows), columns
-
-    first_row = cast(Sequence[Any], first)
-    remaining_rows = (cast(Sequence[Any], row) for row in rows)
-    return chain((first_row,), remaining_rows), columns
+    return rows_as_sequences(first, rows, columns)
 
 
 def copy_from_parquet(
