@@ -24,10 +24,12 @@ from typing import (
 import duckdb
 import sqlalchemy
 from packaging.version import Version
-from sqlalchemy import pool, select, sql, text, util
+from sqlalchemy import event, pool, select, sql, text, util
+from sqlalchemy import schema as sa_schema
 from sqlalchemy import types as sqltypes
 from sqlalchemy.dialects.postgresql import UUID, insert
 from sqlalchemy.dialects.postgresql.base import (
+    PGDDLCompiler,
     PGDialect,
     PGIdentifierPreparer,
     PGInspector,
@@ -671,6 +673,82 @@ class DuckDBIdentifierPreparer(PGIdentifierPreparer):
         return self.format_schema(schema)
 
 
+def _column_needs_implicit_sequence(column: Any) -> bool:
+    """Columns that PostgreSQL would render as SERIAL/BIGSERIAL.
+
+    DuckDB has no SERIAL type, so these columns are backed by an explicitly
+    created sequence instead (see :class:`DuckDBDDLCompiler` and the
+    ``before_create``/``after_drop`` hooks below).
+    """
+    table = getattr(column, "table", None)
+    if table is None:
+        return False
+    if not column.primary_key or column is not table._autoincrement_column:
+        return False
+    if getattr(column, "identity", None) is not None:
+        return False
+    if column.default is not None and not (
+        isinstance(column.default, sa_schema.Sequence) and column.default.optional
+    ):
+        return False
+    if column.server_default is not None:
+        return False
+    return True
+
+
+def _implicit_sequence_ddl_name(preparer: PGIdentifierPreparer, column: Any) -> str:
+    name = preparer.quote(f"{column.table.name}_{column.name}_seq")
+    schema = column.table.schema
+    if schema:
+        name = f"{preparer.quote_schema(schema)}.{name}"
+    return name
+
+
+def _create_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
+    if connection.dialect.name != "duckdb":
+        return
+    preparer = connection.dialect.identifier_preparer
+    for column in target.columns:
+        if _column_needs_implicit_sequence(column):
+            connection.exec_driver_sql(
+                "CREATE SEQUENCE IF NOT EXISTS "
+                f"{_implicit_sequence_ddl_name(preparer, column)}"
+            )
+
+
+def _drop_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
+    if connection.dialect.name != "duckdb":
+        return
+    preparer = connection.dialect.identifier_preparer
+    for column in target.columns:
+        if _column_needs_implicit_sequence(column):
+            connection.exec_driver_sql(
+                "DROP SEQUENCE IF EXISTS "
+                f"{_implicit_sequence_ddl_name(preparer, column)}"
+            )
+
+
+event.listen(sa_schema.Table, "before_create", _create_implicit_sequences)
+event.listen(sa_schema.Table, "after_drop", _drop_implicit_sequences)
+
+
+class DuckDBDDLCompiler(PGDDLCompiler):
+    def get_column_specification(self, column: Any, **kwargs: Any) -> str:
+        if not _column_needs_implicit_sequence(column):
+            return super().get_column_specification(column, **kwargs)
+        colspec = self.preparer.format_column(column)
+        colspec += " " + self.dialect.type_compiler_instance.process(
+            column.type, type_expression=column
+        )
+        seq_name = _implicit_sequence_ddl_name(self.preparer, column)
+        colspec += " DEFAULT nextval(%s)" % self.sql_compiler.render_literal_value(
+            seq_name, sqltypes.String()
+        )
+        if not column.nullable:
+            colspec += " NOT NULL"
+        return colspec
+
+
 class DuckDBNullType(sqltypes.NullType):
     def result_processor(self, dialect: Any, coltype: object) -> Any:
         if coltype == "JSON":
@@ -711,6 +789,7 @@ class Dialect(PGDialect_psycopg2):
     )
     preparer = DuckDBIdentifierPreparer
     identifier_preparer: DuckDBIdentifierPreparer
+    ddl_compiler = DuckDBDDLCompiler
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         kwargs["use_native_hstore"] = False

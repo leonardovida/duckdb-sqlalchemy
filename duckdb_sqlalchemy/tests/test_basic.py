@@ -37,6 +37,7 @@ from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 from sqlalchemy.pool import QueuePool, SingletonThreadPool
+from sqlalchemy.schema import CreateTable
 
 from .. import Dialect, checkpoint, insert, supports_attach, supports_user_agent
 from .._supports import has_comment_support
@@ -771,3 +772,37 @@ def test_register_filesystem() -> None:
     with engine.connect() as conn:
         duckdb_conn = getattr(conn.connection.dbapi_connection, "_ConnectionWrapper__c")
         assert duckdb.list_filesystems(connection=duckdb_conn) == ["memory", "file"]
+
+
+def test_autoincrement_pk_without_sequence() -> None:
+    """Plain Integer primary keys are backed by an implicit sequence (GH-128).
+
+    PostgreSQL renders these columns as SERIAL, which DuckDB does not support.
+    """
+    LocalBase = declarative_base()
+
+    class AutoUser(LocalBase):
+        __tablename__ = "auto_users"
+
+        id = Column(Integer, primary_key=True)
+        name = Column(String)
+
+    engine = create_engine("duckdb:///:memory:")
+    ddl = str(CreateTable(AutoUser.__table__).compile(engine))
+    assert "SERIAL" not in ddl
+    assert "DEFAULT nextval('auto_users_id_seq')" in ddl
+
+    LocalBase.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(AutoUser(name="Ada"))
+        session.add(AutoUser(name="Grace"))
+        session.commit()
+        assert sorted(u.id for u in session.query(AutoUser).all()) == [1, 2]
+
+    # drop_all removes the implicit sequence so create_all starts fresh
+    LocalBase.metadata.drop_all(engine)
+    LocalBase.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(AutoUser(name="Alan"))
+        session.commit()
+        assert session.query(AutoUser).one().id == 1
