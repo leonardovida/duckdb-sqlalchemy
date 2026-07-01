@@ -8,6 +8,12 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+## [1.5.4.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4...v1.5.4.1) (2026-07-01)
+
+### Bug Fixes
+
+- render autoincrement integer primary keys with an implicit DuckDB sequence (`DEFAULT nextval(...)`) instead of PostgreSQL's unsupported `SERIAL`, so `Column(Integer, primary_key=True)` works without an explicit `Sequence` ([#128](https://github.com/leonardovida/duckdb-sqlalchemy/issues/128))
+
 ## [1.5.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.3...v1.5.4) (2026-06-26)
 
 ### Features

@@ -240,3 +240,4 @@ __marimo__/
 
 # Local Codex sandbox rules (machine-specific)
 .codex/rules/
+notes/
