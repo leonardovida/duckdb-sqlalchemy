@@ -103,7 +103,13 @@ user_stmt = select(
 )
 
 dives = md_list_dives()
-dives_stmt = select(dives.c.id, dives.c.title, dives.c.required_resources)
+dives_stmt = select(
+    dives.c.id,
+    dives.c.title,
+    dives.c.status,
+    dives.c.status_applies_to_version,
+    dives.c.required_resources,
+)
 
 tokens = md_access_tokens()
 tokens_stmt = select(tokens.c.token_name, tokens.c.token_type, tokens.c.expire_at)
@@ -132,7 +138,7 @@ created = md_create_dive(
 create_stmt = select(created.c.id, created.c.version_id)
 
 dive = md_get_dive(id="00000000-0000-0000-0000-000000000000")
-dive_stmt = select(dive.c.title, dive.c.content)
+dive_stmt = select(dive.c.title, dive.c.status, dive.c.content)
 
 updated = md_update_dive_content(
     id="00000000-0000-0000-0000-000000000000",

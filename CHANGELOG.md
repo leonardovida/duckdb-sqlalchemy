@@ -8,6 +8,14 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+### Features
+
+- expose MotherDuck Dive status metadata columns on `md_list_dives()`, `md_create_dive()`, `md_get_dive()`, and other summary-returning Dive helpers
+
+### Tooling
+
+- refresh the locked development dependency set to the latest non-breaking transitive releases within existing version caps
+
 ## [1.5.4.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4...v1.5.4.1) (2026-07-01)
 
 ### Bug Fixes

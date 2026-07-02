@@ -22,6 +22,10 @@ MOTHERDUCK_LIST_DIVES_COLUMNS = (
     "created_at",
     "updated_at",
     "owner_name",
+    "status",
+    "status_changed_at",
+    "status_set_by",
+    "status_applies_to_version",
     "required_resources",
 )
 MOTHERDUCK_ACCESS_TOKENS_COLUMNS = (
