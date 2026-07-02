@@ -15,6 +15,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Mapping,
     Optional,
     Sequence,
     Tuple,
@@ -1406,6 +1407,20 @@ class Dialect(PGDialect_psycopg2):
     def _reflection_schema_key(self, schema: Optional[str]) -> Optional[str]:
         return schema
 
+    def _iter_reflection_results(
+        self,
+        schema: Optional[str],
+        table_names: Iterable[str],
+        reflected: Mapping[str, Any],
+        default_factory: Callable[[], Any],
+    ) -> Iterable[Tuple[Any, Any]]:
+        schema_key = self._reflection_schema_key(schema)
+        for table_name in table_names:
+            value = reflected.get(table_name)
+            if value is None:
+                value = default_factory()
+            yield (schema_key, table_name), value
+
     def _get_single_reflection_result(
         self,
         connection: "Connection",
@@ -1502,13 +1517,8 @@ class Dialect(PGDialect_psycopg2):
             }
             for row in constraint_rows
         }
-        schema_key = self._reflection_schema_key(schema)
-        return (
-            (
-                (schema_key, table_name),
-                constraints.get(table_name, ReflectionDefaults.pk_constraint()),
-            )
-            for table_name in table_names
+        return self._iter_reflection_results(
+            schema, table_names, constraints, ReflectionDefaults.pk_constraint
         )
 
     @cache  # type: ignore[call-arg]
@@ -1611,10 +1621,8 @@ class Dialect(PGDialect_psycopg2):
             if any(column_name is None for column_name in column_names):
                 reflected_index["expressions"] = expressions
             indexes[row["table_name"]].append(reflected_index)
-        schema_key = self._reflection_schema_key(schema)
-        return (
-            ((schema_key, table_name), indexes.get(table_name, []))
-            for table_name in table_names
+        return self._iter_reflection_results(
+            schema, table_names, indexes, ReflectionDefaults.indexes
         )
 
     def create_connect_args(self, url: SAURL) -> Tuple[tuple, dict]:

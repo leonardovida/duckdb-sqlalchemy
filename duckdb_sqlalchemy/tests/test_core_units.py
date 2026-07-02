@@ -1362,6 +1362,31 @@ def test_reflection_fallback_returns_empty_only_for_existing_tables(
         )
 
 
+def test_iter_reflection_results_defaults_only_missing_tables() -> None:
+    dialect = Dialect()
+    default_calls = 0
+
+    def default_factory() -> list[Any]:
+        nonlocal default_calls
+        default_calls += 1
+        return []
+
+    results = list(
+        dialect._iter_reflection_results(
+            "analytics",
+            ["orders", "customers"],
+            {"orders": [{"name": "orders_pk"}]},
+            default_factory,
+        )
+    )
+
+    assert results == [
+        (("analytics", "orders"), [{"name": "orders_pk"}]),
+        (("analytics", "customers"), []),
+    ]
+    assert default_calls == 1
+
+
 def test_parse_duckdb_enum_labels_unquotes_escaped_strings() -> None:
     labels, enum_name = Dialect()._parse_duckdb_enum_labels(
         "ENUM('alpha', 'it''s fine')",
