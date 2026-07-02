@@ -41,6 +41,7 @@ from sqlalchemy.engine.url import URL as SAURL
 from sqlalchemy.exc import InvalidRequestError, NoSuchTableError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import bindparam
+from sqlalchemy.sql.compiler import IdentifierPreparer
 from sqlalchemy.sql.selectable import Select
 
 from ._arrow import DuckDBArrowResult
@@ -696,7 +697,7 @@ def _column_needs_implicit_sequence(column: Any) -> bool:
     return True
 
 
-def _implicit_sequence_ddl_name(preparer: PGIdentifierPreparer, column: Any) -> str:
+def _implicit_sequence_ddl_name(preparer: IdentifierPreparer, column: Any) -> str:
     name = preparer.quote(f"{column.table.name}_{column.name}_seq")
     schema = column.table.schema
     if schema:

@@ -720,6 +720,10 @@ def test_md_list_dives_uses_released_motherduck_columns() -> None:
         "created_at",
         "updated_at",
         "owner_name",
+        "status",
+        "status_changed_at",
+        "status_set_by",
+        "status_applies_to_version",
         "required_resources",
     ]
 
@@ -932,6 +936,10 @@ def test_motherduck_dive_helpers_use_released_columns() -> None:
         "created_at",
         "updated_at",
         "owner_name",
+        "status",
+        "status_changed_at",
+        "status_set_by",
+        "status_applies_to_version",
         "required_resources",
         "version_id",
         "version_storage_url",
@@ -987,6 +995,21 @@ def test_motherduck_dive_helpers_render_named_parameters() -> None:
     assert compiled.params["required_resources_1"] == [
         {"url": "md:analytics", "alias": "analytics"}
     ]
+
+
+def test_motherduck_dive_status_columns_compile() -> None:
+    dives = olap.md_list_dives()
+    stmt = select(
+        dives.c.id,
+        dives.c.status,
+        dives.c.status_changed_at,
+        dives.c.status_set_by,
+        dives.c.status_applies_to_version,
+    ).select_from(dives)
+    sql = str(stmt.compile(dialect=Dialect()))
+
+    assert "md_list_dives" in sql
+    assert "status_applies_to_version" in sql
 
 
 def test_cursorwrapper_execute_basic_paths() -> None:
