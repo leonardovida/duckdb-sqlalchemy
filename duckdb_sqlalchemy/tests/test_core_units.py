@@ -1521,6 +1521,38 @@ def test_copy_from_rows_sequence_uses_explicit_columns_and_chunks() -> None:
     assert rows == [(1, "one"), (2, "two"), (3, "three")]
 
 
+def test_copy_from_rows_sequence_header_requires_columns() -> None:
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE safe(i INTEGER, label VARCHAR)")
+
+    with pytest.raises(ValueError, match="header mode requires columns"):
+        copy_from_rows(
+            conn,
+            "safe",
+            [(1, "one"), (2, "two")],
+            include_header=True,
+        )
+
+    rows = conn.execute("SELECT i, label FROM safe ORDER BY i").fetchall()
+    assert rows == []
+
+
+def test_copy_from_rows_header_option_writes_header_with_columns() -> None:
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE safe(i INTEGER, label VARCHAR)")
+
+    copy_from_rows(
+        conn,
+        "safe",
+        [(1, "one"), (2, "two")],
+        columns=["i", "label"],
+        header=True,
+    )
+
+    rows = conn.execute("SELECT i, label FROM safe ORDER BY i").fetchall()
+    assert rows == [(1, "one"), (2, "two")]
+
+
 def test_copy_rows_as_sequences_infers_mapping_columns() -> None:
     rows, columns = duckdb_sqlalchemy.bulk._copy_rows_as_sequences(
         {"id": 1, "label": "one"},

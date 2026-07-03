@@ -6,11 +6,19 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
-## Unreleased
+## [1.5.4.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.1...v1.5.4.2) (2026-07-03)
 
 ### Features
 
 - expose MotherDuck Dive status metadata columns on `md_list_dives()`, `md_create_dive()`, `md_get_dive()`, and other summary-returning Dive helpers
+
+### Bug Fixes
+
+- reject `copy_from_rows(..., include_header=True)` for sequence rows without explicit `columns` instead of letting DuckDB treat the first data row as the header
+
+### Maintenance
+
+- centralize reflection result default handling for multi-reflection methods without changing public behavior
 
 ### Tooling
 
