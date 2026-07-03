@@ -233,16 +233,21 @@ def copy_from_rows(
     if first is None:
         return None
 
-    copy_options = {"header": include_header, **copy_options}
+    header = copy_options.pop("header", include_header)
+    copy_options = {"header": header, **copy_options}
 
     chunked_rows, columns = _copy_rows_as_sequences(first, iterator, columns)
+    if header and columns is None:
+        raise ValueError(
+            "copy_from_rows header mode requires columns for sequence rows"
+        )
     _copy_rows_as_csv_chunks(
         connection,
         table,
         chunked_rows,
         columns=columns,
         chunk_size=chunk_size,
-        include_header=include_header,
+        include_header=header,
         copy_options=copy_options,
     )
     return None
