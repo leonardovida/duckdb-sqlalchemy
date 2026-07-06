@@ -188,6 +188,7 @@ __all__ = [
     "md_get_job_version",
     "md_create_dive",
     "md_update_dive_metadata",
+    "md_update_dive_status",
     "md_update_dive_content",
     "md_get_dive",
     "md_list_dive_versions",
@@ -668,6 +669,17 @@ def md_update_dive_metadata(
 ) -> Any:
     return _motherduck_metadata_function(
         "md_update_dive_metadata",
+        MOTHERDUCK_LIST_DIVES_COLUMNS,
+        columns=columns,
+        **kwargs,
+    )
+
+
+def md_update_dive_status(
+    *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+) -> Any:
+    return _motherduck_metadata_function(
+        "md_update_dive_status",
         MOTHERDUCK_LIST_DIVES_COLUMNS,
         columns=columns,
         **kwargs,

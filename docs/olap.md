@@ -127,6 +127,7 @@ from duckdb_sqlalchemy import (
     md_get_dive,
     md_list_dive_versions,
     md_update_dive_content,
+    md_update_dive_status,
 )
 
 created = md_create_dive(
@@ -145,6 +146,13 @@ updated = md_update_dive_content(
     content="export default function Dive() { return null }",
 )
 update_stmt = select(updated.c.version, updated.c.storage_url)
+
+status = md_update_dive_status(
+    id="00000000-0000-0000-0000-000000000000",
+    status="endorsed",
+    version=2,
+)
+status_stmt = select(status.c.id, status.c.status, status.c.status_set_by)
 
 versions = md_list_dive_versions(id="00000000-0000-0000-0000-000000000000")
 versions_stmt = select(versions.c.version, versions.c.created_at)
