@@ -951,6 +951,9 @@ def test_motherduck_dive_helpers_use_released_columns() -> None:
     assert list(olap.md_update_dive_metadata().c.keys()) == list(
         olap.md_list_dives().c.keys()
     )
+    assert list(olap.md_update_dive_status().c.keys()) == list(
+        olap.md_list_dives().c.keys()
+    )
     assert list(olap.md_get_dive().c.keys()) == [
         *list(olap.md_create_dive().c.keys()),
         "content",
@@ -995,6 +998,27 @@ def test_motherduck_dive_helpers_render_named_parameters() -> None:
     assert compiled.params["required_resources_1"] == [
         {"url": "md:analytics", "alias": "analytics"}
     ]
+
+
+def test_motherduck_dive_status_helper_renders_named_parameters() -> None:
+    updated_status = olap.md_update_dive_status(
+        id="00000000-0000-0000-0000-000000000000",
+        status="endorsed",
+        version=2,
+    )
+    stmt = select(updated_status.c.id, updated_status.c.status).select_from(
+        updated_status
+    )
+    compiled = stmt.compile(dialect=Dialect())
+
+    sql = str(compiled)
+    assert "md_update_dive_status" in sql
+    assert '"id" :=' in sql
+    assert '"status" :=' in sql
+    assert '"version" :=' in sql
+    assert compiled.params["id_1"] == "00000000-0000-0000-0000-000000000000"
+    assert compiled.params["status_1"] == "endorsed"
+    assert compiled.params["version_1"] == 2
 
 
 def test_motherduck_dive_status_columns_compile() -> None:
