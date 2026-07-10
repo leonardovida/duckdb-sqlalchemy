@@ -655,7 +655,7 @@ def test_table_function_renders_duckdb_named_parameters() -> None:
 
 
 def test_table_function_quotes_reserved_named_parameters() -> None:
-    flights = olap.md_flights(limit=1, offset=0)
+    flights = olap.md_list_flights(limit=1, offset=0)
 
     stmt = select(flights.c.flight_id).select_from(flights)
     compiled = stmt.compile(dialect=Dialect())
@@ -748,7 +748,7 @@ def test_motherduck_metadata_helpers_allow_custom_columns() -> None:
 
 
 def test_motherduck_flight_helpers_use_released_columns() -> None:
-    assert list(olap.md_flights().c.keys()) == [
+    assert list(olap.md_list_flights().c.keys()) == [
         "flight_id",
         "flight_name",
         "schedule_cron",
@@ -758,9 +758,13 @@ def test_motherduck_flight_helpers_use_released_columns() -> None:
         "created_at",
         "updated_at",
     ]
-    assert list(olap.md_create_flight().c.keys()) == list(olap.md_flights().c.keys())
-    assert list(olap.md_get_flight().c.keys()) == list(olap.md_flights().c.keys())
-    assert list(olap.md_update_flight().c.keys()) == list(olap.md_flights().c.keys())
+    assert list(olap.md_create_flight().c.keys()) == list(
+        olap.md_list_flights().c.keys()
+    )
+    assert list(olap.md_get_flight().c.keys()) == list(olap.md_list_flights().c.keys())
+    assert list(olap.md_update_flight().c.keys()) == list(
+        olap.md_list_flights().c.keys()
+    )
     assert list(olap.md_delete_flight().c.keys()) == ["deleted_count"]
     assert list(olap.md_cancel_flight_run().c.keys()) == ["canceled_count"]
     assert list(olap.md_run_flight().c.keys()) == [
@@ -779,9 +783,11 @@ def test_motherduck_flight_helpers_use_released_columns() -> None:
         "cancelled_at",
         "exit_code",
     ]
-    assert list(olap.md_flight_runs().c.keys()) == list(olap.md_run_flight().c.keys())
-    assert list(olap.md_flight_logs().c.keys()) == ["logs"]
-    assert list(olap.md_flight_versions().c.keys()) == [
+    assert list(olap.md_list_flight_runs().c.keys()) == list(
+        olap.md_run_flight().c.keys()
+    )
+    assert list(olap.md_get_flight_logs().c.keys()) == ["logs"]
+    assert list(olap.md_list_flight_versions().c.keys()) == [
         "version_id",
         "flight_id",
         "flight_version",
@@ -791,9 +797,10 @@ def test_motherduck_flight_helpers_use_released_columns() -> None:
         "config",
         "source_code",
         "requirements_txt",
+        "max_runtime_sec",
     ]
     assert list(olap.md_get_flight_version().c.keys()) == list(
-        olap.md_flight_versions().c.keys()
+        olap.md_list_flight_versions().c.keys()
     )
 
     run = olap.md_run_flight(
@@ -807,6 +814,32 @@ def test_motherduck_flight_helpers_use_released_columns() -> None:
     assert '"config" :=' in str(compiled)
     assert compiled.params["flight_id_1"] == "00000000-0000-0000-0000-000000000000"
     assert compiled.params["config_1"] == {"MODE": "dry_run"}
+
+
+@pytest.mark.parametrize(
+    ("legacy_helper", "replacement", "sql_function"),
+    [
+        (olap.md_flights, "md_list_flights", "md_list_flights"),
+        (olap.md_flight_runs, "md_list_flight_runs", "md_list_flight_runs"),
+        (olap.md_flight_logs, "md_get_flight_logs", "md_get_flight_logs"),
+        (
+            olap.md_flight_versions,
+            "md_list_flight_versions",
+            "md_list_flight_versions",
+        ),
+    ],
+)
+def test_deprecated_flight_helpers_compile_to_released_functions(
+    legacy_helper: Any,
+    replacement: str,
+    sql_function: str,
+) -> None:
+    with pytest.warns(DeprecationWarning, match=replacement):
+        helper = legacy_helper(columns=["value"])
+
+    compiled = select(helper.c.value).select_from(helper).compile(dialect=Dialect())
+
+    assert sql_function in str(compiled)
 
 
 @pytest.mark.parametrize(
@@ -861,7 +894,7 @@ def test_deprecated_motherduck_job_helpers_alias_flight_columns() -> None:
     compiled = stmt.compile(dialect=Dialect())
     sql = str(compiled)
 
-    assert "md_flights" in sql
+    assert "md_list_flights" in sql
     assert "md_jobs" not in sql
     assert compiled.params["limit_1"] == 1
 

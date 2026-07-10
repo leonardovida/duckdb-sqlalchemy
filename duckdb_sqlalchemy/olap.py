@@ -94,6 +94,7 @@ MOTHERDUCK_FLIGHT_VERSION_COLUMNS = (
     "config",
     "source_code",
     "requirements_txt",
+    "max_runtime_sec",
 )
 MOTHERDUCK_FLIGHT_RUN_COLUMNS = (
     "run_id",
@@ -165,14 +166,18 @@ __all__ = [
     "md_list_dives",
     "md_access_tokens",
     "md_create_flight",
+    "md_list_flights",
     "md_flights",
     "md_get_flight",
     "md_update_flight",
     "md_delete_flight",
     "md_run_flight",
     "md_cancel_flight_run",
+    "md_list_flight_runs",
     "md_flight_runs",
+    "md_get_flight_logs",
     "md_flight_logs",
+    "md_list_flight_versions",
     "md_flight_versions",
     "md_get_flight_version",
     "md_create_job",
@@ -308,20 +313,28 @@ def _validate_flight_config(kwargs: Mapping[str, Any]) -> None:
 def _warn_deprecated_job_helper(helper_name: str) -> None:
     replacements = {
         "md_create_job": "md_create_flight",
-        "md_jobs": "md_flights",
+        "md_jobs": "md_list_flights",
         "md_get_job": "md_get_flight",
         "md_update_job": "md_update_flight",
         "md_delete_job": "md_delete_flight",
         "md_run_job": "md_run_flight",
         "md_cancel_job_run": "md_cancel_flight_run",
-        "md_job_runs": "md_flight_runs",
-        "md_job_run_logs": "md_flight_logs",
-        "md_job_versions": "md_flight_versions",
+        "md_job_runs": "md_list_flight_runs",
+        "md_job_run_logs": "md_get_flight_logs",
+        "md_job_versions": "md_list_flight_versions",
         "md_get_job_version": "md_get_flight_version",
     }
     flight_name = replacements[helper_name]
     warnings.warn(
         f"`{helper_name}` is deprecated; use `{flight_name}` instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
+def _warn_deprecated_flight_helper(helper_name: str, replacement: str) -> None:
+    warnings.warn(
+        f"`{helper_name}` is deprecated; use `{replacement}` instead.",
         DeprecationWarning,
         stacklevel=3,
     )
@@ -416,13 +429,18 @@ def md_create_flight(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) 
     )
 
 
-def md_flights(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+def md_list_flights(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
     return _motherduck_metadata_function(
-        "md_flights",
+        "md_list_flights",
         MOTHERDUCK_FLIGHT_SUMMARY_COLUMNS,
         columns=columns,
         **kwargs,
     )
+
+
+def md_flights(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    _warn_deprecated_flight_helper("md_flights", "md_list_flights")
+    return md_list_flights(columns=columns, **kwargs)
 
 
 def md_get_flight(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
@@ -474,19 +492,44 @@ def md_cancel_flight_run(
     )
 
 
-def md_flight_runs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+def md_list_flight_runs(
+    *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+) -> Any:
     return _motherduck_metadata_function(
-        "md_flight_runs",
+        "md_list_flight_runs",
         MOTHERDUCK_FLIGHT_RUN_COLUMNS,
         columns=columns,
         **kwargs,
     )
 
 
-def md_flight_logs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+def md_flight_runs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    _warn_deprecated_flight_helper("md_flight_runs", "md_list_flight_runs")
+    return md_list_flight_runs(columns=columns, **kwargs)
+
+
+def md_get_flight_logs(
+    *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+) -> Any:
     return _motherduck_metadata_function(
-        "md_flight_logs",
+        "md_get_flight_logs",
         MOTHERDUCK_FLIGHT_LOG_COLUMNS,
+        columns=columns,
+        **kwargs,
+    )
+
+
+def md_flight_logs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    _warn_deprecated_flight_helper("md_flight_logs", "md_get_flight_logs")
+    return md_get_flight_logs(columns=columns, **kwargs)
+
+
+def md_list_flight_versions(
+    *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+) -> Any:
+    return _motherduck_metadata_function(
+        "md_list_flight_versions",
+        MOTHERDUCK_FLIGHT_VERSION_COLUMNS,
         columns=columns,
         **kwargs,
     )
@@ -495,12 +538,8 @@ def md_flight_logs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) ->
 def md_flight_versions(
     *, columns: Optional[Iterable[str]] = None, **kwargs: Any
 ) -> Any:
-    return _motherduck_metadata_function(
-        "md_flight_versions",
-        MOTHERDUCK_FLIGHT_VERSION_COLUMNS,
-        columns=columns,
-        **kwargs,
-    )
+    _warn_deprecated_flight_helper("md_flight_versions", "md_list_flight_versions")
+    return md_list_flight_versions(columns=columns, **kwargs)
 
 
 def md_get_flight_version(
@@ -528,7 +567,7 @@ def md_create_job(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> 
 def md_jobs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
     return _legacy_job_subquery(
         "md_jobs",
-        md_flights,
+        md_list_flights,
         columns=columns,
         legacy_to_flight={"job_id": "flight_id", "job_name": "flight_name"},
         default_columns=MOTHERDUCK_JOB_SUMMARY_COLUMNS,
@@ -598,7 +637,7 @@ def md_cancel_job_run(*, columns: Optional[Iterable[str]] = None, **kwargs: Any)
 def md_job_runs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
     return _legacy_job_subquery(
         "md_job_runs",
-        md_flight_runs,
+        md_list_flight_runs,
         columns=columns,
         legacy_to_flight={
             "job_id": "flight_id",
@@ -613,7 +652,7 @@ def md_job_runs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> An
 def md_job_run_logs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
     return _legacy_job_subquery(
         "md_job_run_logs",
-        md_flight_logs,
+        md_get_flight_logs,
         columns=columns,
         legacy_to_flight={},
         default_columns=MOTHERDUCK_JOB_RUN_LOG_COLUMNS,
@@ -624,7 +663,7 @@ def md_job_run_logs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -
 def md_job_versions(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
     return _legacy_job_subquery(
         "md_job_versions",
-        md_flight_versions,
+        md_list_flight_versions,
         columns=columns,
         legacy_to_flight={
             "job_id": "flight_id",

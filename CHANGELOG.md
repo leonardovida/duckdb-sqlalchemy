@@ -6,6 +6,21 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.5.4.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.2...v1.5.4.3) (2026-07-10)
+
+### Features
+
+- expose the supported verb-style MotherDuck Flight helpers and the `max_runtime_sec` Flight version column
+- add `md_update_dive_status()` for updating public Dive status metadata through SQLAlchemy
+
+### Bug Fixes
+
+- compile Flight list, run-list, log, and version helpers to the released MotherDuck table-function names while keeping the older Python helper names as deprecated compatibility aliases
+
+### Tooling
+
+- extend the validated compatibility matrix to DuckDB 1.4.5, update `ty` to `0.0.58`, and refresh locked development dependencies within existing version constraints
+
 ## [1.5.4.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.1...v1.5.4.2) (2026-07-03)
 
 ### Features
