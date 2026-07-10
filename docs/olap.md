@@ -165,16 +165,36 @@ read-only helpers are useful for listing Flights, runs, logs, and versions:
 
 ```python
 from sqlalchemy import select
-from duckdb_sqlalchemy import md_flight_runs, md_flight_versions, md_flights
+from duckdb_sqlalchemy import (
+    md_get_flight_logs,
+    md_list_flight_runs,
+    md_list_flight_versions,
+    md_list_flights,
+)
 
-flights = md_flights(limit=10)
+flights = md_list_flights(limit=10)
 flights_stmt = select(flights.c.flight_id, flights.c.flight_name, flights.c.status)
 
-runs = md_flight_runs(flight_id="00000000-0000-0000-0000-000000000000", limit=10)
+runs = md_list_flight_runs(
+    flight_id="00000000-0000-0000-0000-000000000000",
+    limit=10,
+)
 runs_stmt = select(runs.c.run_number, runs.c.status, runs.c.config, runs.c.started_at)
 
-versions = md_flight_versions(flight_id="00000000-0000-0000-0000-000000000000")
-versions_stmt = select(versions.c.flight_version, versions.c.requirements_txt)
+logs = md_get_flight_logs(
+    flight_id="00000000-0000-0000-0000-000000000000",
+    run_number=1,
+)
+logs_stmt = select(logs.c.logs)
+
+versions = md_list_flight_versions(
+    flight_id="00000000-0000-0000-0000-000000000000"
+)
+versions_stmt = select(
+    versions.c.flight_version,
+    versions.c.requirements_txt,
+    versions.c.max_runtime_sec,
+)
 ```
 
 Mutating Flight functions are available as helpers too:
@@ -185,9 +205,11 @@ that run only; run result helpers expose the effective `config` column. Config
 map keys must be strings, non-empty, and cannot contain `=` or NUL bytes.
 Config values must be strings or `None`, and cannot contain NUL bytes.
 
-The older `md_*job*` helper names remain as deprecated compatibility aliases.
-They compile through the current Flight functions while preserving legacy
-`job_*` column access where possible.
+The older noun-style `md_flights`, `md_flight_runs`, `md_flight_logs`, and
+`md_flight_versions` helpers remain as deprecated compatibility aliases for the
+verb-style functions above. The `md_*job*` helper names also remain as
+deprecated compatibility aliases while preserving legacy `job_*` column access
+where possible.
 
 ## Arrow results
 

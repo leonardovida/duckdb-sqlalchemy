@@ -93,6 +93,7 @@ from .olap import (
     md_get_dive,
     md_get_dive_version,
     md_get_flight,
+    md_get_flight_logs,
     md_get_flight_version,
     md_get_job,
     md_get_job_version,
@@ -102,6 +103,9 @@ from .olap import (
     md_jobs,
     md_list_dive_versions,
     md_list_dives,
+    md_list_flight_runs,
+    md_list_flight_versions,
+    md_list_flights,
     md_run_flight,
     md_run_job,
     md_update_dive_content,
@@ -131,7 +135,7 @@ else:
 try:
     __version__ = package_version("duckdb-sqlalchemy")
 except PackageNotFoundError:  # pragma: no cover - source tree import fallback
-    __version__ = "1.5.4.2"
+    __version__ = "1.5.4.3"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -181,14 +185,18 @@ __all__ = [
     "md_list_dives",
     "md_access_tokens",
     "md_create_flight",
+    "md_list_flights",
     "md_flights",
     "md_get_flight",
     "md_update_flight",
     "md_delete_flight",
     "md_run_flight",
     "md_cancel_flight_run",
+    "md_list_flight_runs",
     "md_flight_runs",
+    "md_get_flight_logs",
     "md_flight_logs",
+    "md_list_flight_versions",
     "md_flight_versions",
     "md_get_flight_version",
     "md_create_job",
