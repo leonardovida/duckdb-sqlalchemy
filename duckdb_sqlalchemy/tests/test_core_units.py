@@ -257,10 +257,43 @@ def test_create_engine_from_paths_requires_paths() -> None:
         create_engine_from_paths([])
 
 
-def test_is_disconnect_matches_patterns() -> None:
+def test_is_disconnect_matches_only_operational_errors() -> None:
     dialect = Dialect()
     assert dialect.is_disconnect(RuntimeError("connection closed"), None, None)
+    dbapi_connection = duckdb.connect(":memory:")
+    dbapi_connection.close()
+    with pytest.raises(duckdb.ConnectionException) as closed:
+        dbapi_connection.execute("SELECT 1")
+    assert dialect.is_disconnect(closed.value, None, None)
+    assert not dialect.is_disconnect(
+        duckdb.BinderException('Referenced column "socket_timeout" not found'),
+        None,
+        None,
+    )
     assert not dialect.is_disconnect(RuntimeError("syntax error"), None, None)
+
+
+@pytest.mark.parametrize("identifier", ["timeout", "socket"])
+def test_query_error_terms_do_not_invalidate_connection(identifier: str) -> None:
+    engine = create_engine("duckdb:///:memory:")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE keep_me (id INTEGER)"))
+
+    with pytest.raises(sa_exc.DBAPIError) as captured:
+        with engine.connect() as conn:
+            conn.execute(text(f"SELECT {identifier} FROM keep_me"))
+
+    assert not captured.value.connection_invalidated
+    with engine.connect() as conn:
+        assert (
+            conn.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.tables "
+                    "WHERE table_name = 'keep_me'"
+                )
+            ).scalar_one()
+            == 1
+        )
 
 
 def test_retry_on_transient_select() -> None:

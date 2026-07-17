@@ -135,7 +135,7 @@ else:
 try:
     __version__ = package_version("duckdb-sqlalchemy")
 except PackageNotFoundError:  # pragma: no cover - source tree import fallback
-    __version__ = "1.5.4.3"
+    __version__ = "1.5.4.4"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -1731,6 +1731,8 @@ class Dialect(PGDialect_psycopg2):
         )
 
     def is_disconnect(self, e: Exception, connection: Any, cursor: Any) -> bool:
+        if isinstance(e, duckdb.Error) and not isinstance(e, duckdb.OperationalError):
+            return False
         message = str(e).lower()
         return any(pattern in message for pattern in DISCONNECT_ERROR_PATTERNS)
 
