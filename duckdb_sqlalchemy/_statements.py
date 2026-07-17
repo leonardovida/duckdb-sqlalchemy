@@ -1,6 +1,7 @@
 import re
 
 DISCONNECT_ERROR_PATTERNS = (
+    "connection already closed",
     "connection closed",
     "connection reset",
     "connection refused",

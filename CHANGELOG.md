@@ -6,6 +6,16 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.5.4.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.3...v1.5.4.4) (2026-07-17)
+
+### Bug Fixes
+
+- preserve healthy pooled connections when DuckDB query errors contain words such as `timeout` or `socket` instead of misclassifying those programming errors as disconnects, while recognizing DuckDB's actual `Connection already closed` error
+
+### Tooling
+
+- update `ty` to `0.0.60` and refresh locked development dependencies within existing version constraints
+
 ## [1.5.4.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.2...v1.5.4.3) (2026-07-10)
 
 ### Features
