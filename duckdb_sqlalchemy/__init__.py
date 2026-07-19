@@ -716,28 +716,25 @@ def _implicit_sequence_ddl_name(preparer: IdentifierPreparer, column: Any) -> st
     return name
 
 
-def _create_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
+def _execute_implicit_sequence_ddl(
+    target: Any, connection: Any, statement_prefix: str
+) -> None:
     if connection.dialect.name != "duckdb":
         return
     preparer = connection.dialect.identifier_preparer
     for column in target.columns:
         if _column_needs_implicit_sequence(column):
             connection.exec_driver_sql(
-                "CREATE SEQUENCE IF NOT EXISTS "
-                f"{_implicit_sequence_ddl_name(preparer, column)}"
+                f"{statement_prefix} {_implicit_sequence_ddl_name(preparer, column)}"
             )
+
+
+def _create_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
+    _execute_implicit_sequence_ddl(target, connection, "CREATE SEQUENCE IF NOT EXISTS")
 
 
 def _drop_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
-    if connection.dialect.name != "duckdb":
-        return
-    preparer = connection.dialect.identifier_preparer
-    for column in target.columns:
-        if _column_needs_implicit_sequence(column):
-            connection.exec_driver_sql(
-                "DROP SEQUENCE IF EXISTS "
-                f"{_implicit_sequence_ddl_name(preparer, column)}"
-            )
+    _execute_implicit_sequence_ddl(target, connection, "DROP SEQUENCE IF EXISTS")
 
 
 event.listen(sa_schema.Table, "before_create", _create_implicit_sequences)

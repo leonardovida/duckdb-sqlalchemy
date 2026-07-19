@@ -6,7 +6,17 @@ from urllib.parse import parse_qs
 
 import duckdb
 import pytest
-from sqlalchemy import Integer, String, create_engine, pool, select, text
+from sqlalchemy import (
+    Column,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    create_engine,
+    pool,
+    select,
+    text,
+)
 from sqlalchemy import exc as sa_exc
 from sqlalchemy.engine import URL as SAURL
 
@@ -1294,6 +1304,47 @@ def test_connectionwrapper_close_marks_closed() -> None:
 
     assert wrapper.closed is True
     assert conn.closed is True
+
+
+@pytest.mark.parametrize(
+    ("handler", "expected_statement"),
+    [
+        (
+            duckdb_sqlalchemy._create_implicit_sequences,
+            "CREATE SEQUENCE IF NOT EXISTS events_id_seq",
+        ),
+        (
+            duckdb_sqlalchemy._drop_implicit_sequences,
+            "DROP SEQUENCE IF EXISTS events_id_seq",
+        ),
+    ],
+)
+def test_implicit_sequence_event_handlers_share_ddl_execution(
+    handler: Any, expected_statement: str
+) -> None:
+    table = Table(
+        "events",
+        MetaData(),
+        Column("id", Integer, primary_key=True),
+        Column("name", String),
+    )
+
+    class DummyConnection:
+        def __init__(self) -> None:
+            self.dialect = Dialect()
+            self.statements: list[str] = []
+
+        def exec_driver_sql(self, statement: str) -> None:
+            self.statements.append(statement)
+
+    connection = DummyConnection()
+    handler(table, connection)
+
+    assert connection.statements == [expected_statement]
+
+    connection.dialect.name = "postgresql"
+    handler(table, connection)
+    assert connection.statements == [expected_statement]
 
 
 def test_map_processors(monkeypatch: pytest.MonkeyPatch) -> None:
