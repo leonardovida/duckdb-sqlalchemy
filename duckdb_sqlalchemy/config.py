@@ -58,7 +58,10 @@ def _render_config_value(
         return "NULL"
 
     if isinstance(value, os.PathLike):
-        return string_processor(os.fspath(value))
+        path = value.__fspath__()
+        if isinstance(path, bytes):
+            path = os.fsdecode(path)
+        return string_processor(path)
     if isinstance(value, Decimal):
         return string_processor(str(value))
 

@@ -68,3 +68,20 @@ jobs:
           fail_ci_if_error: true
           use_pypi: true
           verbose: true
+
+  sqlalchemy_prerelease:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          allow-prereleases: true
+      - name: Install SQLAlchemy prerelease
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install SQLAlchemy==2.1.0b3
+      - name: Run SQLAlchemy prerelease tests
+        run: pytest -q

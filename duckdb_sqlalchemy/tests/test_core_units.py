@@ -6,6 +6,8 @@ from urllib.parse import parse_qs
 
 import duckdb
 import pytest
+import sqlalchemy
+from packaging.version import Version
 from sqlalchemy import (
     Column,
     Integer,
@@ -13,6 +15,7 @@ from sqlalchemy import (
     String,
     Table,
     create_engine,
+    inspect,
     pool,
     select,
     text,
@@ -352,6 +355,32 @@ def test_retry_on_transient_select_without_params() -> None:
     cursor = DummyCursor()
     dialect.do_execute_no_params(cursor, "select 1", context=DummyContext())
     assert cursor.calls == 2
+
+
+@pytest.mark.skipif(
+    Version(sqlalchemy.__version__) < Version("2.1.0b1"),
+    reason="SQLAlchemy 2.1 execution context compatibility",
+)
+def test_sqlalchemy_21_execution_and_reflection_compatibility() -> None:
+    engine = create_engine("duckdb:///:memory:")
+    metadata = MetaData()
+    Table(
+        "sqlalchemy_21_compat",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("name", String),
+    )
+    metadata.create_all(engine)
+
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT 1")).scalar_one() == 1
+        assert [
+            column["name"]
+            for column in inspect(connection).get_columns("sqlalchemy_21_compat")
+        ] == ["id", "name"]
+
+    reflected = Table("sqlalchemy_21_compat", MetaData(), autoload_with=engine)
+    assert list(reflected.columns.keys()) == ["id", "name"]
 
 
 def test_motherduck_url_builder_moves_path_params() -> None:
