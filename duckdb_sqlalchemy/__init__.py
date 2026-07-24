@@ -7,6 +7,7 @@ from collections import defaultdict
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
+from types import SimpleNamespace
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -135,10 +136,11 @@ else:
 try:
     __version__ = package_version("duckdb-sqlalchemy")
 except PackageNotFoundError:  # pragma: no cover - source tree import fallback
-    __version__ = "1.5.4.4"
+    __version__ = "1.5.4.5"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
+_EMPTY_NAMED_TYPE_LOADER = SimpleNamespace(enums={}, domains={})
 duckdb_version: str = duckdb.__version__
 _capabilities = get_capabilities(duckdb_version)
 supports_attach: bool = _capabilities.supports_attach
@@ -508,6 +510,7 @@ class DuckDBExecutionContext(_PGExecutionContext):
         invoked_statement: Any,
         extracted_parameters: Any,
         cache_hit: Any = None,
+        **kwargs: Any,
     ) -> Any:
         execution_options = _normalize_execution_options(execution_options)
         return super()._init_compiled(
@@ -520,6 +523,7 @@ class DuckDBExecutionContext(_PGExecutionContext):
             invoked_statement,
             extracted_parameters,
             cache_hit,
+            **kwargs,
         )
 
     @classmethod
@@ -1273,6 +1277,13 @@ class Dialect(PGDialect_psycopg2):
     ) -> Any:
         reflect_type = getattr(super(), "_reflect_type", None)
         if reflect_type is not None:
+            if SQLALCHEMY_VERSION >= Version("2.1.0b1"):
+                return reflect_type(
+                    format_type,
+                    _EMPTY_NAMED_TYPE_LOADER,
+                    type_description=type_description,
+                    collation=None,
+                )
             return reflect_type(
                 format_type,
                 {},
@@ -1631,6 +1642,20 @@ class Dialect(PGDialect_psycopg2):
         return self._iter_reflection_results(
             schema, table_names, indexes, ReflectionDefaults.indexes
         )
+
+    def get_multi_table_options(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+        scope: Any = None,
+        kind: Any = None,
+        **kw: Any,
+    ) -> Iterable[Tuple[Any, Any]]:
+        table_names = self._duckdb_table_names(
+            connection, schema=schema, filter_names=filter_names
+        )
+        return self._iter_reflection_results(schema, table_names, {}, dict)
 
     def create_connect_args(self, url: SAURL) -> Tuple[tuple, dict]:
         opts = url.translate_connect_args(database="database")

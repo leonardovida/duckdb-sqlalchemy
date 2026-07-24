@@ -40,9 +40,10 @@ def group(title: str) -> Generator[None, None, None]:
         "1.5.2",
         "1.5.3",
         "1.5.4",
+        "1.5.5",
     ],
 )
-@nox.parametrize("sqlalchemy", ["2.0.0", "2.0.51"])
+@nox.parametrize("sqlalchemy", ["2.0.0", "2.0.51", "2.1.0b3"])
 def tests(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
     if session.python == "3.14" and sqlalchemy == "2.0.0":
         session.skip("SQLAlchemy 2.0.0 is not compatible with Python 3.14")
@@ -52,7 +53,7 @@ def tests(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
 @nox.session(py=["3.9"])
 def nightly(session: nox.Session) -> None:
     session.skip("DuckDB nightly installs are broken right now")
-    tests_core(session, "master", "2.0.51")
+    tests_core(session, "master", "2.1.0b3")
 
 
 def tests_core(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:

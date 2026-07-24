@@ -6,6 +6,16 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.5.4.5](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.4...v1.5.4.5) (2026-07-24)
+
+### Bug Fixes
+
+- adapt SQLAlchemy 2.1 execution-context and PostgreSQL reflection API changes so statement execution and table reflection keep working ([#142](https://github.com/leonardovida/duckdb-sqlalchemy/issues/142))
+
+### Tooling
+
+- validate DuckDB 1.5.5 and SQLAlchemy 2.1.0b3, update `ty` to 0.0.63 and Ruff to 0.16.0, and refresh locked development dependencies
+
 ## [1.5.4.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.3...v1.5.4.4) (2026-07-17)
 
 ### Bug Fixes
