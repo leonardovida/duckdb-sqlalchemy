@@ -310,21 +310,46 @@ def _validate_flight_config(kwargs: Mapping[str, Any]) -> None:
             )
 
 
+_JOB_HELPER_REPLACEMENTS = {
+    "md_create_job": "md_create_flight",
+    "md_jobs": "md_list_flights",
+    "md_get_job": "md_get_flight",
+    "md_update_job": "md_update_flight",
+    "md_delete_job": "md_delete_flight",
+    "md_run_job": "md_run_flight",
+    "md_cancel_job_run": "md_cancel_flight_run",
+    "md_job_runs": "md_list_flight_runs",
+    "md_job_run_logs": "md_get_flight_logs",
+    "md_job_versions": "md_list_flight_versions",
+    "md_get_job_version": "md_get_flight_version",
+}
+_JOB_PARAMETER_REPLACEMENTS = {
+    "job_id": "flight_id",
+    "job_name": "name",
+    "job_version": "flight_version",
+    "md_token_name": "access_token_name",
+    "md_secret_names": "flight_secret_names",
+    "version": "version_number",
+}
+_JOB_SUMMARY_COLUMN_REPLACEMENTS = {
+    "job_id": "flight_id",
+    "job_name": "flight_name",
+}
+_JOB_RUN_COLUMN_REPLACEMENTS = {
+    **_JOB_SUMMARY_COLUMN_REPLACEMENTS,
+    "job_version": "flight_version",
+}
+_JOB_VERSION_COLUMN_REPLACEMENTS = {
+    "job_id": "flight_id",
+    "version": "flight_version",
+    "md_token_name": "access_token_name",
+    "md_secret_names": "flight_secret_names",
+}
+_UNCHANGED_JOB_COLUMNS: Mapping[str, str] = {}
+
+
 def _warn_deprecated_job_helper(helper_name: str) -> None:
-    replacements = {
-        "md_create_job": "md_create_flight",
-        "md_jobs": "md_list_flights",
-        "md_get_job": "md_get_flight",
-        "md_update_job": "md_update_flight",
-        "md_delete_job": "md_delete_flight",
-        "md_run_job": "md_run_flight",
-        "md_cancel_job_run": "md_cancel_flight_run",
-        "md_job_runs": "md_list_flight_runs",
-        "md_job_run_logs": "md_get_flight_logs",
-        "md_job_versions": "md_list_flight_versions",
-        "md_get_job_version": "md_get_flight_version",
-    }
-    flight_name = replacements[helper_name]
+    flight_name = _JOB_HELPER_REPLACEMENTS[helper_name]
     warnings.warn(
         f"`{helper_name}` is deprecated; use `{flight_name}` instead.",
         DeprecationWarning,
@@ -341,15 +366,10 @@ def _warn_deprecated_flight_helper(helper_name: str, replacement: str) -> None:
 
 
 def _translate_job_parameters(kwargs: Mapping[str, Any]) -> Dict[str, Any]:
-    replacements = {
-        "job_id": "flight_id",
-        "job_name": "name",
-        "job_version": "flight_version",
-        "md_token_name": "access_token_name",
-        "md_secret_names": "flight_secret_names",
-        "version": "version_number",
+    return {
+        _JOB_PARAMETER_REPLACEMENTS.get(key, key): value
+        for key, value in kwargs.items()
     }
-    return {replacements.get(key, key): value for key, value in kwargs.items()}
 
 
 def _legacy_job_columns(
@@ -558,7 +578,7 @@ def md_create_job(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> 
         "md_create_job",
         md_create_flight,
         columns=columns,
-        legacy_to_flight={"job_id": "flight_id", "job_name": "flight_name"},
+        legacy_to_flight=_JOB_SUMMARY_COLUMN_REPLACEMENTS,
         default_columns=MOTHERDUCK_JOB_SUMMARY_COLUMNS,
         **kwargs,
     )
@@ -569,7 +589,7 @@ def md_jobs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
         "md_jobs",
         md_list_flights,
         columns=columns,
-        legacy_to_flight={"job_id": "flight_id", "job_name": "flight_name"},
+        legacy_to_flight=_JOB_SUMMARY_COLUMN_REPLACEMENTS,
         default_columns=MOTHERDUCK_JOB_SUMMARY_COLUMNS,
         **kwargs,
     )
@@ -580,7 +600,7 @@ def md_get_job(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any
         "md_get_job",
         md_get_flight,
         columns=columns,
-        legacy_to_flight={"job_id": "flight_id", "job_name": "flight_name"},
+        legacy_to_flight=_JOB_SUMMARY_COLUMN_REPLACEMENTS,
         default_columns=MOTHERDUCK_JOB_SUMMARY_COLUMNS,
         **kwargs,
     )
@@ -591,7 +611,7 @@ def md_update_job(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> 
         "md_update_job",
         md_update_flight,
         columns=columns,
-        legacy_to_flight={"job_id": "flight_id", "job_name": "flight_name"},
+        legacy_to_flight=_JOB_SUMMARY_COLUMN_REPLACEMENTS,
         default_columns=MOTHERDUCK_JOB_SUMMARY_COLUMNS,
         **kwargs,
     )
@@ -602,7 +622,7 @@ def md_delete_job(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> 
         "md_delete_job",
         md_delete_flight,
         columns=columns,
-        legacy_to_flight={},
+        legacy_to_flight=_UNCHANGED_JOB_COLUMNS,
         default_columns=MOTHERDUCK_DELETE_JOB_COLUMNS,
         **kwargs,
     )
@@ -613,11 +633,7 @@ def md_run_job(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any
         "md_run_job",
         md_run_flight,
         columns=columns,
-        legacy_to_flight={
-            "job_id": "flight_id",
-            "job_name": "flight_name",
-            "job_version": "flight_version",
-        },
+        legacy_to_flight=_JOB_RUN_COLUMN_REPLACEMENTS,
         default_columns=MOTHERDUCK_JOB_RUN_COLUMNS,
         **kwargs,
     )
@@ -628,7 +644,7 @@ def md_cancel_job_run(*, columns: Optional[Iterable[str]] = None, **kwargs: Any)
         "md_cancel_job_run",
         md_cancel_flight_run,
         columns=columns,
-        legacy_to_flight={},
+        legacy_to_flight=_UNCHANGED_JOB_COLUMNS,
         default_columns=MOTHERDUCK_CANCEL_JOB_RUN_COLUMNS,
         **kwargs,
     )
@@ -639,11 +655,7 @@ def md_job_runs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> An
         "md_job_runs",
         md_list_flight_runs,
         columns=columns,
-        legacy_to_flight={
-            "job_id": "flight_id",
-            "job_name": "flight_name",
-            "job_version": "flight_version",
-        },
+        legacy_to_flight=_JOB_RUN_COLUMN_REPLACEMENTS,
         default_columns=MOTHERDUCK_JOB_RUN_COLUMNS,
         **kwargs,
     )
@@ -654,7 +666,7 @@ def md_job_run_logs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -
         "md_job_run_logs",
         md_get_flight_logs,
         columns=columns,
-        legacy_to_flight={},
+        legacy_to_flight=_UNCHANGED_JOB_COLUMNS,
         default_columns=MOTHERDUCK_JOB_RUN_LOG_COLUMNS,
         **kwargs,
     )
@@ -665,12 +677,7 @@ def md_job_versions(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -
         "md_job_versions",
         md_list_flight_versions,
         columns=columns,
-        legacy_to_flight={
-            "job_id": "flight_id",
-            "version": "flight_version",
-            "md_token_name": "access_token_name",
-            "md_secret_names": "flight_secret_names",
-        },
+        legacy_to_flight=_JOB_VERSION_COLUMN_REPLACEMENTS,
         default_columns=MOTHERDUCK_JOB_VERSION_COLUMNS,
         **kwargs,
     )
@@ -683,12 +690,7 @@ def md_get_job_version(
         "md_get_job_version",
         md_get_flight_version,
         columns=columns,
-        legacy_to_flight={
-            "job_id": "flight_id",
-            "version": "flight_version",
-            "md_token_name": "access_token_name",
-            "md_secret_names": "flight_secret_names",
-        },
+        legacy_to_flight=_JOB_VERSION_COLUMN_REPLACEMENTS,
         default_columns=MOTHERDUCK_JOB_VERSION_COLUMNS,
         **kwargs,
     )
