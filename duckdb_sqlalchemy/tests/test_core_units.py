@@ -1,5 +1,8 @@
 import importlib.metadata
+import threading
+import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional, Tuple, cast
 from urllib.parse import parse_qs
@@ -647,7 +650,7 @@ def test_identifier_preparer_separate_and_format_schema() -> None:
 def test_identifier_preparer_reserved_words_are_cached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    duckdb_sqlalchemy._get_reserved_words.cache_clear()
+    duckdb_sqlalchemy._load_reserved_words.cache_clear()
     calls = 0
 
     class DummyCursor:
@@ -1315,6 +1318,38 @@ def test_cursorwrapper_description_handles_unhashable_type_code() -> None:
     cursor = _cursor(DummyConn())
 
     assert cursor.description == [("col", "['complex']")]
+
+
+def test_reserved_words_load_once_during_concurrent_engine_startup(monkeypatch) -> None:
+    original_cursor = duckdb.cursor
+    cursor_calls = 0
+    calls_lock = threading.Lock()
+    start = threading.Barrier(16)
+
+    def counted_cursor(*args, **kwargs):
+        nonlocal cursor_calls
+        with calls_lock:
+            cursor_calls += 1
+        time.sleep(0.05)
+        return original_cursor(*args, **kwargs)
+
+    def create_concurrent_engine(_: int) -> int:
+        start.wait()
+        engine = create_engine("duckdb:///:memory:")
+        try:
+            with engine.connect() as connection:
+                return connection.scalar(text("SELECT 42"))
+        finally:
+            engine.dispose()
+
+    duckdb_sqlalchemy._load_reserved_words.cache_clear()
+    monkeypatch.setattr(duckdb, "cursor", counted_cursor)
+
+    with ThreadPoolExecutor(max_workers=start.parties) as executor:
+        results = list(executor.map(create_concurrent_engine, range(start.parties)))
+
+    assert results == [42] * start.parties
+    assert cursor_calls == 1
 
 
 def test_connectionwrapper_close_marks_closed() -> None:
