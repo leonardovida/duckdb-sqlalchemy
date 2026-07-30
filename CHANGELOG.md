@@ -6,6 +6,16 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.5.4.6](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.5...v1.5.4.6) (2026-07-30)
+
+### Bug Fixes
+
+- serialize the first DuckDB reserved-word catalog load so concurrently created engines do not repeat the query or race during DuckDB initialization
+
+### Tooling
+
+- update `ty` to 0.0.65 and refresh locked development dependencies within existing version constraints
+
 ## [1.5.4.5](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.4...v1.5.4.5) (2026-07-24)
 
 ### Bug Fixes

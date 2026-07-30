@@ -7,6 +7,7 @@ from collections import defaultdict
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
+from threading import Lock
 from types import SimpleNamespace
 from typing import (
     TYPE_CHECKING,
@@ -136,7 +137,7 @@ else:
 try:
     __version__ = package_version("duckdb-sqlalchemy")
 except PackageNotFoundError:  # pragma: no cover - source tree import fallback
-    __version__ = "1.5.4.5"
+    __version__ = "1.5.4.6"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -467,16 +468,24 @@ class DuckDBEngineWarning(Warning):
     pass
 
 
+_RESERVED_WORDS_LOCK = Lock()
+
+
 @lru_cache()
-def _get_reserved_words() -> set[str]:
-    return {
+def _load_reserved_words() -> frozenset[str]:
+    return frozenset(
         keyword_name
         for (keyword_name,) in duckdb.cursor()
         .execute(
             "select keyword_name from duckdb_keywords() where keyword_category == 'reserved'"
         )
         .fetchall()
-    }
+    )
+
+
+def _get_reserved_words() -> frozenset[str]:
+    with _RESERVED_WORDS_LOCK:
+        return _load_reserved_words()
 
 
 def _normalize_execution_options(execution_options: Dict[str, Any]) -> Dict[str, Any]:
