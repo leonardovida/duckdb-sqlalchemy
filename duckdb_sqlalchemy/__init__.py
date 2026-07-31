@@ -137,7 +137,7 @@ else:
 try:
     __version__ = package_version("duckdb-sqlalchemy")
 except PackageNotFoundError:  # pragma: no cover - source tree import fallback
-    __version__ = "1.5.4.6"
+    __version__ = "1.5.4.7"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -672,14 +672,18 @@ class DuckDBIdentifierPreparer(PGIdentifierPreparer):
         Get database name and schema name from schema if it contains a database name
             Format:
               <db_name>.<schema_name>
-              db_name and schema_name are double quoted if contains spaces or double quotes
+              Components may be double quoted to preserve spaces, dots, or quotes.
         """
-        database_name, schema_name = None, name
-        if name is not None and "." in name:
-            database_name, schema_name = (
-                max(s) for s in re.findall(r'"([^.]+)"|([^.]+)', name)
-            )
-        return database_name, schema_name
+        if name is None:
+            return None, None
+        identifiers = self.unformat_identifiers(name)
+        if len(identifiers) == 1:
+            return None, identifiers[0]
+        if len(identifiers) == 2:
+            return identifiers[0], identifiers[1]
+        raise ValueError(
+            "DuckDB schema names must contain at most a database and schema"
+        )
 
     def format_schema(self, name: str) -> str:
         """Prepare a quoted schema name."""
@@ -950,8 +954,8 @@ class Dialect(PGDialect_psycopg2):
             """
         rs = connection.execute(text(s))
 
-        qs = self.identifier_preparer.quote_schema
-        return [qs(".".join(nspname)) for nspname in rs]
+        quote = self.identifier_preparer.quote
+        return [".".join(quote(identifier) for identifier in nspname) for nspname in rs]
 
     def _build_query_where(
         self,

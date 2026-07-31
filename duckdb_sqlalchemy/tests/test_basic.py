@@ -186,6 +186,7 @@ def test_get_schema_names(inspector: Inspector, session: Session) -> None:
     # Using multi-line strings because of all the single and double quotes flying around...
     cmds = [
         """CREATE SCHEMA "quack quack" """,
+        """CREATE SCHEMA "schema.with.dot" """,
         """CREATE SCHEMA "daffy duck"."you're "" despicable" """,
     ]
     for cmd in cmds:
@@ -200,6 +201,7 @@ def test_get_schema_names(inspector: Inspector, session: Session) -> None:
         '"daffy duck"."you\'re "" despicable"',
         "memory.main",
         'memory."quack quack"',
+        'memory."schema.with.dot"',
         "system.information_schema",
         "system.main",
         "temp.main",
@@ -213,6 +215,17 @@ def test_get_schema_names(inspector: Inspector, session: Session) -> None:
             }
         )
     assert names == expected
+
+
+def test_reflect_schema_with_dot(inspector: Inspector, session: Session) -> None:
+    session.execute(text('CREATE SCHEMA "schema.with.dot"'))
+    session.execute(text('CREATE TABLE "schema.with.dot".records (id INTEGER)'))
+    session.commit()
+
+    schema = 'memory."schema.with.dot"'
+    assert inspector.get_table_names(schema=schema) == ["records"]
+    assert inspector.has_table("records", schema=schema)
+    assert inspector.get_columns("records", schema=schema)[0]["name"] == "id"
 
 
 @mark.skipif(

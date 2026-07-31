@@ -6,6 +6,16 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.5.4.7](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.6...v1.5.4.7) (2026-07-31)
+
+### Bug Fixes
+
+- reflect valid quoted DuckDB schema names containing dots without crashing or splitting quoted identifier components
+
+### Tooling
+
+- update Ruff to 0.16.1 and refresh locked development dependencies within existing version constraints
+
 ## [1.5.4.6](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.5...v1.5.4.6) (2026-07-30)
 
 ### Bug Fixes
