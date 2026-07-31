@@ -556,7 +556,7 @@ wheels = [
 
 [[package]]
 name = "duckdb-sqlalchemy"
-version = "1.5.4.6"
+version = "1.5.4.7"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb", version = "1.4.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
@@ -1559,7 +1559,7 @@ version = "0.2.27"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "posthog", version = "6.9.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
-    { name = "posthog", version = "7.34.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "posthog", version = "7.35.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "pyyaml" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c7/36/59ef0a4be1e99dbe3a389fc4b200005f32dffa6dfd6e2ebd1eed6b3ce450/ploomber-core-0.2.27.tar.gz", hash = "sha256:d48bc826e382d095eaa776f67c86786f6473bfc8507a1b1b3671d4b48ddce070", size = 22390, upload-time = "2025-07-21T16:53:47.594Z" }
@@ -1598,7 +1598,7 @@ wheels = [
 
 [[package]]
 name = "posthog"
-version = "7.34.0"
+version = "7.35.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -1619,9 +1619,9 @@ dependencies = [
     { name = "requests", version = "2.34.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "typing-extensions", marker = "python_full_version >= '3.10'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4f/c1/a51567ea78c5e9c77abbc863088f82e79f908e500d3441292a11abe8ad6a/posthog-7.34.0.tar.gz", hash = "sha256:c5f0e9a07536867bea3b5a233378b1a3f7c69ec36c5770581147f7be4fd91005", size = 390645, upload-time = "2026-07-30T09:50:07.221Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ff/f7/479cbb1c4d24c1cbcf45a06d98fc03f47fdb725069756f3394421ded0d3c/posthog-7.35.1.tar.gz", hash = "sha256:ac39c36d401a79d9e8997c6b9cce80a233780eb1718fe879b0c835f4171f0390", size = 392147, upload-time = "2026-07-31T08:11:23.619Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9d/de/a4209376d58d7d4081dff754c3bf4f99186d0d07aaca33d19e52d2a50fdf/posthog-7.34.0-py3-none-any.whl", hash = "sha256:6a277de901c240fc66926d64b4ba4a04d0212653ae616c0219168bf6addc36fb", size = 463553, upload-time = "2026-07-30T09:50:05.068Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/a3/00d3f3af98bd1e7bcaa5198b971e911784509a15f1130c064be496745a03/posthog-7.35.1-py3-none-any.whl", hash = "sha256:1e852bf3bb9c076b989432bb2913b2e44bb9c9e8cac1ebdc886b17e7ddb1c6ad", size = 465193, upload-time = "2026-07-31T08:11:21.818Z" },
 ]
 
 [[package]]

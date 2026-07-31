@@ -641,10 +641,22 @@ def test_identifier_preparer_separate_and_format_schema() -> None:
 
     assert preparer._separate("db.schema") == ("db", "schema")
     assert preparer._separate('"my db"."my schema"') == ("my db", "my schema")
+    assert preparer._separate('"db.with.dot"."schema.with.dot"') == (
+        "db.with.dot",
+        "schema.with.dot",
+    )
+    assert preparer._separate('"db""quote"."schema""quote"') == (
+        'db"quote',
+        'schema"quote',
+    )
     assert preparer._separate("schema") == (None, "schema")
 
     formatted = preparer.format_schema('"my db".main')
     assert formatted == '"my db".main'
+    assert (
+        preparer.format_schema('"db.with.dot"."schema.with.dot"')
+        == '"db.with.dot"."schema.with.dot"'
+    )
 
 
 def test_identifier_preparer_reserved_words_are_cached(
