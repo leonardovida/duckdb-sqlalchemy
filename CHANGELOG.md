@@ -6,6 +6,16 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.5.5](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.7...v1.5.5) (2026-08-09)
+
+### Compatibility
+
+- align the package version with DuckDB and MotherDuck 1.5.5 after validating SQLAlchemy Core, ORM, transaction, and reflection behavior without changing the supported DuckDB, SQLAlchemy, or Python ranges
+
+### Tooling
+
+- update `ty` to 0.0.69 and Ruff to 0.16.2, and refresh locked development dependencies within existing version constraints
+
 ## [1.5.4.7](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.6...v1.5.4.7) (2026-07-31)
 
 ### Bug Fixes
