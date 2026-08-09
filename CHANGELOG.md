@@ -8,6 +8,10 @@ preserved from the upstream project for historical context.
 
 ## [1.5.5](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.7...v1.5.5) (2026-08-09)
 
+### Maintenance
+
+- simplify reflection list parsing while preserving quoted commas, escaped identifiers, and nested type expressions ([#147](https://github.com/leonardovida/duckdb-sqlalchemy/pull/147))
+
 ### Compatibility
 
 - align the package version with DuckDB and MotherDuck 1.5.5 after validating SQLAlchemy Core, ORM, transaction, and reflection behavior without changing the supported DuckDB, SQLAlchemy, or Python ranges
