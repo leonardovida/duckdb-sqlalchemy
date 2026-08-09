@@ -1191,31 +1191,24 @@ class Dialect(PGDialect_psycopg2):
         items: List[str] = []
         current: List[str] = []
         depth = 0
-        in_single_quote = False
-        in_double_quote = False
+        quote: Optional[str] = None
         index = 0
         while index < len(value):
             char = value[index]
-            if in_single_quote:
+            if quote is not None:
                 current.append(char)
-                if char == "'" and index + 1 < len(value) and value[index + 1] == "'":
+                if (
+                    char == quote
+                    and index + 1 < len(value)
+                    and value[index + 1] == quote
+                ):
                     current.append(value[index + 1])
                     index += 1
-                elif char == "'":
-                    in_single_quote = False
-            elif in_double_quote:
-                current.append(char)
-                if char == '"' and index + 1 < len(value) and value[index + 1] == '"':
-                    current.append(value[index + 1])
-                    index += 1
-                elif char == '"':
-                    in_double_quote = False
+                elif char == quote:
+                    quote = None
             else:
-                if char == "'":
-                    in_single_quote = True
-                    current.append(char)
-                elif char == '"':
-                    in_double_quote = True
+                if char in {"'", '"'}:
+                    quote = char
                     current.append(char)
                 elif char in "([":
                     depth += 1

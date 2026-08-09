@@ -1614,6 +1614,26 @@ def test_parse_duckdb_enum_labels_unquotes_escaped_strings() -> None:
     assert enum_name is None
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("'alpha,beta', gamma", ["'alpha,beta'", "gamma"]),
+        (
+            '"display, ""name""", lower(name, 1)',
+            ['"display, ""name"""', "lower(name, 1)"],
+        ),
+        (
+            "STRUCT(name VARCHAR, tags VARCHAR[]), plain",
+            ["STRUCT(name VARCHAR, tags VARCHAR[])", "plain"],
+        ),
+    ],
+)
+def test_split_duckdb_list_preserves_quoted_and_nested_commas(
+    value: str, expected: list[str]
+) -> None:
+    assert Dialect()._split_duckdb_list(value) == expected
+
+
 def test_reflect_duckdb_index_expressions_parses_columns_and_expressions() -> None:
     expressions, column_names = Dialect()._reflect_duckdb_index_expressions(
         "['name', '\"display name\"', 'lower(name)']"
