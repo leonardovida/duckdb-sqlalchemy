@@ -1376,6 +1376,8 @@ class Dialect(PGDialect_psycopg2):
             reflected = sqltypes.JSON()
         elif upper == "BLOB":
             reflected = sqltypes.LargeBinary()
+        elif upper == "TIMESTAMPTZ_NS":
+            reflected = sqltypes.TIMESTAMP(timezone=True)
         elif upper.startswith(("DECIMAL(", "NUMERIC(")) and normalized.endswith(")"):
             precision_scale = normalized[normalized.index("(") + 1 : -1]
             parts = [part.strip() for part in precision_scale.split(",", 1)]
@@ -1389,7 +1391,9 @@ class Dialect(PGDialect_psycopg2):
                 normalized, enum_rows.get(data_type_id)
             )
             reflected = sqltypes.Enum(*labels, name=enum_name)
-        elif upper.startswith(("STRUCT(", "MAP(", "UNION(")):
+        elif upper == "STRUCT" or upper.startswith(
+            ("STRUCT(", "MAP(", "UNION(", "TUPLE(")
+        ):
             reflected = sqltypes.NULLTYPE
         else:
             reflected = self._reflect_pg_type_compat(

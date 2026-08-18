@@ -50,13 +50,18 @@ def tests(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
     tests_core(session, duckdb, sqlalchemy)
 
 
-@nox.session(py=["3.9"])
+@nox.session(py=["3.11"])
 def nightly(session: nox.Session) -> None:
-    session.skip("DuckDB nightly installs are broken right now")
-    tests_core(session, "master", "2.1.0b3")
+    tests_core(session, "master", "2.1.0b3", remote_data=False)
 
 
-def tests_core(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
+def tests_core(
+    session: nox.Session,
+    duckdb: str,
+    sqlalchemy: str,
+    *,
+    remote_data: bool = True,
+) -> None:
     with group(f"{session.name} - Install"):
         session.install("-e", ".[dev]")
         operator = "==" if sqlalchemy.count(".") == 2 else "~="
@@ -66,7 +71,7 @@ def tests_core(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
         else:
             session.install(f"duckdb=={duckdb}")
     with group(f"{session.name} Test"):
-        session.run(
+        pytest_args = [
             "pytest",
             "--junitxml=results.xml",
             "--cov",
@@ -74,7 +79,11 @@ def tests_core(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
             "xml:coverage.xml",
             "--verbose",
             "-rs",
-            "--remote-data",
+        ]
+        if remote_data:
+            pytest_args.append("--remote-data")
+        session.run(
+            *pytest_args,
             env={
                 "SQLALCHEMY_WARN_20": "true",
             },
