@@ -137,7 +137,7 @@ else:
 try:
     __version__ = package_version("duckdb-sqlalchemy")
 except PackageNotFoundError:  # pragma: no cover - source tree import fallback
-    __version__ = "1.5.5"
+    __version__ = "1.5.5.1"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -1376,8 +1376,14 @@ class Dialect(PGDialect_psycopg2):
             reflected = sqltypes.JSON()
         elif upper == "BLOB":
             reflected = sqltypes.LargeBinary()
-        elif upper == "TIMESTAMPTZ_NS":
+        elif upper in {
+            "TIMESTAMPTZ",
+            "TIMESTAMPTZ_NS",
+            "TIMESTAMP WITH TIME ZONE",
+        }:
             reflected = sqltypes.TIMESTAMP(timezone=True)
+        elif upper in {"TIMETZ", "TIME WITH TIME ZONE"}:
+            reflected = sqltypes.TIME(timezone=True)
         elif upper.startswith(("DECIMAL(", "NUMERIC(")) and normalized.endswith(")"):
             precision_scale = normalized[normalized.index("(") + 1 : -1]
             parts = [part.strip() for part in precision_scale.split(",", 1)]

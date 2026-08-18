@@ -611,7 +611,7 @@ wheels = [
 
 [[package]]
 name = "duckdb-sqlalchemy"
-version = "1.5.5"
+version = "1.5.5.1"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb", version = "1.4.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },

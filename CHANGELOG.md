@@ -6,6 +6,21 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.5.5.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5...v1.5.5.1) (2026-08-18)
+
+### Bug Fixes
+
+- preserve timezone semantics when reflecting DuckDB `TIMESTAMPTZ` and `TIMETZ` columns so copied SQLAlchemy metadata does not recreate them without time zones ([#152](https://github.com/leonardovida/duckdb-sqlalchemy/pull/152))
+
+### Compatibility
+
+- support DuckDB 1.6 prerelease `TIMESTAMPTZ_NS`, unnamed `TUPLE`, and empty `STRUCT` catalog types without failed reflection or unexpected warnings ([#151](https://github.com/leonardovida/duckdb-sqlalchemy/pull/151))
+
+### Tooling
+
+- update the stable SQLAlchemy matrix to 2.0.52, `ty` to 0.0.72, Ruff to 0.16.3, and Codecov Action to v7 ([#150](https://github.com/leonardovida/duckdb-sqlalchemy/pull/150))
+- restore local and hosted DuckDB prerelease coverage on supported Python versions ([#151](https://github.com/leonardovida/duckdb-sqlalchemy/pull/151))
+
 ## [1.5.5](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.4.7...v1.5.5) (2026-08-09)
 
 ### Maintenance
