@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session, declarative_base
 from sqlalchemy.sql import sqltypes
 from sqlalchemy.types import FLOAT, JSON
 
+from .. import Dialect
 from .._supports import duckdb_version, has_uhugeint_support
 from ..datatypes import Map, Struct, Variant, types
 
@@ -293,18 +294,44 @@ def test_all_types_reflection(engine: Engine) -> None:
     importorskip("sqlalchemy", "1.4.0")
     importorskip("duckdb", "0.5.1")
 
-    with warnings.catch_warnings() as capture, engine.connect() as conn:
+    with warnings.catch_warnings(record=True) as capture, engine.connect() as conn:
         conn.execute(text("create table t2 as select * from test_all_types()"))
         table = Table("t2", MetaData(), autoload_with=conn)
         for col in table.columns:
             name = col.name
             if name.endswith("_enum") and duckdb_version < Version("0.7.1"):
                 continue
-            if "struct" in name or "map" in name or "union" in name:
+            if any(
+                nested_type in name
+                for nested_type in ("struct", "map", "union", "tuple")
+            ):
                 assert col.type == sqltypes.NULLTYPE, name
             else:
                 assert col.type != sqltypes.NULLTYPE, name
         assert not capture
+
+
+def test_timestamptz_ns_reflection() -> None:
+    reflected = Dialect()._reflect_duckdb_data_type(
+        "TIMESTAMPTZ_NS",
+        None,
+        {},
+        "test timestamp",
+    )
+
+    assert isinstance(reflected, sqltypes.TIMESTAMP)
+    assert reflected.timezone is True
+
+
+def test_tuple_reflection_is_deliberately_unsupported() -> None:
+    reflected = Dialect()._reflect_duckdb_data_type(
+        "TUPLE(INTEGER, VARCHAR)",
+        None,
+        {},
+        "test tuple",
+    )
+
+    assert reflected == sqltypes.NULLTYPE
 
 
 def test_nested_types(engine: Engine, session: Session) -> None:
