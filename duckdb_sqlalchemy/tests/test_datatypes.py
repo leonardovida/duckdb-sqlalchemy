@@ -323,6 +323,29 @@ def test_timestamptz_ns_reflection() -> None:
     assert reflected.timezone is True
 
 
+def test_timezone_reflection_preserves_timezone_in_ddl(engine: Engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE timezone_source "
+                "(observed_at TIMESTAMPTZ, observed_time TIMETZ)"
+            )
+        )
+        source = Table("timezone_source", MetaData(), autoload_with=conn)
+
+    reflected_timestamp = source.c.observed_at.type
+    assert isinstance(reflected_timestamp, sqltypes.TIMESTAMP)
+    assert reflected_timestamp.timezone is True
+    reflected_time = source.c.observed_time.type
+    assert isinstance(reflected_time, sqltypes.TIME)
+    assert reflected_time.timezone is True
+
+    clone = source.to_metadata(MetaData(), name="timezone_clone")
+    ddl = str(schema.CreateTable(clone).compile(dialect=engine.dialect))
+    assert "TIMESTAMP WITH TIME ZONE" in ddl
+    assert "TIME WITH TIME ZONE" in ddl
+
+
 def test_tuple_reflection_is_deliberately_unsupported() -> None:
     reflected = Dialect()._reflect_duckdb_data_type(
         "TUPLE(INTEGER, VARCHAR)",
