@@ -58,7 +58,7 @@ jobs:
           files: results.xml
           comment_mode: off
           check_name:  "Test Results - python=${{ matrix.python }}"
-      - uses: codecov/codecov-action@v5.5.1
+      - uses: codecov/codecov-action@v7.0.0
         env:
           PYTHON: ${{matrix.python}}
         with:
