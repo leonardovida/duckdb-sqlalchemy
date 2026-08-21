@@ -1514,6 +1514,20 @@ def test_duckdb_reflection_filters_share_schema_database_builder() -> None:
     assert ordered_stmt._bindparams["filter_names"].expanding
 
     class DummyResult:
+        def mappings(self) -> "DummyResult":
+            return self
+
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            return iter(
+                [
+                    {
+                        "database_name": "analytics db",
+                        "schema_name": "reporting",
+                        "table_name": "orders",
+                    }
+                ]
+            )
+
         def first(self) -> tuple[int]:
             return (1,)
 

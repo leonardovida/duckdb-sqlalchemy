@@ -331,6 +331,35 @@ def test_get_columns(inspector: Inspector, session: Session) -> None:
     assert cols1[1]["name"] == cols2[1]["name"] == cols3[1]["name"]
 
 
+def test_unqualified_reflection_prefers_visible_duplicate_table(engine: Engine) -> None:
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE duplicate_name "
+                "(main_id INTEGER PRIMARY KEY, main_value VARCHAR)"
+            )
+        )
+        conn.commit()
+        conn.execute(text("ATTACH ':memory:' AS duplicate_catalog"))
+        conn.commit()
+        conn.execute(
+            text(
+                "CREATE TABLE duplicate_catalog.duplicate_name "
+                "(attached_id BIGINT, attached_value BOOLEAN, extra DOUBLE)"
+            )
+        )
+        conn.commit()
+
+        reflected = Table("duplicate_name", MetaData(), autoload_with=conn)
+
+        assert list(reflected.c.keys()) == ["main_id", "main_value"]
+        assert inspect(conn).get_pk_constraint("duplicate_name") == {
+            "name": "duplicate_name_main_id_pkey",
+            "constrained_columns": ["main_id"],
+        }
+        assert conn.execute(reflected.select()).all() == []
+
+
 def test_get_foreign_keys(inspector: Inspector) -> None:
     assert inspector.get_foreign_keys("test", None) == []
     assert inspector.get_foreign_keys("t1", '"daffy duck"."quack quack"') == []

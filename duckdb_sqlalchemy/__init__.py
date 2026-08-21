@@ -137,7 +137,7 @@ else:
 try:
     __version__ = package_version("duckdb-sqlalchemy")
 except PackageNotFoundError:  # pragma: no cover - source tree import fallback
-    __version__ = "1.5.5.1"
+    __version__ = "1.5.5.2"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -1029,7 +1029,7 @@ class Dialect(PGDialect_psycopg2):
         In the latter scenario the schema associated with the default database is used.
         """
         s = """
-            SELECT oid, table_name
+            SELECT oid, table_name, database_name, schema_name
             FROM (
                 SELECT table_oid AS oid, table_name,              database_name, schema_name FROM duckdb_tables()
                 UNION ALL BY NAME
@@ -1040,8 +1040,9 @@ class Dialect(PGDialect_psycopg2):
         sql, params = self._build_query_where(table_name=table_name, schema_name=schema)
         s += sql
 
-        rs = connection.execute(text(s), params)
-        table_oid = rs.scalar()
+        rows = [dict(row) for row in connection.execute(text(s), params).mappings()]
+        visible_rows = self._visible_duckdb_relation_rows(connection, rows)
+        table_oid = visible_rows[0]["oid"] if visible_rows else None
         if table_oid is None:
             raise NoSuchTableError(table_name)
         return table_oid
@@ -1050,15 +1051,18 @@ class Dialect(PGDialect_psycopg2):
         self, connection: "Connection", table_name: str, schema: Optional[str]
     ) -> bool:
         sql = """
-            SELECT 1
+            SELECT database_name, schema_name, table_name
             FROM duckdb_tables()
-            WHERE 1 = 1
+            WHERE internal = false
             """
         where_sql, params = self._build_query_where(
             table_name=table_name, schema_name=schema
         )
-        sql += where_sql
-        return connection.execute(text(sql), params).first() is not None
+        rows = [
+            dict(row)
+            for row in connection.execute(text(sql + where_sql), params).mappings()
+        ]
+        return bool(self._visible_duckdb_relation_rows(connection, rows))
 
     def _get_reflection_or_empty_for_existing_table(
         self,
@@ -1134,6 +1138,51 @@ class Dialect(PGDialect_psycopg2):
             stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
         return stmt, params
 
+    def _visible_duckdb_relation_rows(
+        self, connection: "Connection", rows: Sequence[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        if not rows:
+            return []
+
+        relations_by_table: Dict[str, set[Tuple[str, str]]] = defaultdict(set)
+        for row in rows:
+            relations_by_table[row["table_name"]].add(
+                (row["database_name"], row["schema_name"])
+            )
+        if all(len(relations) == 1 for relations in relations_by_table.values()):
+            return list(rows)
+
+        current_database, current_schema, search_path = connection.execute(
+            text("SELECT current_database(), current_schema(), current_schemas(false)")
+        ).one()
+        search_order = {
+            schema_name: index + 2 for index, schema_name in enumerate(search_path)
+        }
+
+        visible_relations: Dict[str, Tuple[str, str]] = {}
+        for table_name, relations in relations_by_table.items():
+            ranked: List[Tuple[int, Tuple[str, str]]] = []
+            for relation in relations:
+                database_name, schema_name = relation
+                if database_name == "temp":
+                    ranked.append((0, relation))
+                elif database_name == current_database:
+                    if schema_name == current_schema:
+                        ranked.append((1, relation))
+                    elif schema_name in search_order:
+                        ranked.append((search_order[schema_name], relation))
+            if ranked:
+                visible_relations[table_name] = min(ranked)[1]
+            elif len(relations) == 1:
+                visible_relations[table_name] = next(iter(relations))
+
+        return [
+            row
+            for row in rows
+            if visible_relations.get(row["table_name"])
+            == (row["database_name"], row["schema_name"])
+        ]
+
     def _duckdb_column_rows(
         self,
         connection: "Connection",
@@ -1151,7 +1200,10 @@ class Dialect(PGDialect_psycopg2):
             include_internal_filter=True,
             suffix="ORDER BY table_name, column_index",
         )
-        return [dict(row) for row in connection.execute(stmt, params).mappings()]
+        rows = [dict(row) for row in connection.execute(stmt, params).mappings()]
+        return [
+            dict(row) for row in self._visible_duckdb_relation_rows(connection, rows)
+        ]
 
     def _duckdb_table_names(
         self,
@@ -1535,7 +1587,10 @@ class Dialect(PGDialect_psycopg2):
         )
         stmt, params = self._duckdb_reflection_stmt(
             "duckdb_constraints",
-            "table_name, constraint_name, constraint_column_names",
+            (
+                "database_name, schema_name, table_name, constraint_name, "
+                "constraint_column_names"
+            ),
             schema=schema,
             filter_names=filter_names,
             suffix=(
@@ -1543,7 +1598,10 @@ class Dialect(PGDialect_psycopg2):
                 "ORDER BY table_name, constraint_index"
             ),
         )
-        constraint_rows = list(connection.execute(stmt, params).mappings())
+        constraint_rows = self._visible_duckdb_relation_rows(
+            connection,
+            [dict(row) for row in connection.execute(stmt, params).mappings()],
+        )
         constraints = {
             row["table_name"]: {
                 "name": row["constraint_name"],
@@ -1636,12 +1694,18 @@ class Dialect(PGDialect_psycopg2):
         )
         stmt, params = self._duckdb_reflection_stmt(
             "duckdb_indexes",
-            "table_name, index_name, expressions, is_unique",
+            (
+                "database_name, schema_name, table_name, index_name, "
+                "expressions, is_unique"
+            ),
             schema=schema,
             filter_names=filter_names,
             suffix="ORDER BY table_name, index_name",
         )
-        index_rows = list(connection.execute(stmt, params).mappings())
+        index_rows = self._visible_duckdb_relation_rows(
+            connection,
+            [dict(row) for row in connection.execute(stmt, params).mappings()],
+        )
         indexes: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for row in index_rows:
             expressions, column_names = self._reflect_duckdb_index_expressions(
