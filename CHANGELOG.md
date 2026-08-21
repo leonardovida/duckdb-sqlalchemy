@@ -6,6 +6,16 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.5.5.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.1...v1.5.5.2) (2026-08-21)
+
+### Bug Fixes
+
+- resolve unqualified table reflection with DuckDB's temp-table and schema search-path precedence, preventing SQLAlchemy autoload from merging columns and constraints from same-named tables in attached catalogs
+
+### Tooling
+
+- update `ty` to 0.0.73 and Ruff to 0.16.4, and refresh compatible locked development dependencies
+
 ## [1.5.5.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5...v1.5.5.1) (2026-08-18)
 
 ### Bug Fixes
