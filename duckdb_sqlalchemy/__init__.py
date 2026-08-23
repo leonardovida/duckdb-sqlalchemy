@@ -1040,8 +1040,9 @@ class Dialect(PGDialect_psycopg2):
         sql, params = self._build_query_where(table_name=table_name, schema_name=schema)
         s += sql
 
-        rows = [dict(row) for row in connection.execute(text(s), params).mappings()]
-        visible_rows = self._visible_duckdb_relation_rows(connection, rows)
+        visible_rows = self._execute_visible_duckdb_relation_rows(
+            connection, text(s), params
+        )
         table_oid = visible_rows[0]["oid"] if visible_rows else None
         if table_oid is None:
             raise NoSuchTableError(table_name)
@@ -1058,11 +1059,10 @@ class Dialect(PGDialect_psycopg2):
         where_sql, params = self._build_query_where(
             table_name=table_name, schema_name=schema
         )
-        rows = [
-            dict(row)
-            for row in connection.execute(text(sql + where_sql), params).mappings()
-        ]
-        return bool(self._visible_duckdb_relation_rows(connection, rows))
+        rows = self._execute_visible_duckdb_relation_rows(
+            connection, text(sql + where_sql), params
+        )
+        return bool(rows)
 
     def _get_reflection_or_empty_for_existing_table(
         self,
@@ -1183,6 +1183,15 @@ class Dialect(PGDialect_psycopg2):
             == (row["database_name"], row["schema_name"])
         ]
 
+    def _execute_visible_duckdb_relation_rows(
+        self,
+        connection: "Connection",
+        statement: Any,
+        params: Mapping[str, Any],
+    ) -> List[Dict[str, Any]]:
+        rows = [dict(row) for row in connection.execute(statement, params).mappings()]
+        return self._visible_duckdb_relation_rows(connection, rows)
+
     def _duckdb_column_rows(
         self,
         connection: "Connection",
@@ -1200,10 +1209,7 @@ class Dialect(PGDialect_psycopg2):
             include_internal_filter=True,
             suffix="ORDER BY table_name, column_index",
         )
-        rows = [dict(row) for row in connection.execute(stmt, params).mappings()]
-        return [
-            dict(row) for row in self._visible_duckdb_relation_rows(connection, rows)
-        ]
+        return self._execute_visible_duckdb_relation_rows(connection, stmt, params)
 
     def _duckdb_table_names(
         self,
@@ -1598,9 +1604,8 @@ class Dialect(PGDialect_psycopg2):
                 "ORDER BY table_name, constraint_index"
             ),
         )
-        constraint_rows = self._visible_duckdb_relation_rows(
-            connection,
-            [dict(row) for row in connection.execute(stmt, params).mappings()],
+        constraint_rows = self._execute_visible_duckdb_relation_rows(
+            connection, stmt, params
         )
         constraints = {
             row["table_name"]: {
@@ -1702,9 +1707,8 @@ class Dialect(PGDialect_psycopg2):
             filter_names=filter_names,
             suffix="ORDER BY table_name, index_name",
         )
-        index_rows = self._visible_duckdb_relation_rows(
-            connection,
-            [dict(row) for row in connection.execute(stmt, params).mappings()],
+        index_rows = self._execute_visible_duckdb_relation_rows(
+            connection, stmt, params
         )
         indexes: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for row in index_rows:
