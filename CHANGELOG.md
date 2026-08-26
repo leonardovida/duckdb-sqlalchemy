@@ -10,8 +10,8 @@ preserved from the upstream project for historical context.
 
 ### Bug Fixes
 
-- align `md_get_flight_logs` with MotherDuck's tabular `line_number`, `reported_at`, and `line` result while preserving the deprecated log helpers' historical `logs` accessor
-- declare the runtime timezone dependency needed to materialize `TIMESTAMPTZ` values such as Flight log timestamps in minimal installations
+- align `md_get_flight_logs` with MotherDuck's tabular `line_number`, `reported_at`, and `line` result while preserving the deprecated log helpers' historical `logs` accessor ([#155](https://github.com/leonardovida/duckdb-sqlalchemy/pull/155))
+- declare the runtime timezone dependency needed to materialize `TIMESTAMPTZ` values such as Flight log timestamps in minimal installations ([#155](https://github.com/leonardovida/duckdb-sqlalchemy/pull/155))
 
 ### Maintenance
 
@@ -19,7 +19,7 @@ preserved from the upstream project for historical context.
 
 ### Tooling
 
-- update `ty` to 0.0.74 and refresh compatible locked development dependencies
+- update `ty` to 0.0.74 and refresh compatible locked development dependencies ([#155](https://github.com/leonardovida/duckdb-sqlalchemy/pull/155))
 
 ## [1.5.5.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.1...v1.5.5.2) (2026-08-21)
 
