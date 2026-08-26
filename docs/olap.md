@@ -185,7 +185,7 @@ logs = md_get_flight_logs(
     flight_id="00000000-0000-0000-0000-000000000000",
     run_number=1,
 )
-logs_stmt = select(logs.c.logs)
+logs_stmt = select(logs.c.line_number, logs.c.reported_at, logs.c.line)
 
 versions = md_list_flight_versions(
     flight_id="00000000-0000-0000-0000-000000000000"
@@ -209,7 +209,9 @@ The older noun-style `md_flights`, `md_flight_runs`, `md_flight_logs`, and
 `md_flight_versions` helpers remain as deprecated compatibility aliases for the
 verb-style functions above. The `md_*job*` helper names also remain as
 deprecated compatibility aliases while preserving legacy `job_*` column access
-where possible.
+where possible. The deprecated `md_flight_logs` and `md_job_run_logs` helpers
+also preserve their historical `logs` column as an alias for the current
+line-by-line `line` result.
 
 ## Arrow results
 

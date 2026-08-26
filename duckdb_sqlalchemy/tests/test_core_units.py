@@ -877,7 +877,11 @@ def test_motherduck_flight_helpers_use_released_columns() -> None:
     assert list(olap.md_list_flight_runs().c.keys()) == list(
         olap.md_run_flight().c.keys()
     )
-    assert list(olap.md_get_flight_logs().c.keys()) == ["logs"]
+    assert list(olap.md_get_flight_logs().c.keys()) == [
+        "line_number",
+        "reported_at",
+        "line",
+    ]
     assert list(olap.md_list_flight_versions().c.keys()) == [
         "version_id",
         "flight_id",
@@ -931,6 +935,16 @@ def test_deprecated_flight_helpers_compile_to_released_functions(
     compiled = select(helper.c.value).select_from(helper).compile(dialect=Dialect())
 
     assert sql_function in str(compiled)
+
+
+def test_deprecated_flight_logs_aliases_tabular_line_column() -> None:
+    with pytest.warns(DeprecationWarning, match="md_get_flight_logs"):
+        logs = olap.md_flight_logs()
+
+    compiled = select(logs.c.logs).compile(dialect=Dialect())
+
+    assert "md_get_flight_logs" in str(compiled)
+    assert "anon_2.line AS logs" in str(compiled)
 
 
 @pytest.mark.parametrize(
@@ -1021,6 +1035,11 @@ def test_deprecated_motherduck_job_helpers_alias_flight_columns() -> None:
         assert list(olap.md_job_runs().c.keys()) == run_job_columns
     with pytest.warns(DeprecationWarning, match="md_job_run_logs"):
         assert list(olap.md_job_run_logs().c.keys()) == ["logs"]
+
+    with pytest.warns(DeprecationWarning, match="md_job_run_logs"):
+        logs = olap.md_job_run_logs()
+    compiled_logs = select(logs.c.logs).compile(dialect=Dialect())
+    assert "anon_2.line AS logs" in str(compiled_logs)
     with pytest.warns(DeprecationWarning, match="md_job_versions"):
         assert list(olap.md_job_versions().c.keys()) == [
             "version_id",
