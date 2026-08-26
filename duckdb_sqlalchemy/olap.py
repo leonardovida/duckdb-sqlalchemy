@@ -112,7 +112,7 @@ MOTHERDUCK_FLIGHT_RUN_COLUMNS = (
     "cancelled_at",
     "exit_code",
 )
-MOTHERDUCK_FLIGHT_LOG_COLUMNS = ("logs",)
+MOTHERDUCK_FLIGHT_LOG_COLUMNS = ("line_number", "reported_at", "line")
 MOTHERDUCK_DELETE_FLIGHT_COLUMNS = ("deleted_count",)
 MOTHERDUCK_CANCEL_FLIGHT_RUN_COLUMNS = ("canceled_count",)
 MOTHERDUCK_DIVE_VERSION_COLUMNS = (
@@ -345,6 +345,7 @@ _JOB_VERSION_COLUMN_REPLACEMENTS = {
     "md_token_name": "access_token_name",
     "md_secret_names": "flight_secret_names",
 }
+_LEGACY_LOG_COLUMN_REPLACEMENTS = {"logs": "line"}
 _UNCHANGED_JOB_COLUMNS: Mapping[str, str] = {}
 
 
@@ -394,6 +395,23 @@ def _legacy_job_subquery(
     **kwargs: Any,
 ) -> Any:
     _warn_deprecated_job_helper(helper_name)
+    return _compatibility_subquery(
+        flight_helper,
+        columns=columns,
+        legacy_to_flight=legacy_to_flight,
+        default_columns=default_columns,
+        kwargs=_translate_job_parameters(kwargs),
+    )
+
+
+def _compatibility_subquery(
+    flight_helper: Any,
+    *,
+    columns: Optional[Iterable[str]],
+    legacy_to_flight: Mapping[str, str],
+    default_columns: Iterable[str],
+    kwargs: Mapping[str, Any],
+) -> Any:
     legacy_columns, flight_columns = _legacy_job_columns(
         columns,
         legacy_to_flight,
@@ -401,7 +419,7 @@ def _legacy_job_subquery(
     )
     flight_table = flight_helper(
         columns=flight_columns,
-        **_translate_job_parameters(kwargs),
+        **kwargs,
     )
     projections = []
     for legacy_column, flight_column in zip(legacy_columns, flight_columns):
@@ -541,7 +559,13 @@ def md_get_flight_logs(
 
 def md_flight_logs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
     _warn_deprecated_flight_helper("md_flight_logs", "md_get_flight_logs")
-    return md_get_flight_logs(columns=columns, **kwargs)
+    return _compatibility_subquery(
+        md_get_flight_logs,
+        columns=columns,
+        legacy_to_flight=_LEGACY_LOG_COLUMN_REPLACEMENTS,
+        default_columns=MOTHERDUCK_JOB_RUN_LOG_COLUMNS,
+        kwargs=kwargs,
+    )
 
 
 def md_list_flight_versions(
@@ -666,7 +690,7 @@ def md_job_run_logs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -
         "md_job_run_logs",
         md_get_flight_logs,
         columns=columns,
-        legacy_to_flight=_UNCHANGED_JOB_COLUMNS,
+        legacy_to_flight=_LEGACY_LOG_COLUMN_REPLACEMENTS,
         default_columns=MOTHERDUCK_JOB_RUN_LOG_COLUMNS,
         **kwargs,
     )
