@@ -10,11 +10,11 @@ preserved from the upstream project for historical context.
 
 ### Bug Fixes
 
-- return empty constraint and index metadata when reflecting regular or temporary views instead of reporting that the existing view is missing
+- return empty constraint and index metadata when reflecting regular or temporary views instead of reporting that the existing view is missing ([#156](https://github.com/leonardovida/duckdb-sqlalchemy/pull/156))
 
 ### Tooling
 
-- update `ty` to 0.0.75, Ruff to 0.16.5, current first-party GitHub Actions majors, and compatible locked development dependencies
+- update `ty` to 0.0.75, Ruff to 0.16.5, current first-party GitHub Actions majors, and compatible locked development dependencies ([#156](https://github.com/leonardovida/duckdb-sqlalchemy/pull/156))
 
 ## [1.5.5.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.2...v1.5.5.3) (2026-08-26)
 
