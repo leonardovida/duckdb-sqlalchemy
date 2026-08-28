@@ -1562,7 +1562,7 @@ def test_duckdb_reflection_filters_share_schema_database_builder() -> None:
 
     connection = DummyConnection()
 
-    assert dialect._duckdb_table_exists(
+    assert dialect._duckdb_relation_exists(
         cast(Any, connection), "orders", '"analytics db"."reporting"'
     )
     assert connection.statement is not None
@@ -1576,7 +1576,7 @@ def test_duckdb_reflection_filters_share_schema_database_builder() -> None:
     }
 
 
-def test_reflection_fallback_returns_empty_only_for_existing_tables(
+def test_reflection_fallback_returns_empty_only_for_existing_relations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dialect = Dialect()
@@ -1594,7 +1594,7 @@ def test_reflection_fallback_returns_empty_only_for_existing_tables(
     def unsupported_reflection() -> list[Any]:
         raise sa_exc.NoSuchTableError("orders")
 
-    monkeypatch.setattr(dialect, "_duckdb_table_exists", existing_table)
+    monkeypatch.setattr(dialect, "_duckdb_relation_exists", existing_table)
     assert (
         dialect._get_reflection_or_empty_for_existing_table(
             unsupported_reflection,
@@ -1606,7 +1606,7 @@ def test_reflection_fallback_returns_empty_only_for_existing_tables(
     )
     assert seen == [(connection, "orders", "main")]
 
-    monkeypatch.setattr(dialect, "_duckdb_table_exists", missing_table)
+    monkeypatch.setattr(dialect, "_duckdb_relation_exists", missing_table)
     with pytest.raises(sa_exc.NoSuchTableError):
         dialect._get_reflection_or_empty_for_existing_table(
             unsupported_reflection,
