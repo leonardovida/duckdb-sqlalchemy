@@ -360,6 +360,24 @@ def test_unqualified_reflection_prefers_visible_duplicate_table(engine: Engine) 
         assert conn.execute(reflected.select()).all() == []
 
 
+def test_view_reflection_returns_empty_constraint_metadata(engine: Engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(text("CREATE VIEW regular_view AS SELECT 1 AS id"))
+        conn.execute(text("CREATE TEMP VIEW temporary_view AS SELECT 1 AS id"))
+
+        inspector = inspect(conn)
+        for view_name in ("regular_view", "temporary_view"):
+            assert inspector.has_table(view_name)
+            assert inspector.get_pk_constraint(view_name) == {
+                "name": None,
+                "constrained_columns": [],
+            }
+            assert inspector.get_foreign_keys(view_name) == []
+            assert inspector.get_unique_constraints(view_name) == []
+            assert inspector.get_check_constraints(view_name) == []
+            assert inspector.get_indexes(view_name) == []
+
+
 def test_get_foreign_keys(inspector: Inspector) -> None:
     assert inspector.get_foreign_keys("test", None) == []
     assert inspector.get_foreign_keys("t1", '"daffy duck"."quack quack"') == []

@@ -137,7 +137,7 @@ else:
 try:
     __version__ = package_version("duckdb-sqlalchemy")
 except PackageNotFoundError:  # pragma: no cover - source tree import fallback
-    __version__ = "1.5.5.3"
+    __version__ = "1.5.5.4"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -1048,12 +1048,18 @@ class Dialect(PGDialect_psycopg2):
             raise NoSuchTableError(table_name)
         return table_oid
 
-    def _duckdb_table_exists(
+    def _duckdb_relation_exists(
         self, connection: "Connection", table_name: str, schema: Optional[str]
     ) -> bool:
         sql = """
             SELECT database_name, schema_name, table_name
-            FROM duckdb_tables()
+            FROM (
+                SELECT database_name, schema_name, table_name, internal
+                FROM duckdb_tables()
+                UNION ALL BY NAME
+                SELECT database_name, schema_name, view_name AS table_name, internal
+                FROM duckdb_views()
+            )
             WHERE internal = false
             """
         where_sql, params = self._build_query_where(
@@ -1074,7 +1080,7 @@ class Dialect(PGDialect_psycopg2):
         try:
             return getter()
         except NoSuchTableError:
-            if self._duckdb_table_exists(connection, table_name, schema):
+            if self._duckdb_relation_exists(connection, table_name, schema):
                 return []
             raise
 
@@ -1537,7 +1543,7 @@ class Dialect(PGDialect_psycopg2):
         key = (self._reflection_schema_key(schema), table_name)
         if key in reflected:
             return reflected[key]
-        if self._duckdb_table_exists(connection, table_name, schema):
+        if self._duckdb_relation_exists(connection, table_name, schema):
             return default_factory()
         raise NoSuchTableError(table_name)
 
