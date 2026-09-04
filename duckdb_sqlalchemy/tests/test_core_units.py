@@ -877,6 +877,9 @@ def test_motherduck_flight_helpers_use_released_columns() -> None:
     assert list(olap.md_list_flight_runs().c.keys()) == list(
         olap.md_run_flight().c.keys()
     )
+    assert list(olap.md_get_flight_run().c.keys()) == list(
+        olap.md_run_flight().c.keys()
+    )
     assert list(olap.md_get_flight_logs().c.keys()) == [
         "line_number",
         "reported_at",

@@ -6,6 +6,16 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## Unreleased
+
+### Features
+
+- add `md_get_flight_run` for retrieving one MotherDuck Flight run with typed SQLAlchemy columns
+
+### Tooling
+
+- test SQLAlchemy 2.1.0rc1, update `ty` to 0.0.78 and Ruff to 0.16.6, and refresh compatible locked development dependencies
+
 ## [1.5.5.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.3...v1.5.5.4) (2026-08-28)
 
 ### Bug Fixes

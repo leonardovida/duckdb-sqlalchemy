@@ -173,6 +173,7 @@ __all__ = [
     "md_delete_flight",
     "md_run_flight",
     "md_cancel_flight_run",
+    "md_get_flight_run",
     "md_list_flight_runs",
     "md_flight_runs",
     "md_get_flight_logs",
@@ -525,6 +526,15 @@ def md_cancel_flight_run(
     return _motherduck_metadata_function(
         "md_cancel_flight_run",
         MOTHERDUCK_CANCEL_FLIGHT_RUN_COLUMNS,
+        columns=columns,
+        **kwargs,
+    )
+
+
+def md_get_flight_run(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    return _motherduck_metadata_function(
+        "md_get_flight_run",
+        MOTHERDUCK_FLIGHT_RUN_COLUMNS,
         columns=columns,
         **kwargs,
     )
