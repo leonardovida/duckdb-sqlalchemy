@@ -334,20 +334,21 @@ _BEGIN_TRANSACTION_ISOLATION_RE = re.compile(
 )
 
 
+def _first_present_register_value(
+    parameters: Mapping[str, Any], keys: Sequence[str]
+) -> Optional[Any]:
+    for key in keys:
+        if key in parameters:
+            return parameters[key]
+    return None
+
+
 def _parse_register_params(parameters: Optional[Any]) -> Tuple[str, Any]:
     if parameters is None:
         raise ValueError("register requires a view name and data")
     if isinstance(parameters, dict):
-        view_name = None
-        for key in _REGISTER_NAME_KEYS:
-            if key in parameters:
-                view_name = parameters[key]
-                break
-        df = None
-        for key in _REGISTER_DATA_KEYS:
-            if key in parameters:
-                df = parameters[key]
-                break
+        view_name = _first_present_register_value(parameters, _REGISTER_NAME_KEYS)
+        df = _first_present_register_value(parameters, _REGISTER_DATA_KEYS)
         if view_name is None or df is None:
             raise ValueError("register requires a view name and data (tuple or dict)")
         return view_name, df

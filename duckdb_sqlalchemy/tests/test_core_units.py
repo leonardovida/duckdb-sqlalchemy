@@ -1908,11 +1908,28 @@ def test_copy_from_rows_closes_rotated_tempfiles(
     assert all(not Path(temp.name).exists() for temp in created)
 
 
-def test_parse_register_params_dict_and_tuple() -> None:
-    view_name, df = _parse_register_params({"view_name": "v", "df": "data"})
+@pytest.mark.parametrize("name_key", ["name", "view_name", "table"])
+@pytest.mark.parametrize("data_key", ["df", "dataframe", "relation", "data"])
+def test_parse_register_params_dict_aliases(name_key: str, data_key: str) -> None:
+    view_name, df = _parse_register_params({name_key: "v", data_key: "data"})
     assert view_name == "v"
     assert df == "data"
 
+
+def test_parse_register_params_prefers_canonical_keys() -> None:
+    view_name, df = _parse_register_params(
+        {
+            "name": "preferred-name",
+            "view_name": "fallback-name",
+            "df": "preferred-data",
+            "dataframe": "fallback-data",
+        }
+    )
+    assert view_name == "preferred-name"
+    assert df == "preferred-data"
+
+
+def test_parse_register_params_tuple() -> None:
     view_name, df = _parse_register_params(("v2", "data2"))
     assert view_name == "v2"
     assert df == "data2"
