@@ -167,6 +167,7 @@ read-only helpers are useful for listing Flights, runs, logs, and versions:
 from sqlalchemy import select
 from duckdb_sqlalchemy import (
     md_get_flight_logs,
+    md_get_flight_run,
     md_list_flight_runs,
     md_list_flight_versions,
     md_list_flights,
@@ -180,6 +181,12 @@ runs = md_list_flight_runs(
     limit=10,
 )
 runs_stmt = select(runs.c.run_number, runs.c.status, runs.c.config, runs.c.started_at)
+
+run = md_get_flight_run(
+    flight_id="00000000-0000-0000-0000-000000000000",
+    run_number=1,
+)
+run_stmt = select(run.c.run_number, run.c.status, run.c.config, run.c.started_at)
 
 logs = md_get_flight_logs(
     flight_id="00000000-0000-0000-0000-000000000000",
