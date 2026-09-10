@@ -6,15 +6,24 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
-## Unreleased
+## [1.5.5.5](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.4...v1.5.5.5) (2026-09-10)
+
+### Bug Fixes
+
+- preserve compiled positional column order in bulk inserts so the register fast path cannot write values into the wrong columns ([#161](https://github.com/leonardovida/duckdb-sqlalchemy/pull/161))
 
 ### Features
 
-- add `md_get_flight_run` for retrieving one MotherDuck Flight run with typed SQLAlchemy columns
+- add `md_get_flight_run` for retrieving one MotherDuck Flight run with typed SQLAlchemy columns ([#157](https://github.com/leonardovida/duckdb-sqlalchemy/pull/157))
+
+### Maintenance
+
+- centralize ordered register parameter alias lookup while preserving accepted aliases and precedence ([#158](https://github.com/leonardovida/duckdb-sqlalchemy/pull/158))
+- extract pool-selection policy and checkpoint transaction handling into focused private modules without changing public behavior ([#159](https://github.com/leonardovida/duckdb-sqlalchemy/pull/159), [#160](https://github.com/leonardovida/duckdb-sqlalchemy/pull/160))
 
 ### Tooling
 
-- test SQLAlchemy 2.1.0rc1, update `ty` to 0.0.78 and Ruff to 0.16.6, and refresh compatible locked development dependencies
+- test SQLAlchemy 2.1.0rc2, update `ty` to 0.0.80 and Ruff to 0.16.6, and refresh compatible locked development dependencies ([#157](https://github.com/leonardovida/duckdb-sqlalchemy/pull/157), [#161](https://github.com/leonardovida/duckdb-sqlalchemy/pull/161))
 
 ## [1.5.5.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.3...v1.5.5.4) (2026-08-28)
 

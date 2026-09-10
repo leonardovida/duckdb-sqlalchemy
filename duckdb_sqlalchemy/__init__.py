@@ -144,7 +144,7 @@ else:
 try:
     __version__ = package_version("duckdb-sqlalchemy")
 except PackageNotFoundError:  # pragma: no cover - source tree import fallback
-    __version__ = "1.5.5.4"
+    __version__ = "1.5.5.5"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -1707,9 +1707,9 @@ class Dialect(PGDialect_psycopg2):
         if getattr(stmt, "_post_values_clause", None) is not None:
             return False
 
-        column_keys = getattr(compiled, "column_keys", None)
+        column_keys = getattr(compiled, "positiontup", None)
         if not column_keys:
-            column_keys = getattr(compiled, "positiontup", None)
+            column_keys = getattr(compiled, "column_keys", None)
         if not column_keys:
             column_keys = _infer_bulk_insert_column_keys(parameters)
         if not column_keys:
