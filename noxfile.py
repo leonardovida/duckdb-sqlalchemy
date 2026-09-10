@@ -43,18 +43,18 @@ def group(title: str) -> Generator[None, None, None]:
         "1.5.5",
     ],
 )
-@nox.parametrize("sqlalchemy", ["2.0.0", "2.0.52", "2.1.0rc1"])
+@nox.parametrize("sqlalchemy", ["2.0.0", "2.0.52", "2.1.0rc2"])
 def tests(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
     if session.python == "3.14" and sqlalchemy == "2.0.0":
         session.skip("SQLAlchemy 2.0.0 is not compatible with Python 3.14")
-    if session.python == "3.10" and sqlalchemy == "2.1.0rc1":
-        session.skip("SQLAlchemy 2.1.0rc1 requires Python 3.11 or newer")
+    if session.python == "3.10" and sqlalchemy == "2.1.0rc2":
+        session.skip("SQLAlchemy 2.1.0rc2 requires Python 3.11 or newer")
     tests_core(session, duckdb, sqlalchemy)
 
 
 @nox.session(py=["3.11"])
 def nightly(session: nox.Session) -> None:
-    tests_core(session, "master", "2.1.0rc1", remote_data=False)
+    tests_core(session, "master", "2.1.0rc2", remote_data=False)
 
 
 def tests_core(

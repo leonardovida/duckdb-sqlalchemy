@@ -36,6 +36,38 @@ def test_bulk_insert_register_path() -> None:
         assert result == [(1, "Ada"), (2, "Grace")]
 
 
+def test_bulk_insert_register_path_preserves_compiled_position_order() -> None:
+    if (
+        importlib.util.find_spec("pandas") is None
+        and importlib.util.find_spec("pyarrow") is None
+    ):
+        pytest.skip("pandas or pyarrow is required for bulk insert fast path")
+
+    engine = create_engine("duckdb:///:memory:", use_insertmanyvalues=False)
+    md = MetaData()
+    t = Table(
+        "ordered_bulk_insert",
+        md,
+        Column("z_col", String),
+        Column("a_col", String),
+        Column("m_col", String),
+    )
+    md.create_all(engine)
+
+    rows = [
+        {"z_col": "Z", "a_col": "A", "m_col": "M"},
+        {"z_col": "Z2", "a_col": "A2", "m_col": "M2"},
+    ]
+
+    with engine.begin() as conn:
+        conn.execution_options(duckdb_copy_threshold=1).execute(t.insert(), rows)
+
+    with engine.connect() as conn:
+        result = conn.execute(select(t.c.z_col, t.c.a_col, t.c.m_col)).fetchall()
+
+    assert result == [("Z", "A", "M"), ("Z2", "A2", "M2")]
+
+
 def test_build_bulk_insert_data_handles_positional_rows() -> None:
     if (
         importlib.util.find_spec("pandas") is None
