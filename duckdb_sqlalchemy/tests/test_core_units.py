@@ -364,6 +364,38 @@ def test_retry_on_transient_select_without_params() -> None:
     assert cursor.calls == 2
 
 
+def test_retry_does_not_repeat_read_prefixed_multistatement_mutation() -> None:
+    connection = duckdb.connect(":memory:")
+    connection.execute("CREATE TABLE retry_target (id INTEGER)")
+
+    class TransientAfterExecutionCursor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, statement: str, parameters: Any) -> Any:
+            self.calls += 1
+            connection.execute(statement, parameters)
+            raise RuntimeError("HTTP Error: 503 Service Unavailable")
+
+    class RetryContext:
+        execution_options = {
+            "duckdb_retry_on_transient": True,
+            "duckdb_retry_count": 1,
+        }
+
+    cursor = TransientAfterExecutionCursor()
+    with pytest.raises(RuntimeError, match="503 Service Unavailable"):
+        Dialect().do_execute(
+            cursor,
+            "SELECT ';' AS marker; INSERT INTO retry_target VALUES (1)",
+            (),
+            RetryContext(),
+        )
+
+    assert cursor.calls == 1
+    assert connection.execute("SELECT * FROM retry_target").fetchall() == [(1,)]
+
+
 @pytest.mark.skipif(
     Version(sqlalchemy.__version__) < Version("2.1.0b1"),
     reason="SQLAlchemy 2.1 execution context compatibility",
@@ -1991,7 +2023,13 @@ def test_idempotent_statement_detection() -> None:
         "(SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 3) "
         "SELECT n FROM seq"
     )
+    assert _is_idempotent_statement("SELECT ';' AS value; -- trailing comment")
+    assert _is_idempotent_statement('SELECT 1 AS "semi;colon";;; /* trailing */')
     assert not _is_idempotent_statement("insert into t values (1)")
+    assert not _is_idempotent_statement("SELECT 1; INSERT INTO t VALUES (1)")
+    assert not _is_idempotent_statement(
+        "-- read first\nSELECT 1; /* then write */ INSERT INTO t VALUES (1)"
+    )
     assert not _is_idempotent_statement(
         "WITH source AS (SELECT 1 AS value) INSERT INTO t SELECT value FROM source"
     )

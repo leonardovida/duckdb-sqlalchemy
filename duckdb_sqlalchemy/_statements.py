@@ -58,10 +58,49 @@ def _strip_leading_sql_comments(statement: str) -> str:
     return sql
 
 
+def _has_additional_sql_statement(statement: str) -> bool:
+    index = 0
+    while index < len(statement):
+        char = statement[index]
+        if char in {"'", '"'}:
+            quote = char
+            index += 1
+            while index < len(statement):
+                if statement[index] != quote:
+                    index += 1
+                    continue
+                if index + 1 < len(statement) and statement[index + 1] == quote:
+                    index += 2
+                    continue
+                index += 1
+                break
+            continue
+        if statement.startswith("--", index):
+            newline_index = statement.find("\n", index + 2)
+            if newline_index == -1:
+                return False
+            index = newline_index + 1
+            continue
+        if statement.startswith("/*", index):
+            comment_end = statement.find("*/", index + 2)
+            if comment_end == -1:
+                return False
+            index = comment_end + 2
+            continue
+        if char == ";":
+            remainder = _strip_leading_sql_comments(statement[index + 1 :])
+            while remainder.startswith(";"):
+                remainder = _strip_leading_sql_comments(remainder[1:])
+            return bool(remainder)
+        index += 1
+    return False
+
+
 def _is_idempotent_statement(statement: str) -> bool:
-    normalized = _strip_leading_sql_comments(statement).lower()
-    if not normalized:
+    normalized = _strip_leading_sql_comments(statement)
+    if not normalized or _has_additional_sql_statement(normalized):
         return False
+    normalized = normalized.lower()
     if normalized.startswith(IDEMPOTENT_STATEMENT_PREFIXES):
         return True
     if not normalized.startswith("with"):
