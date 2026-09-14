@@ -364,7 +364,19 @@ def test_retry_on_transient_select_without_params() -> None:
     assert cursor.calls == 2
 
 
-def test_retry_does_not_repeat_read_prefixed_multistatement_mutation() -> None:
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SELECT ';' AS marker; INSERT INTO retry_target VALUES (1)",
+        "SELECT $$'$$; INSERT INTO retry_target VALUES (1)",
+        "SELECT $tag$'$tag$; INSERT INTO retry_target VALUES (1)",
+        "SELECT 1 /* outer /* inner */ ' */; INSERT INTO retry_target VALUES (1)",
+        "EXPLAIN ANALYZE INSERT INTO retry_target VALUES (1)",
+    ],
+)
+def test_retry_does_not_repeat_read_prefixed_multistatement_mutation(
+    statement: str,
+) -> None:
     connection = duckdb.connect(":memory:")
     connection.execute("CREATE TABLE retry_target (id INTEGER)")
 
@@ -387,7 +399,7 @@ def test_retry_does_not_repeat_read_prefixed_multistatement_mutation() -> None:
     with pytest.raises(RuntimeError, match="503 Service Unavailable"):
         Dialect().do_execute(
             cursor,
-            "SELECT ';' AS marker; INSERT INTO retry_target VALUES (1)",
+            statement,
             (),
             RetryContext(),
         )
@@ -1498,7 +1510,7 @@ def test_map_processors(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(dt, "IS_GT_1", False)
     legacy = dt.Map(String, Integer).result_processor(Dialect(), None)
     assert legacy({"key": ["a"], "value": [1]}) == {"a": 1}
-    assert legacy(None) == {}
+    assert legacy(None) is None
 
 
 def test_struct_or_union_requires_fields() -> None:
@@ -2012,6 +2024,10 @@ def test_normalize_execution_options_canonical_value_skips_warning() -> None:
 
 def test_idempotent_statement_detection() -> None:
     assert _is_idempotent_statement("SELECT 1")
+    assert _is_idempotent_statement("SELECT $1")
+    assert not _is_idempotent_statement("SELECT $$safe$$")
+    assert not _is_idempotent_statement(r"SELECT E'escaped\\n'")
+    assert not _is_idempotent_statement("EXPLAIN ANALYZE SELECT 1")
     assert _is_idempotent_statement("  show tables")
     assert _is_idempotent_statement("pragma version")
     assert _is_idempotent_statement("-- comment\nSELECT 1")

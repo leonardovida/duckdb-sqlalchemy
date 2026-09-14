@@ -383,6 +383,16 @@ def test_nested_types(engine: Engine, session: Session) -> None:
     assert result.map == map_data
 
 
+@mark.parametrize("value", [None, {}, {"one": 1, "missing": None}])
+def test_map_round_trip(engine: Engine, value: Any) -> None:
+    table = Table("test_map_values", MetaData(), Column("value", Map(String, Integer)))
+    table.create(engine)
+
+    with engine.begin() as connection:
+        connection.execute(table.insert().values(value=value))
+        assert connection.execute(select(table.c.value)).scalar() == value
+
+
 def test_double_nested_types(engine: Engine, session: Session) -> None:
     """Test for https://github.com/leonardovida/duckdb-sqlalchemy/issues/1138"""
     importorskip("duckdb", "0.5.0")  # nested types require at least duckdb 0.5.0

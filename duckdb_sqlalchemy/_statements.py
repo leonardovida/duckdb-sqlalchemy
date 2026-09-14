@@ -97,10 +97,22 @@ def _has_additional_sql_statement(statement: str) -> bool:
 
 
 def _is_idempotent_statement(statement: str) -> bool:
+    # Fail closed for lexical forms this lightweight scanner does not parse.
+    # Dollar strings, escape strings, and nested comments can conceal a
+    # statement separator from the ordinary quote/comment handling below.
+    if (
+        re.search(r"\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$", statement)
+        or "\\" in statement
+        or statement.count("/*") > 1
+    ):
+        return False
     normalized = _strip_leading_sql_comments(statement)
     if not normalized or _has_additional_sql_statement(normalized):
         return False
     normalized = normalized.lower()
+    # ANALYZE executes its argument, including INSERT/UPDATE/DELETE.
+    if normalized.startswith("explain") and re.search(r"\banalyze\b", normalized):
+        return False
     if normalized.startswith(IDEMPOTENT_STATEMENT_PREFIXES):
         return True
     if not normalized.startswith("with"):
