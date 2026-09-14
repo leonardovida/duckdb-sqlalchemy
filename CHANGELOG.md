@@ -6,6 +6,13 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.5.5.7](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.6...v1.5.5.7) (2026-09-14)
+
+### Bug Fixes
+
+- conservatively exclude dollar strings, escape strings, multiple block comments, and EXPLAIN ANALYZE from automatic transient retries to prevent duplicated side effects ([#163](https://github.com/leonardovida/duckdb-sqlalchemy/pull/163))
+- preserve SQL NULL MAP values as None on legacy DuckDB instead of converting them to empty dictionaries ([#163](https://github.com/leonardovida/duckdb-sqlalchemy/pull/163))
+
 ## [1.5.5.6](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.5...v1.5.5.6) (2026-09-14)
 
 ### Bug Fixes
