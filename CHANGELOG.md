@@ -6,6 +6,12 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.5.5.6](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.5...v1.5.5.6) (2026-09-14)
+
+### Bug Fixes
+
+- prevent opt-in transient retries from repeating mutations hidden after a read-only first statement in multi-statement SQL ([#162](https://github.com/leonardovida/duckdb-sqlalchemy/pull/162))
+
 ## [1.5.5.5](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.4...v1.5.5.5) (2026-09-10)
 
 ### Bug Fixes
