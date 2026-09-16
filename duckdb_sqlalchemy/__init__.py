@@ -66,7 +66,7 @@ from ._statements import (
 )
 from ._supports import has_comment_support
 from ._validation import validate_extension_name
-from .bulk import copy_from_csv, copy_from_parquet, copy_from_rows
+from .bulk import copy_from_csv, copy_from_parquet, copy_from_rows, copy_to_parquet
 from .capabilities import get_capabilities
 from .config import apply_config, get_core_config
 from .datatypes import ISCHEMA_NAMES, register_extension_types
@@ -232,6 +232,7 @@ __all__ = [
     "copy_from_parquet",
     "copy_from_csv",
     "copy_from_rows",
+    "copy_to_parquet",
     "checkpoint",
 ]
 

@@ -6,6 +6,12 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## Unreleased
+
+### Features
+
+- add `copy_to_parquet` to export SQLAlchemy selects directly through DuckDB while preserving bound parameters and custom bind conversions
+
 ## [1.5.5.7](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.6...v1.5.5.7) (2026-09-14)
 
 ### Bug Fixes
