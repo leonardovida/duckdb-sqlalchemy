@@ -3,6 +3,12 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple, Union
 
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql.elements import ClauseElement
+from sqlalchemy.sql.expression import Executable
+from sqlalchemy.sql.selectable import CompoundSelect, Select
+from sqlalchemy.sql.visitors import InternalTraversal
+
 from ._row_shape import rows_as_sequences
 from ._validation import (
     validate_dotted_identifier,
@@ -82,6 +88,59 @@ def _execute_sql(connection: Any, statement: str) -> Any:
     if hasattr(connection, "exec_driver_sql"):
         return connection.exec_driver_sql(statement)
     return connection.execute(statement)
+
+
+class _CopyToParquet(Executable, ClauseElement):
+    inherit_cache = False
+    _traverse_internals = [("selectable", InternalTraversal.dp_clauseelement)]
+
+    def __init__(
+        self,
+        selectable: Union[Select, CompoundSelect],
+        path: Union[str, Path],
+        copy_options: Mapping[str, Any],
+    ) -> None:
+        self.selectable = selectable
+        self.path = path
+        self._copy_options = copy_options
+
+
+@compiles(_CopyToParquet, "duckdb")
+def _compile_copy_to_parquet(
+    statement: _CopyToParquet, compiler: Any, **kw: Any
+) -> str:
+    # COPY returns its own metadata, not the SELECT column types/processors.
+    with compiler._nested_result():
+        query = compiler.process(statement.selectable, **kw)
+    options = _format_copy_options({"format": "parquet", **statement._copy_options})
+    return f"COPY ({query}) TO {_quote_literal(statement.path)}{options}"
+
+
+def copy_to_parquet(
+    connection: Any,
+    selectable: Union[Select, CompoundSelect],
+    path: Union[str, Path],
+    *,
+    parameters: Optional[Mapping[str, Any]] = None,
+    **options: Any,
+) -> Any:
+    """Export a SELECT to Parquet and return DuckDB's COPY result.
+
+    By default the result contains a single ``Count`` column. COPY options
+    may change the result schema.
+    The output path is a literal for compatibility with older DuckDB releases.
+    COPY overwrites an existing single-file destination, and its file write is
+    not rolled back with the surrounding SQL transaction.
+    """
+
+    if not isinstance(selectable, (Select, CompoundSelect)):
+        raise TypeError("copy_to_parquet requires a Select or CompoundSelect")
+    if any(str(key).lower() == "format" for key in options):
+        raise ValueError("copy_to_parquet always uses FORMAT parquet")
+    if parameters is not None and not isinstance(parameters, Mapping):
+        raise TypeError("copy_to_parquet parameters must be a mapping")
+    statement = _CopyToParquet(selectable, path, options)
+    return connection.execute(statement, parameters or {})
 
 
 def _unlink_if_exists(path: Union[str, Path]) -> None:

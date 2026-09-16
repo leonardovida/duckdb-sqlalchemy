@@ -301,6 +301,50 @@ with engine.begin() as conn:
     copy_from_rows(conn, "users", rows, columns=["id", "name"], chunk_size=100_000)
 ```
 
+## Export a query to Parquet
+
+Use `copy_to_parquet` to export a SQLAlchemy `select()` directly through
+DuckDB, without fetching the query's rows into Python:
+
+```python
+from pathlib import Path
+from sqlalchemy import bindparam, select
+from duckdb_sqlalchemy import copy_to_parquet
+
+query = select(events.c.event_id, events.c.ts).where(
+    events.c.event_id.in_(bindparam("event_ids", expanding=True))
+)
+with engine.connect() as conn:
+    result = copy_to_parquet(
+        conn,
+        query,
+        Path("selected-events.parquet"),
+        parameters={"event_ids": [1, 2]},
+        compression="zstd",
+    )
+    exported_rows = result.scalar_one()
+```
+
+The helper accepts SQLAlchemy `Select` and compound selects such as
+`union_all()`. Pass one parameter mapping through `parameters`; normal typed
+bind processing and expanding `IN` parameters are preserved. Raw SQL strings,
+`text()` statements, and inserts/updates/deletes are not accepted. SQLAlchemy
+expressions remain trusted application code.
+
+COPY options such as `compression` are passed as keyword arguments. The format
+is always Parquet and cannot be overridden. Paths may be strings or `Path`
+objects and are escaped as SQL literals for compatibility with older DuckDB
+versions. The helper is tested with DuckDB 1.3.0 and 1.5.5 and SQLAlchemy 2.0;
+older DuckDB versions are not verified for this workflow.
+
+File writes follow DuckDB COPY semantics: a single-file export replaces an
+existing destination, and rolling back the SQL transaction does not undo the
+file write. Use a distinct destination when retaining a previous export
+matters. Multi-file options such as `partition_by` have their own DuckDB
+append/overwrite behavior. The destination must be accessible to the executing
+DuckDB instance; remote storage needs the relevant filesystem configuration.
+This example is verified with local DuckDB, not MotherDuck remote storage.
+
 ## ATTACH for multi-database analytics
 
 DuckDB can query across multiple databases in a single session:
