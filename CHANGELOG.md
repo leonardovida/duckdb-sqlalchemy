@@ -10,7 +10,7 @@ preserved from the upstream project for historical context.
 
 ### Bug Fixes
 
-- preserve SQL defaults, explicit VALUES expressions, and aliased column keys by using ordinary executemany when the bulk register optimization cannot preserve the compiled statement
+- preserve SQL defaults, explicit VALUES expressions, and aliased column keys by using ordinary executemany when the bulk register optimization cannot preserve the compiled statement ([#166](https://github.com/leonardovida/duckdb-sqlalchemy/pull/166))
 
 ### Features
 
