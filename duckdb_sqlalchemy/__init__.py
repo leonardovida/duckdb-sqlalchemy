@@ -144,7 +144,7 @@ else:
 try:
     __version__ = package_version("duckdb-sqlalchemy")
 except PackageNotFoundError:  # pragma: no cover - source tree import fallback
-    __version__ = "1.5.5.7"
+    __version__ = "1.5.5.8"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -1707,6 +1707,15 @@ class Dialect(PGDialect_psycopg2):
             return False
         if getattr(stmt, "_post_values_clause", None) is not None:
             return False
+        # The register path replaces VALUES with a column projection. Explicit
+        # expressions and SQL defaults must retain their original compiled SQL.
+        if getattr(stmt, "_values", None) or getattr(stmt, "_ordered_values", None):
+            return False
+        if any(
+            column.default is not None and column.default.is_clause_element
+            for column in table.columns
+        ):
+            return False
 
         column_keys = getattr(compiled, "positiontup", None)
         if not column_keys:
@@ -1719,6 +1728,10 @@ class Dialect(PGDialect_psycopg2):
         column_names = [
             str(getattr(column_key, "key", column_key)) for column_key in column_keys
         ]
+        # Bind keys need not be physical column names. Decline the optimization
+        # unless the mapping is unambiguous; normal executemany handles these.
+        if any(key not in table.c or table.c[key].name != key for key in column_names):
+            return False
         rows = parameters if isinstance(parameters, list) else list(parameters)
         data = _build_bulk_insert_data(rows, column_names)
         if data is None:

@@ -2,7 +2,18 @@ import importlib.util
 from collections import UserDict
 
 import pytest
-from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, select
+from sqlalchemy import (
+    Column,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    bindparam,
+    create_engine,
+    func,
+    select,
+    text,
+)
 
 from duckdb_sqlalchemy import _build_bulk_insert_data
 from duckdb_sqlalchemy._bulk_insert import infer_bulk_insert_column_keys
@@ -66,6 +77,52 @@ def test_bulk_insert_register_path_preserves_compiled_position_order() -> None:
         result = conn.execute(select(t.c.z_col, t.c.a_col, t.c.m_col)).fetchall()
 
     assert result == [("Z", "A", "M"), ("Z2", "A2", "M2")]
+
+
+@pytest.mark.parametrize("threshold", [0, 1])
+@pytest.mark.parametrize(
+    "case", ["alias", "expression", "sql_default", "literal_default"]
+)
+def test_bulk_insert_preserves_statement_semantics(threshold: int, case: str) -> None:
+    engine = create_engine("duckdb:///:memory:", use_insertmanyvalues=False)
+    default = (
+        func.length("abc")
+        if case == "sql_default"
+        else text("3")
+        if case == "literal_default"
+        else None
+    )
+    table = Table(
+        "bulk_semantics",
+        MetaData(),
+        Column("id", Integer),
+        Column(
+            "value",
+            Integer,
+            key="alias" if case == "alias" else "value",
+            default=default,
+        ),
+    )
+    table.create(engine)
+    statement = table.insert()
+    if case == "alias":
+        rows = [{"id": 1, "alias": 3}, {"id": 2, "alias": 4}]
+    elif case == "expression":
+        statement = statement.values(value=bindparam("input_value") + 1)
+        rows = [{"id": 1, "input_value": 2}, {"id": 2, "input_value": 3}]
+    else:
+        rows = [{"id": 1}, {"id": 2}]
+    try:
+        with engine.begin() as connection:
+            connection.execution_options(duckdb_copy_threshold=threshold).execute(
+                statement, rows
+            )
+            assert connection.execute(select(table).order_by(table.c.id)).all() == [
+                (1, 3),
+                (2, 4 if case in {"alias", "expression"} else 3),
+            ]
+    finally:
+        engine.dispose()
 
 
 def test_build_bulk_insert_data_handles_positional_rows() -> None:
