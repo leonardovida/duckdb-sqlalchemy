@@ -6,11 +6,19 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
-## Unreleased
+## [1.5.5.8](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.7...v1.5.5.8) (2026-09-18)
+
+### Bug Fixes
+
+- preserve SQL defaults, explicit VALUES expressions, and aliased column keys by using ordinary executemany when the bulk register optimization cannot preserve the compiled statement
 
 ### Features
 
-- add `copy_to_parquet` to export SQLAlchemy selects directly through DuckDB while preserving bound parameters and custom bind conversions
+- add `copy_to_parquet` to export SQLAlchemy selects directly through DuckDB while preserving bound parameters and custom bind conversions ([commit](https://github.com/leonardovida/duckdb-sqlalchemy/commit/d519231e2c5f964a9e51149b6cb1409457240c54))
+
+### Documentation
+
+- clarify the README and surface task-based documentation links ([#164](https://github.com/leonardovida/duckdb-sqlalchemy/pull/164))
 
 ## [1.5.5.7](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.6...v1.5.5.7) (2026-09-14)
 
