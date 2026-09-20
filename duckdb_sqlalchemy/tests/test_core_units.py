@@ -1896,9 +1896,11 @@ def test_copy_rows_as_sequences_uses_explicit_mapping_columns() -> None:
     assert list(rows) == [["one", 1], [None, 2]]
 
 
+@pytest.mark.parametrize("copy_outcome", ["success", "failure", "removed_file"])
 def test_copy_from_rows_closes_rotated_tempfiles(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    copy_outcome: str,
 ) -> None:
     created = []
     copied = []
@@ -1933,6 +1935,10 @@ def test_copy_from_rows_closes_rotated_tempfiles(
     def fake_copy_from_csv(connection: object, table: object, path: str, **kwargs):
         copied.append(Path(path))
         assert Path(path).exists()
+        if copy_outcome == "removed_file":
+            Path(path).unlink()
+        if copy_outcome != "success":
+            raise RuntimeError("COPY failed")
 
     monkeypatch.setattr(
         duckdb_sqlalchemy.bulk.tempfile,
@@ -1941,16 +1947,24 @@ def test_copy_from_rows_closes_rotated_tempfiles(
     )
     monkeypatch.setattr(duckdb_sqlalchemy.bulk, "copy_from_csv", fake_copy_from_csv)
 
-    copy_from_rows(
-        object(),
-        "safe",
-        [(1,), (2,)],
-        columns=["id"],
-        chunk_size=1,
-    )
+    def copy_rows() -> None:
+        copy_from_rows(
+            object(),
+            "safe",
+            [(1,), (2,)],
+            columns=["id"],
+            chunk_size=1,
+        )
 
-    assert len(created) == 2
-    assert len(copied) == 2
+    if copy_outcome == "success":
+        copy_rows()
+    else:
+        with pytest.raises(RuntimeError, match="COPY failed"):
+            copy_rows()
+
+    expected_chunks = 2 if copy_outcome == "success" else 1
+    assert len(created) == expected_chunks
+    assert len(copied) == expected_chunks
     assert all(temp.closed for temp in created)
     assert all(not Path(temp.name).exists() for temp in created)
 

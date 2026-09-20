@@ -143,20 +143,13 @@ def copy_to_parquet(
     return connection.execute(statement, parameters or {})
 
 
-def _unlink_if_exists(path: Union[str, Path]) -> None:
-    try:
-        Path(path).unlink()
-    except FileNotFoundError:
-        pass
-
-
 def _close_and_unlink_tempfile(tmp: Any) -> None:
     path = tmp.name
     try:
         tmp.flush()
     finally:
         tmp.close()
-    _unlink_if_exists(path)
+    Path(path).unlink(missing_ok=True)
 
 
 def _copy_rows_as_csv_chunks(
@@ -189,7 +182,7 @@ def _copy_rows_as_csv_chunks(
                 **copy_options,
             )
         finally:
-            _unlink_if_exists(path)
+            Path(path).unlink(missing_ok=True)
 
     tmp = None
     writer = None
