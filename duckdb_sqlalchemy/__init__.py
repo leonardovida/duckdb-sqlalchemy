@@ -414,11 +414,9 @@ class CursorWrapper:
                 type_code = col[1]
                 try:
                     hash(type_code)
-                    fixed.append(col)
                 except TypeError:
-                    fixed.append((col[0], str(type_code), *col[2:]))
-            else:
-                fixed.append(col)
+                    col = (col[0], str(type_code), *col[2:])
+            fixed.append(col)
         return fixed
 
     def __getattr__(self, name: str) -> Any:
