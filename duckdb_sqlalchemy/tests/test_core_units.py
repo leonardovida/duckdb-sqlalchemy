@@ -1402,6 +1402,53 @@ def test_cursorwrapper_description_handles_unhashable_type_code() -> None:
     assert cursor.description == [("col", "['complex']")]
 
 
+def test_cursorwrapper_description_preserves_descriptor_shapes() -> None:
+    class DummyConn:
+        pass
+
+    def description(value: Any) -> Any:
+        conn = DummyConn()
+        conn.description = value
+        return CursorWrapper(conn, None).description
+
+    assert description(None) is None
+    assert description([]) == []
+    short = ("short",)
+    type_code = object()
+    hashable = ("hashable", type_code, None, None, None, None, None)
+    unhashable = (
+        "complex",
+        ["complex"],
+        "size",
+        "precision",
+        "scale",
+        "nullable",
+        "extra",
+    )
+    empty = ()
+    result = description([short, hashable, unhashable, empty])
+    assert result is not None
+    assert result[0] is short
+    assert result[1] is hashable
+    assert result[2] == (
+        "complex",
+        "['complex']",
+        "size",
+        "precision",
+        "scale",
+        "nullable",
+        "extra",
+    )
+    assert result[3] is empty
+
+    class BrokenTypeCode:
+        def __hash__(self) -> int:
+            raise ValueError("hash probe failed")
+
+    with pytest.raises(ValueError, match="hash probe failed"):
+        description([("col", BrokenTypeCode())])
+
+
 def test_reserved_words_load_once_during_concurrent_engine_startup(monkeypatch) -> None:
     original_cursor = duckdb.cursor
     cursor_calls = 0
