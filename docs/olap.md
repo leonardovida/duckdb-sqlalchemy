@@ -345,6 +345,58 @@ append/overwrite behavior. The destination must be accessible to the executing
 DuckDB instance; remote storage needs the relevant filesystem configuration.
 This example is verified with local DuckDB, not MotherDuck remote storage.
 
+## Export a partitioned snapshot
+
+Use the existing COPY options to split a filtered query into a Hive partitioned
+Parquet dataset. The destination is a directory; partition columns must appear
+in the query's output:
+
+```python
+from pathlib import Path
+from sqlalchemy import bindparam, select
+from duckdb_sqlalchemy import copy_to_parquet, read_parquet
+
+# Choose a new directory for each snapshot.
+destination = Path("snapshots/events-2026-09-21")
+query = select(events.c.event_id, events.c.region).where(
+    events.c.event_id >= bindparam("minimum_id")
+)
+with engine.connect() as conn:
+    count = copy_to_parquet(
+        conn,
+        query,
+        destination,
+        parameters={"minimum_id": 100},
+        partition_by=["region"],
+        compression="zstd",
+    ).scalar_one()
+    rows = []
+    if count:
+        snapshot = read_parquet(
+            str(destination / "**" / "*.parquet"),
+            columns=["event_id", "region"],
+            hive_partitioning=True,
+        )
+        rows = conn.execute(select(snapshot.c.event_id, snapshot.c.region)).all()
+```
+
+Files live under directories such as `region=eu/`. Hive partitioning restores
+the partition columns from those paths when scanning. An empty selection writes
+no Parquet files, so check the COPY count before scanning the glob.
+
+Run the self-contained [partitioned Parquet example](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/examples/partitioned_parquet.py)
+with `uv run python examples/partitioned_parquet.py` from the repository. It
+creates temporary sample data, exports a bound query, and verifies the recovered
+rows and partition directories. This local workflow is verified with DuckDB
+1.3.0 / SQLAlchemy 2.0.0 and DuckDB 1.5.5 / SQLAlchemy 2.0.52.
+
+By default, a second export to a nonempty destination fails. Prefer a distinct
+directory per snapshot. `append=True` adds files; it does not update or
+deduplicate rows, so repeating a batch can duplicate data. File writes survive
+transaction rollback and are not an atomic dataset publication mechanism.
+See DuckDB's [partitioned write documentation](https://duckdb.org/docs/current/data/partitioning/partitioned_writes.html)
+for overwrite and append options. Remote storage is not tested by this recipe.
+
 ## ATTACH for multi-database analytics
 
 DuckDB can query across multiple databases in a single session:

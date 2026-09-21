@@ -19,8 +19,10 @@ from sqlalchemy import (
     union_all,
 )
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.exc import OperationalError
 
 from duckdb_sqlalchemy import copy_to_parquet
+from duckdb_sqlalchemy import read_parquet as parquet_scan
 
 
 class UpperText(TypeDecorator[str]):
@@ -186,3 +188,60 @@ def test_copy_to_parquet_rejects_invalid_option_key(
                 tmp_path / "invalid.parquet",
                 **{"compression); CREATE TABLE pwned(i INTEGER); --": "zstd"},
             )
+
+
+@pytest.mark.parametrize("minimum_id", [0, 3])
+def test_partitioned_export_round_trip(
+    events: tuple[Engine, Table], tmp_path: Path, minimum_id: int
+) -> None:
+    engine, table = events
+    destination = tmp_path / "snapshot"
+    query = select(table).where(table.c.id > bindparam("minimum_id"))
+    with engine.connect() as connection:
+        count = copy_to_parquet(
+            connection,
+            query,
+            destination,
+            parameters={"minimum_id": minimum_id},
+            partition_by=["name"],
+        ).scalar_one()
+        connection.rollback()
+        if minimum_id == 3:
+            assert count == 0
+            assert not list(destination.rglob("*.parquet"))
+        else:
+            assert count == 2
+            assert {p.parent.name for p in destination.rglob("*.parquet")} == {
+                "name=ALPHA",
+                "name=BETA",
+            }
+            snapshot = parquet_scan(
+                str(destination / "**" / "*.parquet"),
+                columns=["id", "name"],
+                hive_partitioning=True,
+            )
+            assert connection.execute(
+                select(snapshot.c.id, snapshot.c.name).order_by(snapshot.c.id)
+            ).all() == [(1, "ALPHA"), (2, "BETA")]
+
+
+def test_partitioned_export_refuses_existing_snapshot(
+    events: tuple[Engine, Table], tmp_path: Path
+) -> None:
+    engine, table = events
+    destination = tmp_path / "snapshot"
+    with engine.connect() as connection:
+        copy_to_parquet(connection, select(table), destination, partition_by=["name"])
+        before = {path: path.read_bytes() for path in destination.rglob("*.parquet")}
+        assert before
+        with pytest.raises(OperationalError, match="not empty"):
+            copy_to_parquet(
+                connection,
+                select(table).where(table.c.id == 1),
+                destination,
+                partition_by=["name"],
+            )
+        connection.rollback()
+        assert {
+            path: path.read_bytes() for path in destination.rglob("*.parquet")
+        } == before
