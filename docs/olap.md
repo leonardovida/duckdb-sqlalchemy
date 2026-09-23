@@ -397,6 +397,26 @@ transaction rollback and are not an atomic dataset publication mechanism.
 See DuckDB's [partitioned write documentation](https://duckdb.org/docs/current/data/partitioning/partitioned_writes.html)
 for overwrite and append options. Remote storage is not tested by this recipe.
 
+### Preserve string partition keys
+
+Hive readers infer partition types from directory names. A string key such as
+`"123"` or `"2026-09-23"` can return as an integer or date. Set `hive_types` when
+reading a snapshot to preserve those identifiers as strings:
+
+```python
+snapshot = read_parquet(
+    "snapshots/events/**/*.parquet",
+    columns=["id", "region"],
+    hive_partitioning=True,
+    hive_types={"region": "VARCHAR"},
+)
+rows = conn.execute(select(snapshot.c.id, snapshot.c.region)).all()
+```
+
+`columns` names the SQLAlchemy columns. It does not set the types DuckDB infers.
+Use DuckDB type names in `hive_types`. See
+[Hive partition types](https://duckdb.org/docs/current/data/partitioning/hive_partitioning.html#hive-types).
+
 ## ATTACH for multi-database analytics
 
 DuckDB can query across multiple databases in a single session:
