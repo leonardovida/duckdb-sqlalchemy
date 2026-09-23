@@ -94,6 +94,10 @@ class _CopyToParquet(Executable, ClauseElement):
     inherit_cache = False
     _traverse_internals = [("selectable", InternalTraversal.dp_clauseelement)]
 
+    def _generate_cache_key(self) -> None:
+        # Keep bind traversal without caching literal destinations or COPY options.
+        return None
+
     def __init__(
         self,
         selectable: Union[Select, CompoundSelect],
