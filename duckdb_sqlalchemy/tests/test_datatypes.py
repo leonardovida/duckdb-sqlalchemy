@@ -290,6 +290,21 @@ def test_pk_and_index_reflection(engine: Engine) -> None:
     assert multi_indexes[(None, "t")] == indexes
 
 
+def test_pk_reflection_on_legacy_duckdb(engine: Engine) -> None:
+    with engine.begin() as con:
+        con.execute(text("CREATE TABLE t (id INTEGER PRIMARY KEY, name VARCHAR)"))
+
+        inspector = inspect(con)
+        pk = inspector.get_pk_constraint("t")
+        multi_pk = dict(inspector.get_multi_pk_constraint(filter_names=["t"]))
+        reflected = Table("t", MetaData(), autoload_with=con)
+
+    expected_name = "t_id_pkey" if duckdb_version >= Version("1.1.0") else None
+    assert pk == {"name": expected_name, "constrained_columns": ["id"]}
+    assert multi_pk[(None, "t")] == pk
+    assert [column.name for column in reflected.primary_key] == ["id"]
+
+
 def test_all_types_reflection(engine: Engine) -> None:
     importorskip("sqlalchemy", "1.4.0")
     importorskip("duckdb", "0.5.1")

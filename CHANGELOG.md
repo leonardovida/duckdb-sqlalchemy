@@ -6,6 +6,12 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.5.5.9](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.8...v1.5.5.9) (2026-09-24)
+
+### Bug Fixes
+
+- reflect primary keys on DuckDB 0.10 and 1.0, whose constraint catalog does not expose names. Generated names remain available on DuckDB 1.1 and newer ([#171](https://github.com/leonardovida/duckdb-sqlalchemy/pull/171))
+
 ## [1.5.5.8](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.7...v1.5.5.8) (2026-09-18)
 
 ### Bug Fixes
