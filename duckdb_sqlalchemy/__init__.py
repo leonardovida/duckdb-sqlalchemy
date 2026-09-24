@@ -144,7 +144,7 @@ else:
 try:
     __version__ = package_version("duckdb-sqlalchemy")
 except PackageNotFoundError:  # pragma: no cover - source tree import fallback
-    __version__ = "1.5.5.8"
+    __version__ = "1.5.5.9"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -1517,11 +1517,16 @@ class Dialect(PGDialect_psycopg2):
         table_names = self._duckdb_table_names(
             connection, schema=schema, filter_names=filter_names
         )
+        constraint_name = (
+            "constraint_name"
+            if self._capabilities.version >= Version("1.1.0")
+            else "NULL AS constraint_name"
+        )
         stmt, params = self._duckdb_reflection_stmt(
             "duckdb_constraints",
             (
-                "database_name, schema_name, table_name, constraint_name, "
-                "constraint_column_names"
+                "database_name, schema_name, table_name, "
+                f"{constraint_name}, constraint_column_names"
             ),
             schema=schema,
             filter_names=filter_names,
