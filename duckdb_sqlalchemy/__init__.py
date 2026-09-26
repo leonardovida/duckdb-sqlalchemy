@@ -1704,6 +1704,10 @@ class Dialect(PGDialect_psycopg2):
             return False
         if getattr(compiled, "effective_returning", None):
             return False
+        # format_table() does not apply SQLAlchemy's schema translation to the
+        # replacement INSERT, so keep the compiled executemany statement.
+        if self._get_execution_options(context).get("schema_translate_map"):
+            return False
         stmt = getattr(compiled, "statement", None)
         table = getattr(stmt, "table", None)
         if table is None:

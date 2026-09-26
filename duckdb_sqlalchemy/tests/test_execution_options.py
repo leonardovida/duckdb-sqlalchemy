@@ -80,6 +80,36 @@ def test_bulk_insert_register_path_preserves_compiled_position_order() -> None:
 
 
 @pytest.mark.parametrize("threshold", [0, 1])
+def test_bulk_insert_respects_schema_translation(threshold: int) -> None:
+    engine = create_engine("duckdb:///:memory:", use_insertmanyvalues=False)
+    table = Table(
+        "bulk_translate",
+        MetaData(),
+        Column("id", Integer),
+        schema="logical",
+    )
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("CREATE SCHEMA translated")
+            connection.exec_driver_sql(
+                "CREATE TABLE translated.bulk_translate(id INTEGER)"
+            )
+            translated = connection.execution_options(
+                schema_translate_map={"logical": "translated"},
+                duckdb_copy_threshold=threshold,
+            )
+            translated.execute(table.insert(), [{"id": 1}, {"id": 2}])
+            assert translated.execute(
+                select(table.c.id).order_by(table.c.id)
+            ).all() == [
+                (1,),
+                (2,),
+            ]
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("threshold", [0, 1])
 @pytest.mark.parametrize(
     "case", ["alias", "expression", "sql_default", "literal_default"]
 )
