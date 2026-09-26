@@ -830,17 +830,25 @@ def test_quack_query_renders_stateless_remote_query() -> None:
     assert compiled.params["disable_ssl_1"] is True
 
 
-def test_md_user_info_uses_released_motherduck_columns() -> None:
+@pytest.mark.parametrize(
+    "client_version,has_region", [("1.5.1", False), ("1.5.3", True)]
+)
+def test_md_user_info_uses_released_motherduck_columns(
+    monkeypatch: pytest.MonkeyPatch, client_version: str, has_region: bool
+) -> None:
+    monkeypatch.setattr(olap, "duckdb_version", client_version)
     user_info = olap.md_user_info()
 
-    assert list(user_info.c.keys()) == [
+    expected = [
         "user_id",
         "username",
         "org_id",
         "org_name",
         "org_type",
-        "region",
     ]
+    if has_region:
+        expected.append("region")
+    assert list(user_info.c.keys()) == expected
 
 
 def test_md_list_dives_uses_released_motherduck_columns() -> None:
@@ -880,6 +888,83 @@ def test_motherduck_metadata_helpers_allow_custom_columns() -> None:
     assert list(olap.md_access_tokens(columns=["token_name"]).c.keys()) == [
         "token_name"
     ]
+
+
+def test_motherduck_guide_helpers_expose_released_columns() -> None:
+    summary = [
+        "id",
+        "topic",
+        "title",
+        "description",
+        "owner_id",
+        "owner_name",
+        "access",
+        "current_version",
+        "created_at",
+        "updated_at",
+    ]
+    write = summary + [
+        "version_change_comment",
+        "version_external_id",
+        "version_created_at",
+        "references",
+    ]
+    assert list(olap.md_list_guides().c.keys()) == summary
+    assert list(olap.md_get_guide().c.keys()) == summary + [
+        "version",
+        *write[len(summary) :],
+        "content",
+    ]
+    assert list(olap.md_create_guide().c.keys()) == write
+    assert list(olap.md_update_guide().c.keys()) == write
+    assert list(olap.md_update_guide_metadata().c.keys()) == summary
+    assert list(olap.md_set_guide_access().c.keys()) == summary
+    assert list(olap.md_list_guide_versions().c.keys()) == [
+        "version",
+        "change_comment",
+        "external_id",
+        "created_at",
+    ]
+    assert list(olap.md_delete_guide().c.keys()) == ["success"]
+
+
+def test_motherduck_guide_helpers_bind_named_arguments() -> None:
+    guides = olap.md_list_guides(topic="core", limit=5)
+    statement = select(guides.c.id, guides.c.title)
+    compiled = statement.compile(dialect=Dialect())
+
+    assert "md_list_guides" in str(compiled)
+    assert '"topic" :=' in str(compiled)
+    assert '"limit" :=' in str(compiled)
+    assert compiled.params["topic_1"] == "core"
+    assert compiled.params["limit_1"] == 5
+
+    guide = olap.md_create_guide(title="Guide's title", content="Private notes")
+    create = select(guide.c.id).compile(dialect=Dialect())
+    assert "Guide's title" not in str(create)
+    assert create.params["title_1"] == "Guide's title"
+
+
+def test_prompt_jev_renders_named_criteria_and_questions() -> None:
+    choice = select(
+        olap.prompt_jev(
+            "A duplicate charge",
+            "Which team?",
+            choice=["billing", "sales"],
+        )
+    ).compile(dialect=Dialect())
+    assert "prompt_jev" in str(choice)
+    assert '"choice" :=' in str(choice)
+    assert choice.params["choice_1"] == ["billing", "sales"]
+
+    questions = select(
+        olap.prompt_jev(
+            "A duplicate charge",
+            questions={"billing": {"type": "noul", "instructions": "Billing?"}},
+        )
+    ).compile(dialect=Dialect())
+    assert '"questions" :=' in str(questions)
+    assert "Billing?" not in str(questions)
 
 
 def test_motherduck_flight_helpers_use_released_columns() -> None:

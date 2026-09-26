@@ -99,7 +99,6 @@ user_stmt = select(
     user_info.c.org_id,
     user_info.c.org_name,
     user_info.c.org_type,
-    user_info.c.region,
 )
 
 dives = md_list_dives()
@@ -114,6 +113,57 @@ dives_stmt = select(
 tokens = md_access_tokens()
 tokens_stmt = select(tokens.c.token_name, tokens.c.token_type, tokens.c.expire_at)
 ```
+
+`md_user_info().c.region` is available with DuckDB 1.5.3 and newer. Older
+MotherDuck clients expose the other five columns.
+
+## MotherDuck Guides
+
+MotherDuck [Guides](https://motherduck.com/docs/sql-reference/motherduck-sql-reference/guides/)
+are markdown documents that capture data context for agents. The Guide helpers
+name each table function's released columns and bind named arguments through
+SQLAlchemy:
+
+```python
+from sqlalchemy import select
+from duckdb_sqlalchemy import md_create_guide, md_get_guide, md_list_guides
+
+guides = md_list_guides(topic="revenue", limit=10)
+list_stmt = select(guides.c.id, guides.c.title, guides.c.current_version)
+
+guide = md_get_guide(id="00000000-0000-0000-0000-000000000000")
+read_stmt = select(guide.c.title, guide.c.content)
+
+created = md_create_guide(title="Metric definitions", content="# Revenue\n...")
+create_stmt = select(created.c.id, created.c.current_version)
+```
+
+The same module exposes `md_update_guide`, `md_update_guide_metadata`,
+`md_set_guide_access`, `md_list_guide_versions`, and `md_delete_guide`.
+Guide functions require a MotherDuck client version that exposes them; they are
+available with DuckDB 1.5.5.
+
+## MotherDuck AI classification
+
+The [`prompt_jev`](https://motherduck.com/docs/sql-reference/motherduck-sql-reference/ai-functions/prompt-jev/)
+helper supports the function's positional input and instructions plus named
+`choice`, `score`, `noul`, `questions`, and `batch_size` arguments:
+
+```python
+from sqlalchemy import select
+from duckdb_sqlalchemy import prompt_jev
+
+stmt = select(
+    prompt_jev(
+        "I was charged twice",
+        "Which team should handle this?",
+        choice=["billing", "technical", "sales"],
+    ).label("routing")
+)
+```
+
+MotherDuck currently limits `prompt_jev` to the regions listed in its function
+reference. The classification runs remotely and may incur usage charges.
 
 ## MotherDuck Dives as code
 
