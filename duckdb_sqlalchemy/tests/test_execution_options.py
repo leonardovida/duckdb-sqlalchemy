@@ -1,5 +1,6 @@
 import importlib.util
 from collections import UserDict
+from typing import Any
 
 import pytest
 from sqlalchemy import (
@@ -15,7 +16,7 @@ from sqlalchemy import (
     text,
 )
 
-from duckdb_sqlalchemy import _build_bulk_insert_data
+from duckdb_sqlalchemy import ConnectionWrapper, _build_bulk_insert_data
 from duckdb_sqlalchemy._bulk_insert import infer_bulk_insert_column_keys
 
 
@@ -80,7 +81,16 @@ def test_bulk_insert_register_path_preserves_compiled_position_order() -> None:
 
 
 @pytest.mark.parametrize("threshold", [0, 1])
-def test_bulk_insert_respects_schema_translation(threshold: int) -> None:
+def test_bulk_insert_respects_schema_translation(
+    threshold: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registered_views: list[str] = []
+
+    def track_register(connection: ConnectionWrapper, name: str, data: Any) -> Any:
+        registered_views.append(name)
+        return connection.__getattr__("register")(name, data)
+
+    monkeypatch.setattr(ConnectionWrapper, "register", track_register, raising=False)
     engine = create_engine("duckdb:///:memory:", use_insertmanyvalues=False)
     table = Table(
         "bulk_translate",
@@ -105,6 +115,7 @@ def test_bulk_insert_respects_schema_translation(threshold: int) -> None:
                 (1,),
                 (2,),
             ]
+            assert len(registered_views) == threshold
     finally:
         engine.dispose()
 
