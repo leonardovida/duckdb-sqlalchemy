@@ -6,6 +6,16 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## Unreleased
+
+### Features
+
+- expose MotherDuck Guide SQL functions and named `prompt_jev` arguments through SQLAlchemy helpers
+
+### Bug Fixes
+
+- expose the `md_user_info` region column by default only on DuckDB clients that support it
+
 ## [1.5.5.10](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.9...v1.5.5.10) (2026-09-26)
 
 ### Bug Fixes

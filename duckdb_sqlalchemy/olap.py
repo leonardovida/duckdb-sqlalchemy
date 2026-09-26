@@ -1,6 +1,8 @@
 import warnings
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
+from duckdb import __version__ as duckdb_version
+from packaging.version import Version
 from sqlalchemy import bindparam, func, select, text
 
 from ._validation import validate_identifier
@@ -11,8 +13,8 @@ MOTHERDUCK_USER_INFO_COLUMNS = (
     "org_id",
     "org_name",
     "org_type",
-    "region",
 )
+MOTHERDUCK_USER_INFO_REGION_COLUMNS = (*MOTHERDUCK_USER_INFO_COLUMNS, "region")
 MOTHERDUCK_LIST_DIVES_COLUMNS = (
     "id",
     "title",
@@ -33,6 +35,40 @@ MOTHERDUCK_ACCESS_TOKENS_COLUMNS = (
     "token_type",
     "created_ts",
     "expire_at",
+)
+MOTHERDUCK_GUIDE_COLUMNS = (
+    "id",
+    "topic",
+    "title",
+    "description",
+    "owner_id",
+    "owner_name",
+    "access",
+    "current_version",
+    "created_at",
+    "updated_at",
+)
+MOTHERDUCK_GUIDE_WRITE_COLUMNS = (
+    *MOTHERDUCK_GUIDE_COLUMNS,
+    "version_change_comment",
+    "version_external_id",
+    "version_created_at",
+    "references",
+)
+MOTHERDUCK_GUIDE_DETAIL_COLUMNS = (
+    *MOTHERDUCK_GUIDE_COLUMNS,
+    "version",
+    "version_change_comment",
+    "version_external_id",
+    "version_created_at",
+    "references",
+    "content",
+)
+MOTHERDUCK_GUIDE_VERSION_COLUMNS = (
+    "version",
+    "change_comment",
+    "external_id",
+    "created_at",
 )
 MOTHERDUCK_JOB_SUMMARY_COLUMNS = (
     "job_id",
@@ -165,6 +201,15 @@ __all__ = [
     "md_user_info",
     "md_list_dives",
     "md_access_tokens",
+    "md_list_guides",
+    "md_get_guide",
+    "md_create_guide",
+    "md_update_guide",
+    "md_update_guide_metadata",
+    "md_set_guide_access",
+    "md_list_guide_versions",
+    "md_delete_guide",
+    "prompt_jev",
     "md_create_flight",
     "md_list_flights",
     "md_flights",
@@ -274,6 +319,11 @@ def quack_query(
     **kwargs: Any,
 ) -> Any:
     return table_function("quack_query", uri, query, columns=columns, **kwargs)
+
+
+def prompt_jev(value: Any, instructions: Optional[Any] = None, **kwargs: Any) -> Any:
+    args = (value,) if instructions is None else (value, instructions)
+    return table_function("prompt_jev", *args, **kwargs)
 
 
 def _motherduck_metadata_function(
@@ -432,9 +482,14 @@ def _compatibility_subquery(
 
 
 def md_user_info(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    default_columns = (
+        MOTHERDUCK_USER_INFO_REGION_COLUMNS
+        if Version(duckdb_version) >= Version("1.5.3")
+        else MOTHERDUCK_USER_INFO_COLUMNS
+    )
     return _motherduck_metadata_function(
         "md_user_info",
-        MOTHERDUCK_USER_INFO_COLUMNS,
+        default_columns,
         columns=columns,
         **kwargs,
     )
@@ -455,6 +510,66 @@ def md_access_tokens(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) 
         MOTHERDUCK_ACCESS_TOKENS_COLUMNS,
         columns=columns,
         **kwargs,
+    )
+
+
+def md_list_guides(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    return _motherduck_metadata_function(
+        "md_list_guides", MOTHERDUCK_GUIDE_COLUMNS, columns=columns, **kwargs
+    )
+
+
+def md_get_guide(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    return _motherduck_metadata_function(
+        "md_get_guide", MOTHERDUCK_GUIDE_DETAIL_COLUMNS, columns=columns, **kwargs
+    )
+
+
+def md_create_guide(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    return _motherduck_metadata_function(
+        "md_create_guide", MOTHERDUCK_GUIDE_WRITE_COLUMNS, columns=columns, **kwargs
+    )
+
+
+def md_update_guide(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    return _motherduck_metadata_function(
+        "md_update_guide", MOTHERDUCK_GUIDE_WRITE_COLUMNS, columns=columns, **kwargs
+    )
+
+
+def md_update_guide_metadata(
+    *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+) -> Any:
+    return _motherduck_metadata_function(
+        "md_update_guide_metadata",
+        MOTHERDUCK_GUIDE_COLUMNS,
+        columns=columns,
+        **kwargs,
+    )
+
+
+def md_set_guide_access(
+    *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+) -> Any:
+    return _motherduck_metadata_function(
+        "md_set_guide_access", MOTHERDUCK_GUIDE_COLUMNS, columns=columns, **kwargs
+    )
+
+
+def md_list_guide_versions(
+    *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+) -> Any:
+    return _motherduck_metadata_function(
+        "md_list_guide_versions",
+        MOTHERDUCK_GUIDE_VERSION_COLUMNS,
+        columns=columns,
+        **kwargs,
+    )
+
+
+def md_delete_guide(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
+    return _motherduck_metadata_function(
+        "md_delete_guide", ("success",), columns=columns, **kwargs
     )
 
 
