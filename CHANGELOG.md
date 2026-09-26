@@ -10,7 +10,7 @@ preserved from the upstream project for historical context.
 
 ### Bug Fixes
 
-- preserve schema translation during bulk inserts by using SQLAlchemy's compiled executemany statement when a schema map is active
+- preserve schema translation during bulk inserts by using SQLAlchemy's compiled executemany statement when a schema map is active ([#172](https://github.com/leonardovida/duckdb-sqlalchemy/pull/172))
 
 ## [1.5.5.9](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.8...v1.5.5.9) (2026-09-24)
 
