@@ -1742,15 +1742,25 @@ class Dialect(PGDialect_psycopg2):
 
         view_name = f"__duckdb_sa_bulk_{uuid.uuid4().hex}"
         dbapi_conn = cursor.connection
-        dbapi_conn.register(view_name, data)
         preparer: Any = getattr(
             context, "identifier_preparer", self.identifier_preparer
         )
         target = preparer.format_table(table)
+        schema_translate_map = self._get_execution_options(context).get(
+            "schema_translate_map"
+        )
+        if schema_translate_map:
+            render_schema_translates = getattr(
+                preparer, "_render_schema_translates", None
+            )
+            if render_schema_translates is None:
+                return False
+            target = render_schema_translates(target, schema_translate_map)
         columns = ", ".join(preparer.quote(col) for col in column_names)
         insert_sql = (
             f"INSERT INTO {target} ({columns}) SELECT {columns} FROM {view_name}"
         )
+        dbapi_conn.register(view_name, data)
         try:
             cursor.execute(insert_sql)
         finally:

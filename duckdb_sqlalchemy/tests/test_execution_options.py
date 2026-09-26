@@ -1,5 +1,6 @@
 import importlib.util
 from collections import UserDict
+from typing import Any
 
 import pytest
 from sqlalchemy import (
@@ -15,7 +16,7 @@ from sqlalchemy import (
     text,
 )
 
-from duckdb_sqlalchemy import _build_bulk_insert_data
+from duckdb_sqlalchemy import ConnectionWrapper, _build_bulk_insert_data
 from duckdb_sqlalchemy._bulk_insert import infer_bulk_insert_column_keys
 
 
@@ -77,6 +78,46 @@ def test_bulk_insert_register_path_preserves_compiled_position_order() -> None:
         result = conn.execute(select(t.c.z_col, t.c.a_col, t.c.m_col)).fetchall()
 
     assert result == [("Z", "A", "M"), ("Z2", "A2", "M2")]
+
+
+@pytest.mark.parametrize("threshold", [0, 1])
+def test_bulk_insert_respects_schema_translation(
+    threshold: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registered_views: list[str] = []
+
+    def track_register(connection: ConnectionWrapper, name: str, data: Any) -> Any:
+        registered_views.append(name)
+        return connection.__getattr__("register")(name, data)
+
+    monkeypatch.setattr(ConnectionWrapper, "register", track_register, raising=False)
+    engine = create_engine("duckdb:///:memory:", use_insertmanyvalues=False)
+    table = Table(
+        "bulk_translate",
+        MetaData(),
+        Column("id", Integer),
+        schema="logical",
+    )
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("CREATE SCHEMA translated")
+            connection.exec_driver_sql(
+                "CREATE TABLE translated.bulk_translate(id INTEGER)"
+            )
+            translated = connection.execution_options(
+                schema_translate_map={"logical": "translated"},
+                duckdb_copy_threshold=threshold,
+            )
+            translated.execute(table.insert(), [{"id": 1}, {"id": 2}])
+            assert translated.execute(
+                select(table.c.id).order_by(table.c.id)
+            ).all() == [
+                (1,),
+                (2,),
+            ]
+            assert len(registered_views) == threshold
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.parametrize("threshold", [0, 1])

@@ -6,6 +6,12 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## [1.5.5.10](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.9...v1.5.5.10) (2026-09-26)
+
+### Bug Fixes
+
+- preserve schema translation during register-backed bulk inserts, retaining the optimized path for mapped schemas ([#172](https://github.com/leonardovida/duckdb-sqlalchemy/pull/172))
+
 ## [1.5.5.9](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.8...v1.5.5.9) (2026-09-24)
 
 ### Bug Fixes
