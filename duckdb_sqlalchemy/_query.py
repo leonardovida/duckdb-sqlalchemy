@@ -18,11 +18,12 @@ def coerce_query_value(value: Any) -> Any:
 
 
 def coerce_query_mapping(mapping: Mapping[str, Any]) -> Dict[str, Any]:
-    return {
-        key: value
-        for key, value in ((k, coerce_query_value(v)) for k, v in mapping.items())
-        if value is not None
-    }
+    coerced = {}
+    for key, value in mapping.items():
+        converted = coerce_query_value(value)
+        if converted is not None:
+            coerced[key] = converted
+    return coerced
 
 
 def merge_query_mappings(*mappings: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
