@@ -328,7 +328,9 @@ _NATIVE_RESULT_FETCH_METHODS = frozenset(
 class ConnectionWrapper:
     __c: duckdb.DuckDBPyConnection
     notices: List[str]
-    autocommit = None  # duckdb doesn't support setting autocommit
+    # True (isolation_level="AUTOCOMMIT") makes begin() a no-op, so DuckDB
+    # commits every statement on its own.
+    autocommit = False
     closed = False
 
     def __init__(self, c: duckdb.DuckDBPyConnection) -> None:
@@ -364,6 +366,10 @@ class ConnectionWrapper:
             pending._buffer_result()
 
     def begin(self) -> None:
+        if not self.autocommit:
+            self._begin()
+
+    def _begin(self) -> None:
         self._buffer_pending_result()
         self.__c.begin()
         self._transaction_statements = 0
@@ -512,7 +518,7 @@ class CursorWrapper:
                 self.__connection_wrapper.commit()
                 return
             elif _BEGIN_TRANSACTION_ISOLATION_RE.fullmatch(norm):
-                self.__connection_wrapper.begin()
+                self.__connection_wrapper._begin()
                 return
             self.__connection_wrapper._count_statement()
             if _SET_TRANSACTION_ISOLATION_RE.fullmatch(norm):
@@ -1038,8 +1044,26 @@ class Dialect(PGDialect_psycopg2):
     def _get_server_version_info(self, connection: "Connection") -> Tuple[int, int]:
         return (8, 0)
 
-    def get_default_isolation_level(self, dbapi_conn):
-        raise NotImplementedError()
+    # DuckDB has a single transaction mode (snapshot isolation). It is reported
+    # as READ COMMITTED, like the "show transaction isolation level" emulation,
+    # so PostgreSQL-oriented tools keep working. AUTOCOMMIT skips BEGIN so that
+    # every statement commits on its own.
+    _transaction_isolation_level = "READ COMMITTED"
+
+    def get_isolation_level_values(self, dbapi_conn: Any) -> List[str]:
+        return ["AUTOCOMMIT", self._transaction_isolation_level]
+
+    def get_default_isolation_level(self, dbapi_conn: Any) -> str:
+        # a constant, so connecting does not probe the isolation level
+        return self._transaction_isolation_level
+
+    def get_isolation_level(self, dbapi_connection: Any) -> str:
+        if getattr(dbapi_connection, "autocommit", False):
+            return "AUTOCOMMIT"
+        return self._transaction_isolation_level
+
+    def set_isolation_level(self, dbapi_connection: Any, level: str) -> None:
+        dbapi_connection.autocommit = level == "AUTOCOMMIT"
 
     def do_rollback(self, dbapi_connection: Any) -> None:
         try:

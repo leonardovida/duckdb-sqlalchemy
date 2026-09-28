@@ -1399,9 +1399,9 @@ def test_cursorwrapper_execute_postgres_compatibility_statements() -> None:
     ]
 
 
-def test_get_default_isolation_level_is_not_implemented() -> None:
-    with pytest.raises(NotImplementedError):
-        Dialect().get_default_isolation_level(object())
+def test_get_default_isolation_level_does_not_query_connection() -> None:
+    # a constant, so it works without a usable DBAPI connection
+    assert Dialect().get_default_isolation_level(object()) == "READ COMMITTED"
 
 
 def test_engine_connect_does_not_probe_isolation_level(

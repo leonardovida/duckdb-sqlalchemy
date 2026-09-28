@@ -444,3 +444,39 @@ def test_bulk_insert_dataframe_fallback_keeps_nullable_big_ints() -> None:
     assert str(frame["value"].dtype) == "Int64"
     assert frame["value"][0] == big
     assert frame["value"][1] is pd.NA
+
+
+def _committed_rows(path: Any) -> int:
+    with duckdb.connect(str(path)) as other:
+        return other.execute("SELECT count(*) FROM log").fetchone()[0]
+
+
+def test_engine_autocommit_commits_each_statement(tmp_path: Any) -> None:
+    path = tmp_path / "autocommit.duckdb"
+    engine = create_engine(f"duckdb:///{path}", isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        assert conn.get_isolation_level() == "AUTOCOMMIT"
+        conn.execute(text("CREATE TABLE log (i INTEGER)"))
+        conn.execute(text("INSERT INTO log VALUES (1)"))
+        conn.rollback()  # nothing to roll back: the INSERT is already committed
+    engine.dispose()
+    assert _committed_rows(path) == 1
+
+
+def test_connection_autocommit_is_reset_on_return_to_pool(engine: Engine) -> None:
+    with engine.connect() as conn:
+        autocommit = conn.execution_options(isolation_level="AUTOCOMMIT")
+        assert autocommit.get_isolation_level() == "AUTOCOMMIT"
+        autocommit.execute(text("CREATE TABLE log (i INTEGER)"))
+        autocommit.execute(text("INSERT INTO log VALUES (1)"))
+    with engine.connect() as conn:
+        assert conn.get_isolation_level() == "READ COMMITTED"
+        conn.execute(text("INSERT INTO log VALUES (2)"))
+        conn.rollback()
+        assert conn.execute(text("SELECT count(*) FROM log")).scalar_one() == 1
+
+
+def test_unsupported_isolation_level_raises_argument_error() -> None:
+    engine = create_engine("duckdb:///:memory:", isolation_level="SERIALIZABLE")
+    with pytest.raises(sa_exc.ArgumentError, match="AUTOCOMMIT"):
+        engine.connect()
