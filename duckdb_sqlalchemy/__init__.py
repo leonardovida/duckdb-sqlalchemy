@@ -1297,6 +1297,10 @@ class Dialect(PGDialect_psycopg2):
         schema: Optional[str],
         **kw: Any,
     ) -> List[Any]:
+        # PostgreSQL's pg_catalog queries do not scope by database, so check
+        # existence with the dialect's own scoping first.
+        if not self._duckdb_relation_exists(connection, table_name, schema):
+            raise NoSuchTableError(table_name)
         return self._get_reflection_or_empty_for_existing_table(
             lambda: getter(connection, table_name, schema=schema, **kw),
             connection,
