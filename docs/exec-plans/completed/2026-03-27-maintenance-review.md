@@ -50,4 +50,5 @@ Validation
 
 Outcomes & Retrospective
 
-- In progress.
+- Completed. The TTL deprecation warning shipped in `motherduck.py`; plan moved to
+  `completed/` during the 2026-09-28 repo audit.

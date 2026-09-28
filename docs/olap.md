@@ -310,7 +310,8 @@ with `duckdb_copy_threshold`:
 
 ```python
 rows = [{"event_id": 1, "ts": "2024-01-01"}, {"event_id": 2, "ts": "2024-01-02"}]
-with engine.connect().execution_options(duckdb_copy_threshold=10000) as conn:
+with engine.begin() as conn:
+    conn.execution_options(duckdb_copy_threshold=10000)
     conn.execute(events.insert(), rows)
 ```
 
@@ -408,6 +409,7 @@ from duckdb_sqlalchemy import copy_to_parquet, read_parquet
 
 # Choose a new directory for each snapshot.
 destination = Path("snapshots/events-2026-09-21")
+destination.parent.mkdir(parents=True, exist_ok=True)
 query = select(events.c.event_id, events.c.region).where(
     events.c.event_id >= bindparam("minimum_id")
 )
@@ -490,7 +492,3 @@ conn.execute(
 )
 rows = conn.execute(text("SELECT * FROM remote_db.events LIMIT 10")).fetchall()
 ```
-
-## Notes
-
-- Column naming for table functions requires SQLAlchemy >= 1.4 (uses `table_valued`).

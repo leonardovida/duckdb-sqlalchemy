@@ -19,6 +19,10 @@ Use an ExecPlan for work that spans multiple steps, files, or validation loops.
 - Record changes in assumptions, regressions, or new findings as they appear.
 - Prefer small, direct steps that can be validated independently.
 - Close the plan with the final validation outcome and any follow-up work.
+- Keep in-flight plans in `docs/exec-plans/active/` and move them to
+  `docs/exec-plans/completed/` once the work lands.
+- Plans are internal: `docs/_config.yml` excludes `exec-plans/` from the
+  published Pages site.
 
 ## When To Use
 

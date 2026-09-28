@@ -5,6 +5,9 @@ title: Pandas and Jupyter
 
 # Pandas and Jupyter
 
+These examples require pandas 2.2 or newer. Older pandas releases do not
+support SQLAlchemy 2.x engines.
+
 ## Register a DataFrame
 
 DuckDB can query a pandas DataFrame by registering it as a view.
@@ -14,20 +17,17 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 
 engine = create_engine("duckdb:///:memory:")
-conn = engine.connect()
-
 df = pd.DataFrame({"id": [1, 2], "name": ["Ada", "Grace"]})
 
-conn.execute(text("register(:name, :df)"), {"name": "people", "df": df})
-
-rows = conn.execute(text("select * from people")).fetchall()
+with engine.connect() as conn:
+    conn.execute(text("register(:name, :df)"), {"name": "people", "df": df})
+    rows = conn.execute(text("select * from people")).fetchall()
 ```
 
-For SQLAlchemy 2.x style usage:
+Registration lasts for the lifetime of the DuckDB connection. Inside a
+transaction block:
 
 ```python
-from sqlalchemy import text
-
 with engine.begin() as conn:
     conn.execute(text("register(:name, :df)"), {"name": "people", "df": df})
     rows = conn.execute(text("select * from people")).fetchall()
@@ -47,11 +47,14 @@ pd.DataFrame({"a": [1, 2]}).to_sql("t", engine, index=False, if_exists="replace"
 result = pd.read_sql("select * from t", engine)
 ```
 
-Parameters are supported:
+Parameters are supported. Wrap the SQL in `text()` so SQLAlchemy binds the
+named parameters:
 
 ```python
+from sqlalchemy import text
+
 result = pd.read_sql_query(
-    "select * from t where a >= :min_a",
+    text("select * from t where a >= :min_a"),
     engine,
     params={"min_a": 1},
 )
