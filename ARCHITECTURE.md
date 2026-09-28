@@ -20,8 +20,8 @@ boundaries:
 - Keep URL query handling explicit: MotherDuck routing parameters must stay in
   the database string, while DuckDB config parameters remain in `query`.
 - Validate identifiers before rendering SQL fragments.
-- Preserve SQLAlchemy compatibility across the supported 1.3, 1.4, and 2.x
-  lines without breaking older supported DuckDB releases.
+- Preserve compatibility with the supported SQLAlchemy 2.0 and 2.1 lines
+  without breaking the DuckDB releases tested in `noxfile.py`.
 - Prefer small wrappers and targeted helpers over broad abstractions.
 
 ## Operational Notes

@@ -1,24 +1,27 @@
 Project: duckdb-sqlalchemy
-Summary: DuckDB SQLAlchemy dialect for DuckDB and MotherDuck. Supports SQLAlchemy Core and ORM APIs with pooling defaults, type mappings, and bulk insert helpers.
+Summary: DuckDB SQLAlchemy dialect for DuckDB and MotherDuck. Supports SQLAlchemy Core and ORM APIs with pooling defaults, type mappings, COPY helpers, and MotherDuck connection helpers.
 
 Key entry points:
 - sqlalchemy.create_engine("duckdb://...")
 - duckdb_sqlalchemy.URL and duckdb_sqlalchemy.MotherDuckURL
-- duckdb_sqlalchemy.create_motherduck_engine
-- duckdb_sqlalchemy.olap helpers (read_parquet, read_csv_auto, table_function)
+- duckdb_sqlalchemy.create_motherduck_engine and create_engine_from_paths
+- duckdb_sqlalchemy table functions (read_parquet, read_csv, table_function)
+- duckdb_sqlalchemy COPY helpers (copy_from_parquet, copy_from_csv, copy_from_rows, copy_to_parquet)
+- duckdb_sqlalchemy.checkpoint
 
-Docs:
-- docs/README.md (index)
-- docs/connection-urls.md
-- docs/motherduck.md
-- docs/configuration.md
-- docs/olap.md
-- docs/pandas-jupyter.md
-- docs/types-and-caveats.md
-- docs/alembic.md
-- docs/migration-from-duckdb-engine.md
+Docs (https://leonardovida.github.io/duckdb-sqlalchemy/):
+- getting-started.html
+- overview.html
+- connection-urls.html
+- motherduck.html
+- configuration.html
+- olap.html
+- pandas-jupyter.html
+- types-and-caveats.html
+- alembic.html
+- migration-from-duckdb-engine.html
 
 Compatibility:
-- Python 3.9+
-- SQLAlchemy 2.0.0+ on Python <3.14; 2.0.45+ on Python 3.14+
-- DuckDB 1.3.0+ (1.4.4 recommended)
+- Python 3.10+
+- SQLAlchemy 2.0.0+ on Python <3.14; 2.0.45+ on Python 3.14+; SQLAlchemy 2.1 requires Python 3.11+
+- DuckDB 1.3.0+

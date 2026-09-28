@@ -1,17 +1,18 @@
 name: Python application
 
 on:
+  push:
+    branches: [main]
   pull_request:
-    paths:
-      - "duckdb_sqlalchemy/**"
-      - "examples/**"
-      - "pyproject.toml"
-      - "noxfile.py"
-      - "test.cfg"
-      - ".github/workflows/pythonapp.yaml"
   workflow_dispatch:
+
 permissions:
+  contents: read
   checks: write
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build_backend:
@@ -27,6 +28,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Remove cached duckdb extensions
         run: rm -rf ~/.duckdb
       - name: Set up Python
@@ -49,8 +52,6 @@ jobs:
             --verbose \
             -rs \
             --remote-data
-        env:
-          SQLALCHEMY_WARN_20: "true"
       - name: Publish Unit Test Results
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
@@ -58,7 +59,7 @@ jobs:
           files: results.xml
           comment_mode: off
           check_name:  "Test Results - python=${{ matrix.python }}"
-      - uses: codecov/codecov-action@v7.0.0
+      - uses: codecov/codecov-action@v7.1.1
         env:
           PYTHON: ${{matrix.python}}
         with:
@@ -69,11 +70,32 @@ jobs:
           use_pypi: true
           verbose: true
 
+  minimum_versions:
+    # Keep in sync with the dependency floors in pyproject.toml.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - name: Install minimum supported versions
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install "SQLAlchemy==2.0.0" "duckdb==1.3.0"
+      - name: Run tests
+        run: pytest -q -rs
+
   sqlalchemy_prerelease:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
@@ -82,7 +104,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-          python -m pip install SQLAlchemy==2.1.0b3
+          python -m pip install --pre --upgrade SQLAlchemy
       - name: Run SQLAlchemy prerelease tests
         run: pytest -q
 
@@ -91,6 +113,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
@@ -102,3 +126,20 @@ jobs:
           python -m pip install --pre --upgrade duckdb
       - name: Run DuckDB prerelease tests
         run: pytest -q
+
+  tests_passed:
+    # Single status check to require in branch rules.
+    if: always()
+    needs: [build_backend, minimum_versions, sqlalchemy_prerelease, duckdb_prerelease]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check job results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              exit 1
+            fi
+          done

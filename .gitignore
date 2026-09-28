@@ -18,6 +18,7 @@ kodiak/
 .vscode
 results.xml
 .venv/
+.venv*/
 venv/
 
 

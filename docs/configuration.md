@@ -51,7 +51,8 @@ engine = create_engine("duckdb:///analytics.db", connect_args={"read_only": True
   DuckDB's native "unrecognized configuration parameter" error.
 - MotherDuck path-query options (`attach_mode`, `session_name`, `access_mode`,
   `motherduck_enable_server_side_temp_tables`, and related keys) are handled
-  specially for `md:` URLs. See
+  specially for `md:`/`motherduck:` URLs, where they move into the database
+  string. For local files they are ordinary DuckDB config. See
   [motherduck.md](motherduck) and [connection-urls.md](connection-urls).
 
 ## Preload extensions
@@ -89,8 +90,9 @@ engine = create_engine(
 
 ## Pool defaults and concurrency
 
-- Exact `:memory:` uses `SingletonThreadPool`.
-- Named in-memory URLs such as `:memory:analytics` and empty database URLs (`duckdb://`) use `QueuePool` for compatibility with `duckdb_engine`.
+- Exact `:memory:` and empty database URLs (`duckdb://`) use `SingletonThreadPool`,
+  so every connection sees the same in-memory database.
+- Named in-memory URLs such as `:memory:analytics` use `QueuePool`.
 - Local file paths also use `QueuePool` so ORM and `Session` workloads can reuse a live DuckDB connection.
 - MotherDuck defaults to `NullPool` to avoid keeping cloud sessions open unless you opt into pooling.
 
@@ -105,7 +107,9 @@ engine = create_engine("duckdb:///analytics.db", poolclass=NullPool)
 
 You can also switch the dialect default pool class via URL or env var:
 
-- URL: `duckdb_sqlalchemy_pool=queue` (alias: `pool=queue`)
+- URL: `duckdb_sqlalchemy_pool=queue` (alias: `pool=queue`). Values: `queue`,
+  `null`, `singleton` and their `queuepool`, `nullpool`, `singletonthreadpool`
+  spellings.
 - Env: `DUCKDB_SQLALCHEMY_POOL=queue`
 
 For long-lived MotherDuck pools, set `pool_pre_ping=True` and consider

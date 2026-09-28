@@ -14,7 +14,7 @@ from typing import (
     Type,
     Union,
 )
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode
 
 import sqlalchemy
 from sqlalchemy import create_engine
@@ -88,8 +88,52 @@ MOTHERDUCK_CONFIG_KEYS = MOTHERDUCK_PATH_QUERY_KEYS | {
     OAUTH_TOKEN_ALIAS_KEY,
 }
 
+MOTHERDUCK_CREDENTIAL_KEYS = frozenset(
+    {
+        TOKEN_ALIAS_KEY,
+        "motherduck_token",
+        MOTHERDUCK_OAUTH_TOKEN_KEY,
+        OAUTH_TOKEN_ALIAS_KEY,
+        SHORT_LIVED_TOKEN_KEY,
+    }
+)
+
 DIALECT_QUERY_KEYS = {"duckdb_sqlalchemy_pool", "pool"}
 CONNECT_ARG_MAPPING_KEYS = ("config", "url_config")
+
+# ``sqlalchemy.create_engine`` keyword arguments that ``create_motherduck_engine``
+# forwards to the engine instead of treating them as DuckDB/MotherDuck config.
+CREATE_ENGINE_KWARGS = frozenset(
+    {
+        "creator",
+        "echo",
+        "echo_pool",
+        "enable_from_linting",
+        "execution_options",
+        "hide_parameters",
+        "insertmanyvalues_page_size",
+        "isolation_level",
+        "json_deserializer",
+        "json_serializer",
+        "label_length",
+        "logging_name",
+        "max_identifier_length",
+        "max_overflow",
+        "paramstyle",
+        "plugins",
+        "pool_logging_name",
+        "pool_reset_on_return",
+        "pool_size",
+        "pool_timeout",
+        "pool_use_lifo",
+        "query_cache_size",
+        "use_insertmanyvalues",
+    }
+)
+# Arguments only ``QueuePool`` accepts; passing them implies pooling.
+QUEUE_POOL_KWARGS = frozenset(
+    {"pool_size", "max_overflow", "pool_timeout", "pool_use_lifo"}
+)
 
 
 def _warn_deprecated_ttl_alias() -> None:
@@ -220,16 +264,48 @@ def extract_path_query_from_config(config: Dict[str, Any]) -> Dict[str, Any]:
     return path_query
 
 
+def is_motherduck_database(database: Optional[str]) -> bool:
+    """Return True when ``database`` targets MotherDuck (``md:``/``motherduck:``)."""
+    if not database:
+        return False
+    return database.lower().startswith(MOTHERDUCK_DATABASE_PREFIXES)
+
+
+def _database_query_keys(database: Optional[str]) -> Collection[str]:
+    if not database or "?" not in database:
+        return ()
+    _, _, query_string = database.partition("?")
+    return {key for key, _ in parse_qsl(query_string, keep_blank_values=True)}
+
+
+def has_explicit_motherduck_credential(
+    database: Optional[str], config: Mapping[str, Any]
+) -> bool:
+    """Return True when a token/credential is set in ``config`` or ``database``."""
+    if any(key in config for key in MOTHERDUCK_CREDENTIAL_KEYS):
+        return True
+    return any(
+        key in MOTHERDUCK_CREDENTIAL_KEYS for key in _database_query_keys(database)
+    )
+
+
 def append_query_to_database(
     database: Optional[str], query: Dict[str, Any]
 ) -> Optional[str]:
     if not query:
         return database
-    query_string = urlencode(query, doseq=True)
     if database is None:
-        return f"?{query_string}"
-    separator = "&" if "?" in database else "?"
-    return f"{database}{separator}{query_string}"
+        return f"?{urlencode(query, doseq=True)}"
+    base, separator, existing = database.partition("?")
+    if not separator:
+        return f"{database}?{urlencode(query, doseq=True)}"
+    merged: Dict[str, Any] = {}
+    for key, value in parse_qsl(existing, keep_blank_values=True):
+        if key in query:
+            continue
+        merged.setdefault(key, []).append(value)
+    merged.update(query)
+    return f"{base}?{urlencode(merged, doseq=True)}"
 
 
 def _database_with_path_query(
@@ -239,15 +315,42 @@ def _database_with_path_query(
     return append_query_to_database(database, _normalize_path_query_mapping(*mappings))
 
 
+def split_database_and_url_config(
+    database: Optional[str], query: Mapping[str, Any]
+) -> Tuple[Optional[str], Dict[str, Any]]:
+    """
+    Split URL query params into the database string and DuckDB config.
+
+    MotherDuck path params (``attach_mode``, ``session_name``, ...) are only
+    moved into the database string for ``md:``/``motherduck:`` databases. For
+    local files and ``:memory:`` every param stays DuckDB config, so
+    ``access_mode=read_only`` opens the file read-only instead of becoming part
+    of the file name.
+    """
+
+    if not is_motherduck_database(database):
+        config = {k: v for k, v in query.items() if k not in DIALECT_QUERY_KEYS}
+        return database, config
+    path_query, config = split_url_query(dict(query))
+    return _database_with_path_query(database, path_query), config
+
+
+def move_path_query_to_database(
+    database: Optional[str], config: Dict[str, Any]
+) -> Optional[str]:
+    """Move MotherDuck path params from ``config`` into an ``md:`` database."""
+    if not is_motherduck_database(database):
+        return database
+    path_query = extract_path_query_from_config(config)
+    return _database_with_path_query(database, path_query)
+
+
 def validate_motherduck_database_name(database: Optional[str]) -> None:
-    if database is None:
+    if database is None or not is_motherduck_database(database):
         return
-    for prefix in MOTHERDUCK_DATABASE_PREFIXES:
-        if database.startswith(prefix):
-            database_name = database.split("?", 1)[0][len(prefix) :]
-            if "," in database_name:
-                raise ValueError("MotherDuck database names cannot contain commas")
-            return
+    database_name = database.split("?", 1)[0].split(":", 1)[1]
+    if "," in database_name:
+        raise ValueError("MotherDuck database names cannot contain commas")
 
 
 def MotherDuckURL(
@@ -258,15 +361,35 @@ def MotherDuckURL(
     **kwargs: Any,
 ) -> SAURL:
     """
-    Build a SQLAlchemy URL for MotherDuck, ensuring routing/cache parameters
-    live in the database string.
+    Build a SQLAlchemy URL for MotherDuck.
+
+    Routing/cache parameters (``attach_mode``, ``session_name``, ...) are kept
+    in ``URL.query`` so ``str(url)`` round-trips through ``make_url``; the
+    dialect moves them into the MotherDuck database string when connecting.
+    A query string embedded in ``database`` is treated the same way, with
+    explicit ``query``/``path_query``/keyword params taking precedence.
     """
 
+    database_name, separator, embedded = database.partition("?")
+    validate_motherduck_database_name(database_name)
+    embedded_query: Dict[str, Any] = {}
+    if separator:
+        for key, value in parse_qsl(embedded, keep_blank_values=True):
+            embedded_query.setdefault(key, []).append(value)
+        embedded_query = {
+            key: values[0] if len(values) == 1 else tuple(values)
+            for key, values in embedded_query.items()
+        }
+    embedded_path, embedded_config = _partition_query(embedded_query)
+    query_path, query_config = _partition_query(query or {})
     path_kwargs, config_kwargs = _partition_query(kwargs)
-    config_params = merge_query_mappings(query, config_kwargs)
-
-    database_with_query = _database_with_path_query(database, path_query, path_kwargs)
-    return SAURL.create("duckdb", database=database_with_query, query=config_params)
+    config_params = merge_query_mappings(embedded_config, query_config, config_kwargs)
+    path_params = _normalize_path_query_mapping(
+        embedded_path, query_path, path_query, path_kwargs
+    )
+    return SAURL.create(
+        "duckdb", database=database_name, query={**config_params, **path_params}
+    )
 
 
 def stable_session_name(
@@ -298,6 +421,13 @@ def stable_session_hint(
     return stable_session_name(value, salt=salt, length=length)
 
 
+def _default_to_queue_pool(engine_kwargs: Dict[str, Any]) -> None:
+    if "poolclass" in engine_kwargs or "pool" in engine_kwargs:
+        return
+    if any(key in engine_kwargs for key in QUEUE_POOL_KWARGS):
+        engine_kwargs["poolclass"] = QueuePool
+
+
 def create_motherduck_engine(
     *,
     database: str,
@@ -309,9 +439,23 @@ def create_motherduck_engine(
     pool_recycle: Optional[int] = None,
     **path_params: Any,
 ) -> sqlalchemy.engine.Engine:
+    """
+    Create an engine for a MotherDuck database.
+
+    Extra keyword arguments are MotherDuck path params or DuckDB config, except
+    for known ``sqlalchemy.create_engine`` arguments (``pool_size``,
+    ``max_overflow``, ``echo``, ``execution_options``, ...), which are passed
+    to ``create_engine``. Pool sizing arguments without an explicit
+    ``poolclass`` select ``QueuePool``.
+    """
+
+    engine_kwargs: Dict[str, Any] = {
+        key: path_params.pop(key)
+        for key in list(path_params)
+        if key in CREATE_ENGINE_KWARGS
+    }
     url = MotherDuckURL(database=database, query=query, **path_params)
 
-    engine_kwargs: Dict[str, Any] = {}
     if poolclass is not None:
         engine_kwargs["poolclass"] = poolclass
     if pool_pre_ping is not None:
@@ -323,6 +467,7 @@ def create_motherduck_engine(
         engine_kwargs.setdefault("poolclass", QueuePool)
         engine_kwargs.setdefault("pool_pre_ping", True)
         engine_kwargs.setdefault("pool_recycle", 23 * 3600)
+    _default_to_queue_pool(engine_kwargs)
 
     return create_engine(url, connect_args=dict(connect_args or {}), **engine_kwargs)
 
@@ -387,4 +532,5 @@ def create_engine_from_paths(
         params = _copy_connect_params(next(params_cycle))
         return dialect.connect(**params)
 
+    _default_to_queue_pool(engine_kwargs)
     return create_engine(urls[0], creator=creator, **engine_kwargs)

@@ -26,7 +26,8 @@ def test_url_helper_round_trip() -> None:
     assert url.database == ":memory:"
     assert str(url.query["read_only"]).lower() == "true"
 
-    base = make_url(database=":memory:")
+    with pytest.warns(DeprecationWarning, match="make_url"):
+        base = make_url(database=":memory:")
     rendered = base.render_as_string(hide_password=False)
     assert rendered.startswith("duckdb:///")
 

@@ -56,4 +56,5 @@ Validation
 
 Outcomes & Retrospective
 
-- In progress.
+- Completed. Superseded by the 2026-03-31 review and later `ty` bumps; plan moved
+  to `completed/` during the 2026-09-28 repo audit.

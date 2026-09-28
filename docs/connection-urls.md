@@ -49,7 +49,9 @@ duckdb:///analytics.db?duckdb_sqlalchemy_pool=queue
 duckdb:///analytics.db?pool=queue
 ```
 
-Supported values: `queue`, `null`, `singleton` (`singletonthreadpool`).
+Supported values: `queue` (`queuepool`), `null` (`nullpool`), `singleton`
+(`singletonthreadpool`). Unknown values emit a `DuckDBEngineWarning` and fall
+back to the default pool class.
 
 ## URL helper
 
@@ -65,8 +67,11 @@ engine = create_engine(url)
 
 ## MotherDuck URL helper
 
-Use `MotherDuckURL` when you want routing/instance-cache params to live in the
-database path and config params in the regular URL query:
+Use `MotherDuckURL` to build MotherDuck URLs with validated routing and
+instance-cache params. All params are kept in the URL query, so `str(url)`
+round-trips through `sqlalchemy.engine.make_url`; at connect time the dialect
+moves routing params into the `md:` database string and applies the rest as
+DuckDB config:
 
 ```python
 from sqlalchemy import create_engine
@@ -115,10 +120,19 @@ normally used from SQL with `ATTACH 'quack:host' AS name (...)` or the
 `quack_query` table function; keep the SQLAlchemy engine connected to a local
 DuckDB database and attach the remote from that session.
 
+Routing params are only moved into the database string for `md:` and
+`motherduck:` databases. For local files and `:memory:`, keys such as
+`access_mode` stay DuckDB config, so `duckdb:///analytics.db?access_mode=read_only`
+opens the existing file read-only.
+
+`duckdb_sqlalchemy.make_url` is deprecated. Use `URL` to build URLs, or
+`sqlalchemy.engine.make_url` to parse URL strings.
+
 See [olap.md](olap) for `quack_query` and `ATTACH` examples.
 
 ## Pool defaults
 
 Pooling behavior is described in [configuration.md](configuration)
-(QueuePool for local files, NullPool for MotherDuck, SingletonThreadPool for `:memory:`) and can be
+(QueuePool for local files, NullPool for MotherDuck, SingletonThreadPool for `:memory:` and empty
+`duckdb://` URLs) and can be
 overridden with `poolclass`.

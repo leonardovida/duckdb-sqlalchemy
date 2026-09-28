@@ -1,27 +1,32 @@
+import os
 from contextlib import contextmanager
 from typing import Generator
 
-import github_action_utils as gha
 import nox
 
 nox.options.default_venv_backend = "uv"
 nox.options.error_on_external_run = True
+nox.options.sessions = ["ty"]
+
+_IN_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
 
 
 @contextmanager
 def group(title: str) -> Generator[None, None, None]:
+    if not _IN_GITHUB_ACTIONS:
+        yield
+        return
+    print(f"::group::{title}", flush=True)
     try:
-        gha.start_group(title)
         yield
     except Exception as e:
-        gha.end_group()
-        gha.error(f"{title} failed with {e}")
+        print("::endgroup::", flush=True)
+        print(f"::error::{title} failed with {e}", flush=True)
         raise
     else:
-        gha.end_group()
+        print("::endgroup::", flush=True)
 
 
-# TODO: "0.5.1", "0.6.1", "0.7.1", "0.8.1"
 @nox.session(py=["3.10", "3.11", "3.12", "3.13", "3.14"])
 # Keep the matrix aligned with the active DuckDB and SQLAlchemy release lines we validate.
 @nox.parametrize(
@@ -43,18 +48,18 @@ def group(title: str) -> Generator[None, None, None]:
         "1.5.5",
     ],
 )
-@nox.parametrize("sqlalchemy", ["2.0.0", "2.0.52", "2.1.0rc2"])
+@nox.parametrize("sqlalchemy", ["2.0.0", "2.0.52", "2.1.1"])
 def tests(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
     if session.python == "3.14" and sqlalchemy == "2.0.0":
         session.skip("SQLAlchemy 2.0.0 is not compatible with Python 3.14")
-    if session.python == "3.10" and sqlalchemy == "2.1.0rc2":
-        session.skip("SQLAlchemy 2.1.0rc2 requires Python 3.11 or newer")
+    if session.python == "3.10" and sqlalchemy.startswith("2.1"):
+        session.skip("SQLAlchemy 2.1 requires Python 3.11 or newer")
     tests_core(session, duckdb, sqlalchemy)
 
 
 @nox.session(py=["3.11"])
 def nightly(session: nox.Session) -> None:
-    tests_core(session, "master", "2.1.0rc2", remote_data=False)
+    tests_core(session, "master", "2.1.1", remote_data=False)
 
 
 def tests_core(
@@ -84,12 +89,7 @@ def tests_core(
         ]
         if remote_data:
             pytest_args.append("--remote-data")
-        session.run(
-            *pytest_args,
-            env={
-                "SQLALCHEMY_WARN_20": "true",
-            },
-        )
+        session.run(*pytest_args)
 
 
 @nox.session(py=["3.11"])
@@ -98,8 +98,6 @@ def ty(session: nox.Session) -> None:
     session.run(
         "ty",
         "check",
-        "--ignore",
-        "unresolved-import",
         "--exclude",
         "duckdb_sqlalchemy/tests/**",
         "duckdb_sqlalchemy/",

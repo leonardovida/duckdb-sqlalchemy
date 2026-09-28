@@ -4,3 +4,7 @@ theme: jekyll-theme-cayman
 plugins:
   - jekyll-seo-tag
   - jekyll-sitemap
+exclude:
+  - README.md
+  - exec-plans/
+  - seo-checklist.md

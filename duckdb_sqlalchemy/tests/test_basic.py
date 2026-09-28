@@ -34,7 +34,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects import registry
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.reflection import Inspector
-from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy.exc import DBAPIError, NoSuchTableError, OperationalError
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 from sqlalchemy.pool import QueuePool, SingletonThreadPool
 from sqlalchemy.schema import CreateTable
@@ -252,10 +252,16 @@ def test_get_table_names(inspector: Inspector, session: Session) -> None:
         for _table_name in _table_names:
             assert inspector.has_table(_table_name, schema)
 
+    # Without a schema, reflection covers the default (current) schema only,
+    # like PostgreSQL: tables in other schemas or attached databases are not
+    # reachable unqualified and must not look like they exist there.
     table_names_all = inspector.get_table_names()
-    assert set(table_names_all).issuperset({"t1", "t2", "t3", "t4"})
+    assert set(table_names_all).issuperset({"test", "t3"})
+    assert set(table_names_all).isdisjoint({"t1", "t2", "t4"})
     for table_name in table_names_all:
         assert inspector.has_table(table_name)
+    for table_name in ("t1", "t2", "t4"):
+        assert not inspector.has_table(table_name)
 
 
 def test_get_views(conn: Connection, dialect: Dialect) -> None:
@@ -321,14 +327,16 @@ def test_get_columns(inspector: Inspector, session: Session) -> None:
     assert len(cols) == 1
     assert cols[0]["name"] == "id"
     assert inspector.has_table("t1", '"daffy duck"."quack quack"')
-    cols1 = inspector.get_columns("t1", None)
+    # t1 lives only in an attached database, so it is not in the default schema.
+    with raises(NoSuchTableError):
+        inspector.get_columns("t1", None)
     cols2 = inspector.get_columns("t1", '"daffy duck"."quack quack"')
     cols3 = inspector.get_columns("t1", "daffy duck.quack quack")
-    assert len(cols1) == 2
-    assert cols1[0]["name"] == "i"
-    assert cols1[1]["name"] == "j"
-    assert cols1[0]["name"] == cols2[0]["name"] == cols3[0]["name"]
-    assert cols1[1]["name"] == cols2[1]["name"] == cols3[1]["name"]
+    assert len(cols2) == 2
+    assert cols2[0]["name"] == "i"
+    assert cols2[1]["name"] == "j"
+    assert cols2[0]["name"] == cols3[0]["name"]
+    assert cols2[1]["name"] == cols3[1]["name"]
 
 
 def test_unqualified_reflection_prefers_visible_duplicate_table(engine: Engine) -> None:
@@ -658,7 +666,7 @@ def test_pool_defaults_for_memory_and_file_urls(tmp_path: Path) -> None:
 
     assert isinstance(exact_memory.pool, SingletonThreadPool)
     assert isinstance(named_memory.pool, QueuePool)
-    assert isinstance(empty_database.pool, QueuePool)
+    assert isinstance(empty_database.pool, SingletonThreadPool)
     assert isinstance(file_database.pool, QueuePool)
 
 
@@ -764,9 +772,10 @@ def test_with_cache(tmp_path: Path) -> None:
 
 
 def test_no_cache(tmp_path: Path) -> None:
-    tmp_db_path = str(tmp_path / "db_no_cache")
-    engine1 = create_engine(f"duckdb:///{tmp_db_path}?threads=1&user=1")
-    engine2 = create_engine(f"duckdb:///{tmp_db_path}?threads=2&user=2")
+    # DuckDB refuses to open one file twice with different configs, so use
+    # separate in-memory databases to check per-engine config is not cached.
+    engine1 = create_engine("duckdb:///:memory:?threads=1&user=1")
+    engine2 = create_engine("duckdb:///:memory:?threads=2&user=2")
     with engine1.connect() as conn1:
         with engine2.connect() as conn2:
             res1 = conn1.execute(

@@ -1,3 +1,4 @@
+import warnings
 from typing import Any, Mapping, Optional
 
 from sqlalchemy.engine import URL as SAURL
@@ -30,4 +31,18 @@ def make_url(
     query: Optional[Mapping[str, Any]] = None,
     **kwargs: Any,
 ) -> SAURL:
+    """
+    Deprecated alias of :func:`URL`.
+
+    It shadows ``sqlalchemy.engine.make_url`` with an incompatible signature.
+    Use ``duckdb_sqlalchemy.URL`` to build URLs, or ``sqlalchemy.engine.make_url``
+    to parse URL strings.
+    """
+
+    warnings.warn(
+        "`duckdb_sqlalchemy.make_url` is deprecated; use `duckdb_sqlalchemy.URL` "
+        "to build URLs, or `sqlalchemy.engine.make_url` to parse URL strings.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return URL(database=database, query=query, **kwargs)

@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import os
+import warnings
 from typing import Any, Mapping, Optional
 
 from sqlalchemy import pool
 from sqlalchemy.engine.url import URL as SAURL
 
-from .motherduck import MOTHERDUCK_CONFIG_KEYS
+from .motherduck import is_motherduck_database
 
 _POOL_CLASS_OVERRIDES: Mapping[str, type[pool.Pool]] = {
     "queue": pool.QueuePool,
+    "queuepool": pool.QueuePool,
     "singleton": pool.SingletonThreadPool,
     "singletonthreadpool": pool.SingletonThreadPool,
     "null": pool.NullPool,
@@ -17,10 +19,19 @@ _POOL_CLASS_OVERRIDES: Mapping[str, type[pool.Pool]] = {
 }
 
 
-def _looks_like_motherduck(database: Optional[str], config: Mapping[str, Any]) -> bool:
-    if database is not None and database.startswith(("md:", "motherduck:")):
-        return True
-    return any(key in config for key in MOTHERDUCK_CONFIG_KEYS)
+def _looks_like_motherduck(
+    database: Optional[str], config: Optional[Mapping[str, Any]] = None
+) -> bool:
+    """
+    Return True for ``md:``/``motherduck:`` databases.
+
+    Detection is based on the database string only: config keys such as
+    ``access_mode`` or ``motherduck_token`` are also valid for local files
+    (for example a local session that later attaches MotherDuck), so they do
+    not make a local database MotherDuck. ``config`` is accepted for backward
+    compatibility and ignored.
+    """
+    return is_motherduck_database(database)
 
 
 def _pool_override_from_url(url: SAURL) -> Optional[str]:
@@ -43,15 +54,28 @@ def _pool_class_from_override(
 ) -> Optional[type[pool.Pool]]:
     if pool_override is None:
         return None
-    return _POOL_CLASS_OVERRIDES.get(pool_override)
+    pool_class = _POOL_CLASS_OVERRIDES.get(pool_override)
+    if pool_class is None:
+        from . import DuckDBEngineWarning  # avoid import cycle
+
+        warnings.warn(
+            f"Unknown duckdb_sqlalchemy pool override {pool_override!r}; using the "
+            "default pool class. Valid values: "
+            f"{', '.join(sorted(_POOL_CLASS_OVERRIDES))}.",
+            DuckDBEngineWarning,
+            stacklevel=2,
+        )
+    return pool_class
 
 
 def _default_pool_class_for_database(
     database: Optional[str], query: Mapping[str, Any]
 ) -> type[pool.Pool]:
-    if database == ":memory:":
+    if not database or database == ":memory:":
+        # An empty database is ``:memory:``; every pooled connection would
+        # otherwise get its own private in-memory database.
         return pool.SingletonThreadPool
-    if not database or database.startswith(":memory:"):
+    if database.startswith(":memory:"):
         return pool.QueuePool
     if _looks_like_motherduck(database, query):
         return pool.NullPool

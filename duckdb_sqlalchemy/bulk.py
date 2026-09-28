@@ -1,11 +1,24 @@
 import csv
+import math
 import tempfile
+import uuid
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+    cast,
+)
 
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.elements import ClauseElement
 from sqlalchemy.sql.expression import Executable
+from sqlalchemy.sql.expression import table as table_clause
 from sqlalchemy.sql.selectable import CompoundSelect, Select
 from sqlalchemy.sql.visitors import InternalTraversal
 
@@ -24,11 +37,23 @@ def _quote_literal(value: Any) -> str:
         value = str(value)
     if isinstance(value, bool):
         return "TRUE" if value else "FALSE"
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError(f"COPY option values must be finite numbers, got {value!r}")
     if isinstance(value, (int, float)):
         return str(value)
     if value is None:
         return "NULL"
     return "'" + str(value).replace("'", "''") + "'"
+
+
+def _render_option_value(value: Any) -> str:
+    if isinstance(value, Mapping):
+        items = ", ".join(
+            f"{_quote_literal(str(key))}: {_render_option_value(item)}"
+            for key, item in value.items()
+        )
+        return "{" + items + "}"
+    return _quote_literal(value)
 
 
 def _format_copy_options(options: Mapping[str, Any]) -> str:
@@ -43,7 +68,7 @@ def _format_copy_options(options: Mapping[str, Any]) -> str:
             inner = ", ".join(_quote_literal(v) for v in value)
             parts.append(f"{opt_key} ({inner})")
         else:
-            parts.append(f"{opt_key} {_quote_literal(value)}")
+            parts.append(f"{opt_key} {_render_option_value(value)}")
     if not parts:
         return ""
     return " (" + ", ".join(parts) + ")"
@@ -53,12 +78,22 @@ def _get_identifier_preparer(connection: Any) -> Any:
     return getattr(getattr(connection, "dialect", None), "identifier_preparer", None)
 
 
+def _effective_schema(connection: Any, table: Any) -> Optional[str]:
+    # Apply the connection's schema_translate_map, as compiled statements do.
+    schema_for_object = getattr(connection, "schema_for_object", None)
+    if callable(schema_for_object):
+        return schema_for_object(table)
+    return getattr(table, "schema", None)
+
+
 def _format_table(connection: Any, table: TableLike) -> str:
     if hasattr(table, "name"):
+        schema = _effective_schema(connection, table)
         preparer = _get_identifier_preparer(connection)
         if preparer is not None:
+            if schema != getattr(table, "schema", None):
+                table = table_clause(cast(str, table.name), schema=schema)
             return preparer.format_table(table)
-        schema = getattr(table, "schema", None)
         name = getattr(table, "name", None)
         if schema:
             schema_name = validate_dotted_identifier(
@@ -156,6 +191,58 @@ def _close_and_unlink_tempfile(tmp: Any) -> None:
     Path(path).unlink(missing_ok=True)
 
 
+_BINARY_TYPES = (bytes, bytearray, memoryview)
+_NULL_STRING_OPTIONS = ("nullstr", "null")
+
+
+def _resolve_null_marker(
+    copy_options: Mapping[str, Any],
+) -> Tuple[str, Dict[str, Any]]:
+    """Pick the CSV marker written for ``None`` and the matching NULLSTR option.
+
+    Without a user ``nullstr``/``null`` option, a unique marker keeps empty
+    strings distinct from NULL. A user-supplied value is honored as given and
+    its (first) string is used to write ``None``.
+    """
+
+    options = dict(copy_options)
+    user_value = None
+    for key in [k for k in options if str(k).lower() in _NULL_STRING_OPTIONS]:
+        value = options.pop(key)
+        if value is not None:
+            user_value = value
+    if user_value is None:
+        marker = f"__duckdb_sqlalchemy_null_{uuid.uuid4().hex}__"
+        options["nullstr"] = marker
+        return marker, options
+    if isinstance(user_value, str):
+        marker = user_value
+    elif (
+        isinstance(user_value, (list, tuple))
+        and user_value
+        and all(isinstance(item, str) for item in user_value)
+    ):
+        marker = user_value[0]
+    else:
+        raise ValueError(
+            "copy_from_rows nullstr must be a string or a non-empty list of strings"
+        )
+    options["nullstr"] = user_value
+    return marker, options
+
+
+def _csv_value(value: Any, null_marker: str) -> Any:
+    if value is None:
+        return null_marker
+    if isinstance(value, _BINARY_TYPES):
+        raise TypeError(
+            "copy_from_rows cannot write binary values "
+            f"({type(value).__name__}) to CSV; use copy_from_parquet or a "
+            "regular INSERT for binary data"
+        )
+    return value
+
+
 def _copy_rows_as_csv_chunks(
     connection: Any,
     table: TableLike,
@@ -165,9 +252,12 @@ def _copy_rows_as_csv_chunks(
     chunk_size: int,
     include_header: bool,
     copy_options: Mapping[str, Any],
+    null_marker: str,
 ) -> None:
     def open_writer() -> Tuple[Any, Any, int]:
-        tmp = tempfile.NamedTemporaryFile("w", newline="", suffix=".csv", delete=False)
+        tmp = tempfile.NamedTemporaryFile(
+            "w", newline="", suffix=".csv", delete=False, encoding="utf-8"
+        )
         writer = csv.writer(tmp)
         if include_header and columns:
             writer.writerow(columns)
@@ -200,7 +290,7 @@ def _copy_rows_as_csv_chunks(
                 flush_chunk(tmp)
                 tmp, writer, count = open_writer()
 
-            writer.writerow(row)
+            writer.writerow([_csv_value(value, null_marker) for value in row])
             count += 1
 
         if tmp is not None and count:
@@ -290,6 +380,7 @@ def copy_from_rows(
         return None
 
     header = copy_options.pop("header", include_header)
+    null_marker, copy_options = _resolve_null_marker(copy_options)
     copy_options = {"header": header, **copy_options}
 
     chunked_rows, columns = _copy_rows_as_sequences(first, iterator, columns)
@@ -305,5 +396,6 @@ def copy_from_rows(
         chunk_size=chunk_size,
         include_header=header,
         copy_options=copy_options,
+        null_marker=null_marker,
     )
     return None

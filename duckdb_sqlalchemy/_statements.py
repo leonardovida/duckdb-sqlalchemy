@@ -37,6 +37,9 @@ MUTATING_STATEMENT_PATTERN = re.compile(
     r"call|attach|detach"
     r")\b"
 )
+# Functions with side effects that a read-shaped statement can still call:
+# sequence advancement and MotherDuck md_* functions such as md_run_job().
+SIDE_EFFECT_FUNCTION_PATTERN = re.compile(r"\b(?:nextval|setval|md_\w*)\"?\s*\(")
 
 
 def _strip_leading_sql_comments(statement: str) -> str:
@@ -113,6 +116,8 @@ def _is_idempotent_statement(statement: str) -> bool:
     # ANALYZE executes its argument, including INSERT/UPDATE/DELETE.
     if normalized.startswith("explain") and re.search(r"\banalyze\b", normalized):
         return False
+    if SIDE_EFFECT_FUNCTION_PATTERN.search(normalized):
+        return False
     if normalized.startswith(IDEMPOTENT_STATEMENT_PREFIXES):
         return True
     if not normalized.startswith("with"):
@@ -125,3 +130,7 @@ def _is_transient_error(error: BaseException) -> bool:
     if any(pattern in message for pattern in DISCONNECT_ERROR_PATTERNS):
         return False
     return any(pattern in message for pattern in TRANSIENT_ERROR_PATTERNS)
+
+
+def _is_aborted_transaction_error(error: BaseException) -> bool:
+    return "current transaction is aborted" in str(error).lower()
