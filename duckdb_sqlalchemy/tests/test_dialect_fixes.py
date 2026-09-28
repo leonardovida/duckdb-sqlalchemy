@@ -4,6 +4,7 @@ from typing import Any, Iterable, List
 import duckdb
 import pytest
 from sqlalchemy import (
+    BigInteger,
     Column,
     Float,
     ForeignKey,
@@ -365,3 +366,81 @@ def test_retry_in_untracked_transaction_raises_original_error() -> None:
 def test_side_effect_functions_are_not_idempotent(statement: str) -> None:
     assert not _is_idempotent_statement(statement)
     assert _is_idempotent_statement("SELECT currval('ids'), mdx FROM t")
+
+
+@pytest.fixture
+def registered_views(monkeypatch: pytest.MonkeyPatch) -> List[Any]:
+    from duckdb_sqlalchemy import ConnectionWrapper
+
+    registered: List[Any] = []
+
+    def track_register(connection: ConnectionWrapper, name: str, data: Any) -> Any:
+        registered.append(data)
+        return connection.__getattr__("register")(name, data)
+
+    monkeypatch.setattr(ConnectionWrapper, "register", track_register, raising=False)
+    return registered
+
+
+def test_default_engine_bulk_insert_uses_register_path_and_keeps_big_ints(
+    registered_views: List[Any],
+) -> None:
+    engine = create_engine("duckdb:///:memory:")
+    big = 2**53 + 1
+    table = Table(
+        "bulk_ints",
+        MetaData(),
+        Column("z_id", Integer),
+        Column("a_big", BigInteger),
+        Column("m_name", String),
+        schema="logical",
+    )
+    rows = [
+        {"z_id": 1, "a_big": big, "m_name": "a"},
+        {"z_id": 2, "a_big": None, "m_name": None},
+        {"z_id": 3, "a_big": -big, "m_name": "c"},
+    ]
+    with engine.begin() as conn:
+        conn.exec_driver_sql("CREATE SCHEMA physical")
+        conn.exec_driver_sql(
+            "CREATE TABLE physical.bulk_ints (z_id INTEGER, a_big BIGINT, m_name VARCHAR)"
+        )
+        translated = conn.execution_options(
+            schema_translate_map={"logical": "physical"}, duckdb_copy_threshold=2
+        )
+        translated.execute(table.insert(), rows)
+        stored = translated.execute(select(table).order_by(table.c.z_id)).all()
+
+    assert len(registered_views) == 1
+    assert stored == [(1, big, "a"), (2, None, None), (3, -big, "c")]
+
+
+def test_bulk_insert_with_returning_keeps_insertmanyvalues(
+    registered_views: List[Any],
+) -> None:
+    engine = create_engine("duckdb:///:memory:")
+    table = Table("bulk_returning", MetaData(), Column("id", Integer))
+    table.create(engine)
+    with engine.begin() as conn:
+        returned = (
+            conn.execution_options(duckdb_copy_threshold=2)
+            .execute(
+                table.insert().returning(table.c.id, sort_by_parameter_order=True),
+                [{"id": 1}, {"id": 2}, {"id": 3}],
+            )
+            .scalars()
+            .all()
+        )
+    assert returned == [1, 2, 3]
+    assert registered_views == []
+
+
+def test_bulk_insert_dataframe_fallback_keeps_nullable_big_ints() -> None:
+    pd = pytest.importorskip("pandas")
+    from duckdb_sqlalchemy._bulk_insert import build_bulk_insert_dataframe
+
+    big = 2**53 + 1
+    frame = build_bulk_insert_dataframe([(1, big), (2, None)], ["id", "value"])
+    assert str(frame["value"].dtype) == "Int64"
+    assert frame["value"][0] == big
+    assert frame["value"][1] is pd.NA

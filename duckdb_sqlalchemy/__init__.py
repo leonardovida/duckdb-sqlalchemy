@@ -42,6 +42,7 @@ from sqlalchemy.dialects.postgresql.base import (
 from sqlalchemy.dialects.postgresql.psycopg2 import PGDialect_psycopg2
 from sqlalchemy.engine import processors
 from sqlalchemy.engine.default import DefaultDialect, DefaultExecutionContext
+from sqlalchemy.engine.interfaces import ExecuteStyle
 from sqlalchemy.engine.reflection import ReflectionDefaults, cache
 from sqlalchemy.engine.url import URL as SAURL
 from sqlalchemy.exc import NoSuchTableError
@@ -52,6 +53,7 @@ from sqlalchemy.sql.selectable import Select
 
 from ._arrow import DuckDBArrowResult
 from ._bulk_insert import build_bulk_insert_data as _build_bulk_insert_data
+from ._bulk_insert import has_bulk_insert_data_library as _has_bulk_insert_data_library
 from ._bulk_insert import (
     infer_bulk_insert_column_keys as _infer_bulk_insert_column_keys,
 )
@@ -677,7 +679,7 @@ class DuckDBExecutionContext(_PGExecutionContext):
         **kwargs: Any,
     ) -> Any:
         execution_options = _normalize_execution_options(execution_options)
-        return super()._init_compiled(
+        context = super()._init_compiled(
             dialect,
             connection,
             dbapi_connection,
@@ -689,6 +691,12 @@ class DuckDBExecutionContext(_PGExecutionContext):
             cache_hit,
             **kwargs,
         )
+        if (
+            context.execute_style is ExecuteStyle.INSERTMANYVALUES
+            and dialect._routes_insertmanyvalues_to_register(context)
+        ):
+            context.execute_style = ExecuteStyle.EXECUTEMANY
+        return context
 
     @classmethod
     def _init_statement(
@@ -1947,34 +1955,32 @@ class Dialect(PGDialect_psycopg2):
             return {}
         return getattr(context, "execution_options", {}) or {}
 
-    def _bulk_insert_via_register(
-        self,
-        cursor: Any,
-        context: Any,
-        parameters: Sequence[Any],
-    ) -> bool:
+    def _bulk_insert_register_columns(
+        self, context: Any, parameters: Sequence[Any]
+    ) -> Optional[List[str]]:
+        """Column names for the register fast path, or None when it can't apply."""
         if not parameters:
-            return False
+            return None
         compiled = getattr(context, "compiled", None)
         if compiled is None:
-            return False
+            return None
         if getattr(compiled, "effective_returning", None):
-            return False
+            return None
         stmt = getattr(compiled, "statement", None)
         table = getattr(stmt, "table", None)
         if table is None:
-            return False
+            return None
         if getattr(stmt, "_post_values_clause", None) is not None:
-            return False
+            return None
         # The register path replaces VALUES with a column projection. Explicit
         # expressions and SQL defaults must retain their original compiled SQL.
         if getattr(stmt, "_values", None) or getattr(stmt, "_ordered_values", None):
-            return False
+            return None
         if any(
             column.default is not None and column.default.is_clause_element
             for column in table.columns
         ):
-            return False
+            return None
 
         column_keys = getattr(compiled, "positiontup", None)
         if not column_keys:
@@ -1982,7 +1988,7 @@ class Dialect(PGDialect_psycopg2):
         if not column_keys:
             column_keys = _infer_bulk_insert_column_keys(parameters)
         if not column_keys:
-            return False
+            return None
 
         column_names = [
             str(getattr(column_key, "key", column_key)) for column_key in column_keys
@@ -1990,7 +1996,41 @@ class Dialect(PGDialect_psycopg2):
         # Bind keys need not be physical column names. Decline the optimization
         # unless the mapping is unambiguous; normal executemany handles these.
         if any(key not in table.c or table.c[key].name != key for key in column_names):
+            return None
+        return column_names
+
+    def _reaches_copy_threshold(self, context: Any, parameters: Sequence[Any]) -> bool:
+        options = self._get_execution_options(context)
+        copy_threshold = options.get(
+            "duckdb_copy_threshold", self.duckdb_copy_threshold
+        )
+        return bool(copy_threshold) and len(parameters) >= copy_threshold
+
+    def _routes_insertmanyvalues_to_register(self, context: Any) -> bool:
+        """Whether a multi-row INSERT should use the register fast path.
+
+        ``use_insertmanyvalues_wo_returning`` sends every multi-row INSERT
+        through batched multi-VALUES statements, which bypass
+        ``do_executemany``; large plain INSERTs are switched back so they load
+        through a registered Arrow table or DataFrame instead.
+        """
+        parameters = context.parameters
+        return (
+            _has_bulk_insert_data_library()
+            and self._reaches_copy_threshold(context, parameters)
+            and self._bulk_insert_register_columns(context, parameters) is not None
+        )
+
+    def _bulk_insert_via_register(
+        self,
+        cursor: Any,
+        context: Any,
+        parameters: Sequence[Any],
+    ) -> bool:
+        column_names = self._bulk_insert_register_columns(context, parameters)
+        if column_names is None:
             return False
+        table = context.compiled.statement.table
         rows = parameters if isinstance(parameters, list) else list(parameters)
         data = _build_bulk_insert_data(rows, column_names)
         if data is None:
@@ -2035,11 +2075,7 @@ class Dialect(PGDialect_psycopg2):
             and parameters
             and isinstance(parameters, (list, tuple))
         ):
-            options = self._get_execution_options(context)
-            copy_threshold = options.get(
-                "duckdb_copy_threshold", self.duckdb_copy_threshold
-            )
-            if copy_threshold and len(parameters) >= copy_threshold:
+            if self._reaches_copy_threshold(context, parameters):
                 if self._bulk_insert_via_register(cursor, context, parameters):
                     return None
         return DefaultDialect.do_executemany(
