@@ -1465,25 +1465,6 @@ def test_cursorwrapper_executemany_coerces_to_list() -> None:
     assert conn.calls[0][1] == list(params)
 
 
-def test_cursorwrapper_execute_handles_specific_runtime_errors() -> None:
-    class CommitConn:
-        def commit(self) -> None:
-            raise RuntimeError(
-                "TransactionContext Error: cannot commit - no transaction is active"
-            )
-
-    cursor = _cursor(CommitConn())
-    cursor.execute("commit")
-
-    class NotImplementedConn:
-        def execute(self, *args, **kwargs):
-            raise RuntimeError("Not implemented Error: nope")
-
-    cursor = _cursor(NotImplementedConn())
-    with pytest.raises(NotImplementedError):
-        cursor.execute("select 1")
-
-
 def test_cursorwrapper_execute_preserves_runtime_errors_without_message() -> None:
     class BrokenConn:
         def execute(self, *args, **kwargs):

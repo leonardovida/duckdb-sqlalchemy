@@ -277,7 +277,7 @@ _DUCKDB_IO_EXCEPTIONS: Tuple[type, ...] = tuple(
 
 
 class DBAPI:
-    paramstyle = "numeric_dollar" if SQLALCHEMY_2 else "qmark"
+    paramstyle = "numeric_dollar"
     apilevel = duckdb.apilevel
     threadsafety = duckdb.threadsafety
 
@@ -521,43 +521,31 @@ class CursorWrapper:
         context: Optional[Any] = None,
     ) -> None:
         self._before_execute()
-        try:
-            norm = statement.strip().lower().rstrip(";")
-            if norm == "commit":  # this is largely for ipython-sql
-                self.__connection_wrapper.commit()
-                return
-            elif _BEGIN_TRANSACTION_ISOLATION_RE.fullmatch(norm):
-                self.__connection_wrapper._begin()
-                return
-            self.__connection_wrapper._count_statement()
-            if _SET_TRANSACTION_ISOLATION_RE.fullmatch(norm):
-                self._clear_result()
-            elif _is_ignored_postgres_config_set(norm):
-                self._clear_result()
-            elif norm.startswith("register"):
-                view_name, df = _parse_register_params(parameters)
-                self.__c.register(view_name, df)
-                return
-            elif norm == "show transaction isolation level":
-                self.__c.execute("select 'read committed' as transaction_isolation")
-            elif norm == "show standard_conforming_strings":
-                self.__c.execute("select 'on' as standard_conforming_strings")
-            elif parameters is None:
-                self.__c.execute(statement)
-            else:
-                self.__c.execute(statement, parameters)
-            self._after_execute()
-        except RuntimeError as e:
-            message = str(e)
-            if message.startswith("Not implemented Error"):
-                raise NotImplementedError(*e.args) from e
-            elif (
-                message
-                == "TransactionContext Error: cannot commit - no transaction is active"
-            ):
-                return
-            else:
-                raise e
+        norm = statement.strip().lower().rstrip(";")
+        if norm == "commit":  # this is largely for ipython-sql
+            self.__connection_wrapper.commit()
+            return
+        elif _BEGIN_TRANSACTION_ISOLATION_RE.fullmatch(norm):
+            self.__connection_wrapper._begin()
+            return
+        self.__connection_wrapper._count_statement()
+        if _SET_TRANSACTION_ISOLATION_RE.fullmatch(norm):
+            self._clear_result()
+        elif _is_ignored_postgres_config_set(norm):
+            self._clear_result()
+        elif norm.startswith("register"):
+            view_name, df = _parse_register_params(parameters)
+            self.__c.register(view_name, df)
+            return
+        elif norm == "show transaction isolation level":
+            self.__c.execute("select 'read committed' as transaction_isolation")
+        elif norm == "show standard_conforming_strings":
+            self.__c.execute("select 'on' as standard_conforming_strings")
+        elif parameters is None:
+            self.__c.execute(statement)
+        else:
+            self.__c.execute(statement, parameters)
+        self._after_execute()
 
     @property
     def connection(self) -> Any:
@@ -968,8 +956,8 @@ class Dialect(PGDialect_psycopg2):
     div_is_floordiv = False  # TODO: tweak this to be based on DuckDB version
     inspector = DuckDBInspector
     insertmanyvalues_page_size = 1000
-    use_insertmanyvalues = SQLALCHEMY_2
-    use_insertmanyvalues_wo_returning = SQLALCHEMY_2
+    use_insertmanyvalues = True
+    use_insertmanyvalues_wo_returning = True
     duckdb_copy_threshold = 10000
     _capabilities: "DuckDBCapabilities"
     colspecs = util.update_copy(
@@ -2229,151 +2217,16 @@ class Dialect(PGDialect_psycopg2):
     ) -> Any:
         # Scope by schema, but strip any database prefix (DuckDB uses db.schema).
         # This will not work if a schema or table name is not unique!
-        if hasattr(super(), "_pg_class_filter_scope_schema"):
-            schema_arg = schema
-            if schema is not None:
-                _, schema_name = self.identifier_preparer._separate(schema)
-                schema_arg = schema_name
-            return getattr(super(), "_pg_class_filter_scope_schema")(
-                query,
-                schema=schema_arg,
-                scope=scope,
-                pg_class_table=pg_class_table,
-            )
-
-    @lru_cache()
-    def _columns_query(self, schema, has_filter_names, scope, kind):  # type: ignore[no-untyped-def]
-        if not SQLALCHEMY_2:
-            return super()._columns_query(schema, has_filter_names, scope, kind)  # type: ignore[misc]
-
-        # DuckDB versions before 1.4 don't expose pg_collation; skip collation
-        # reflection to avoid Catalog Errors during SQLAlchemy 2.x reflection.
-        from sqlalchemy.dialects.postgresql import base as pg_base
-
-        pg_catalog = getattr(pg_base, "pg_catalog")
-        REGCLASS = getattr(pg_base, "REGCLASS")
-        TEXT = getattr(pg_base, "TEXT")
-        OID = getattr(pg_base, "OID")
-
-        server_version_info = self.server_version_info or (0,)
-
-        generated = (
-            pg_catalog.pg_attribute.c.attgenerated.label("generated")
-            if server_version_info >= (12,)
-            else sql.null().label("generated")
+        schema_arg = schema
+        if schema is not None:
+            _, schema_name = self.identifier_preparer._separate(schema)
+            schema_arg = schema_name
+        return super()._pg_class_filter_scope_schema(
+            query,
+            schema=schema_arg,
+            scope=scope,
+            pg_class_table=pg_class_table,
         )
-        if server_version_info >= (10,):
-            identity = (
-                select(
-                    sql.func.json_build_object(
-                        "always",
-                        pg_catalog.pg_attribute.c.attidentity == "a",
-                        "start",
-                        pg_catalog.pg_sequence.c.seqstart,
-                        "increment",
-                        pg_catalog.pg_sequence.c.seqincrement,
-                        "minvalue",
-                        pg_catalog.pg_sequence.c.seqmin,
-                        "maxvalue",
-                        pg_catalog.pg_sequence.c.seqmax,
-                        "cache",
-                        pg_catalog.pg_sequence.c.seqcache,
-                        "cycle",
-                        pg_catalog.pg_sequence.c.seqcycle,
-                        type_=sqltypes.JSON(),
-                    )
-                )
-                .select_from(pg_catalog.pg_sequence)
-                .where(
-                    pg_catalog.pg_attribute.c.attidentity != "",
-                    pg_catalog.pg_sequence.c.seqrelid
-                    == sql.cast(
-                        sql.cast(
-                            pg_catalog.pg_get_serial_sequence(
-                                sql.cast(
-                                    sql.cast(
-                                        pg_catalog.pg_attribute.c.attrelid,
-                                        REGCLASS,
-                                    ),
-                                    TEXT,
-                                ),
-                                pg_catalog.pg_attribute.c.attname,
-                            ),
-                            REGCLASS,
-                        ),
-                        OID,
-                    ),
-                )
-                .correlate(pg_catalog.pg_attribute)
-                .scalar_subquery()
-                .label("identity_options")
-            )
-        else:
-            identity = sql.null().label("identity_options")
-
-        default = (
-            select(
-                pg_catalog.pg_get_expr(
-                    pg_catalog.pg_attrdef.c.adbin,
-                    pg_catalog.pg_attrdef.c.adrelid,
-                )
-            )
-            .select_from(pg_catalog.pg_attrdef)
-            .where(
-                pg_catalog.pg_attrdef.c.adrelid == pg_catalog.pg_attribute.c.attrelid,
-                pg_catalog.pg_attrdef.c.adnum == pg_catalog.pg_attribute.c.attnum,
-                pg_catalog.pg_attribute.c.atthasdef,
-            )
-            .correlate(pg_catalog.pg_attribute)
-            .scalar_subquery()
-            .label("default")
-        )
-
-        collate = sql.null().label("collation")
-
-        relkinds = getattr(super(), "_kind_to_relkinds")(kind)
-        query = (
-            select(
-                pg_catalog.pg_attribute.c.attname.label("name"),
-                pg_catalog.format_type(
-                    pg_catalog.pg_attribute.c.atttypid,
-                    pg_catalog.pg_attribute.c.atttypmod,
-                ).label("format_type"),
-                default,
-                pg_catalog.pg_attribute.c.attnotnull.label("not_null"),
-                pg_catalog.pg_class.c.relname.label("table_name"),
-                pg_catalog.pg_description.c.description.label("comment"),
-                generated,
-                identity,
-                collate,
-            )
-            .select_from(pg_catalog.pg_class)
-            .outerjoin(
-                pg_catalog.pg_attribute,
-                sql.and_(
-                    pg_catalog.pg_class.c.oid == pg_catalog.pg_attribute.c.attrelid,
-                    pg_catalog.pg_attribute.c.attnum > 0,
-                    ~pg_catalog.pg_attribute.c.attisdropped,
-                ),
-            )
-            .outerjoin(
-                pg_catalog.pg_description,
-                sql.and_(
-                    pg_catalog.pg_description.c.objoid
-                    == pg_catalog.pg_attribute.c.attrelid,
-                    pg_catalog.pg_description.c.objsubid
-                    == pg_catalog.pg_attribute.c.attnum,
-                ),
-            )
-            .where(getattr(super(), "_pg_class_relkind_condition")(relkinds))
-            .order_by(pg_catalog.pg_class.c.relname, pg_catalog.pg_attribute.c.attnum)
-        )
-        query = self._pg_class_filter_scope_schema(query, schema, scope=scope)
-        if has_filter_names:
-            query = query.where(
-                pg_catalog.pg_class.c.relname.in_(bindparam("filter_names"))
-            )
-        return query
 
     # Reflect columns from duckdb_columns() rather than PostgreSQL's pg_catalog
     # queries, which do not map DuckDB types or attached databases.
@@ -2407,34 +2260,28 @@ class Dialect(PGDialect_psycopg2):
 
             pg_catalog = getattr(pg_base, "pg_catalog")
 
-            if (
-                hasattr(super(), "_kind_to_relkinds")
-                and hasattr(super(), "_pg_class_filter_scope_schema")
-                and hasattr(super(), "_pg_class_relkind_condition")
-            ):
-                relkinds = getattr(super(), "_kind_to_relkinds")(kind)
-                query = (
-                    select(
-                        pg_catalog.pg_class.c.relname,
-                        pg_catalog.pg_description.c.description,
-                    )
-                    .select_from(pg_catalog.pg_class)
-                    .outerjoin(
-                        pg_catalog.pg_description,
-                        sql.and_(
-                            pg_catalog.pg_class.c.oid
-                            == pg_catalog.pg_description.c.objoid,
-                            pg_catalog.pg_description.c.objsubid == 0,
-                        ),
-                    )
-                    .where(getattr(super(), "_pg_class_relkind_condition")(relkinds))
+            relkinds = getattr(super(), "_kind_to_relkinds")(kind)
+            query = (
+                select(
+                    pg_catalog.pg_class.c.relname,
+                    pg_catalog.pg_description.c.description,
                 )
-                query = self._pg_class_filter_scope_schema(query, schema, scope)
-                if has_filter_names:
-                    query = query.where(
-                        pg_catalog.pg_class.c.relname.in_(bindparam("filter_names"))
-                    )
-                return query
+                .select_from(pg_catalog.pg_class)
+                .outerjoin(
+                    pg_catalog.pg_description,
+                    sql.and_(
+                        pg_catalog.pg_class.c.oid == pg_catalog.pg_description.c.objoid,
+                        pg_catalog.pg_description.c.objsubid == 0,
+                    ),
+                )
+                .where(getattr(super(), "_pg_class_relkind_condition")(relkinds))
+            )
+            query = self._pg_class_filter_scope_schema(query, schema, scope)
+            if has_filter_names:
+                query = query.where(
+                    pg_catalog.pg_class.c.relname.in_(bindparam("filter_names"))
+                )
+            return query
         else:
             if hasattr(super(), "_comment_query"):
                 return getattr(super(), "_comment_query")(
