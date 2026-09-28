@@ -316,7 +316,8 @@ def test_all_types_reflection(engine: Engine) -> None:
             name = col.name
             if name.endswith("_enum") and duckdb_version < Version("0.7.1"):
                 continue
-            if "tuple" in name:
+            if "tuple" in name or name == "empty_struct":
+                # Struct needs at least one field
                 assert col.type == sqltypes.NULLTYPE, name
             else:
                 assert col.type != sqltypes.NULLTYPE, name
