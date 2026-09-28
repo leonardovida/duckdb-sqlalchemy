@@ -512,3 +512,16 @@ def test_implicit_sequence_follows_schema_translate_map(
         assert conn.execute(sequences).scalars().all() == ["physical"]
         metadata.drop_all(translated)
         assert conn.execute(sequences).scalars().all() == []
+
+
+def test_format_schema_does_not_requote_quoted_component(engine: Engine) -> None:
+    preparer = engine.dialect.identifier_preparer
+    assert preparer.format_schema('"my.schema"') == '"my.schema"'
+    assert preparer.format_schema("my schema") == '"my schema"'
+
+    table = Table("dotted", MetaData(), Column("id", Integer), schema='"my.schema"')
+    with engine.begin() as conn:
+        conn.exec_driver_sql('CREATE SCHEMA "my.schema"')
+        table.create(conn)
+        conn.execute(table.insert(), [{"id": 1}])
+        assert conn.execute(select(table.c.id)).scalars().all() == [1]

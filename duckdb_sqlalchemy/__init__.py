@@ -807,7 +807,11 @@ class DuckDBIdentifierPreparer(PGIdentifierPreparer):
         """Prepare a quoted schema name."""
         database_name, schema_name = self._separate(name)
         if database_name is None or schema_name is None:
-            return self.quote(name)
+            if getattr(name, "quote", None) is not None or schema_name is None:
+                # keeps explicit quoting, e.g. schema_translate_map placeholders
+                return self.quote(name)
+            # quote the unquoted form so '"my.schema"' is not quoted twice
+            return self.quote(schema_name)
         return ".".join(self.quote(str(_n)) for _n in [database_name, schema_name])
 
     def quote_schema(self, schema: str, force: Any = None) -> str:
