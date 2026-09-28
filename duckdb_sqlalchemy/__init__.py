@@ -172,6 +172,7 @@ supports_user_agent: bool = _capabilities.supports_user_agent
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection
     from sqlalchemy.engine.interfaces import (  # noqa: F401
+        IsolationLevel,
         ReflectedCheckConstraint,
         ReflectedForeignKeyConstraint,
         ReflectedIndex,
@@ -1061,21 +1062,25 @@ class Dialect(PGDialect_psycopg2):
     # as READ COMMITTED, like the "show transaction isolation level" emulation,
     # so PostgreSQL-oriented tools keep working. AUTOCOMMIT skips BEGIN so that
     # every statement commits on its own.
-    _transaction_isolation_level = "READ COMMITTED"
+    _transaction_isolation_level: "IsolationLevel" = "READ COMMITTED"
 
-    def get_isolation_level_values(self, dbapi_conn: Any) -> List[str]:
+    def get_isolation_level_values(
+        self, dbapi_connection: Any
+    ) -> Sequence["IsolationLevel"]:
         return ["AUTOCOMMIT", self._transaction_isolation_level]
 
-    def get_default_isolation_level(self, dbapi_conn: Any) -> str:
+    def get_default_isolation_level(self, dbapi_conn: Any) -> "IsolationLevel":
         # a constant, so connecting does not probe the isolation level
         return self._transaction_isolation_level
 
-    def get_isolation_level(self, dbapi_connection: Any) -> str:
+    def get_isolation_level(self, dbapi_connection: Any) -> "IsolationLevel":
         if getattr(dbapi_connection, "autocommit", False):
             return "AUTOCOMMIT"
         return self._transaction_isolation_level
 
-    def set_isolation_level(self, dbapi_connection: Any, level: str) -> None:
+    def set_isolation_level(
+        self, dbapi_connection: Any, level: "IsolationLevel"
+    ) -> None:
         dbapi_connection.autocommit = level == "AUTOCOMMIT"
 
     def do_rollback(self, dbapi_connection: Any) -> None:
@@ -2161,7 +2166,7 @@ class Dialect(PGDialect_psycopg2):
         first one in its transaction: rolling back and beginning again then
         loses no earlier work.
         """
-        connection: Any = getattr(cursor, "connection", None)
+        connection = cast(Any, getattr(cursor, "connection", None))
         statements = getattr(connection, "_transaction_statements", None)
         if statements is None:
             return True
