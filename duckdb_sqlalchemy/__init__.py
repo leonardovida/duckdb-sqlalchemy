@@ -64,6 +64,7 @@ from ._pool import (
 )
 from ._statements import (
     DISCONNECT_ERROR_PATTERNS,
+    _is_aborted_transaction_error,
     _is_idempotent_statement,
     _is_transient_error,
 )
@@ -300,7 +301,7 @@ class DuckDBInspector(PGInspector):
 
 # DuckDBPyConnection calls that replace or discard the connection's open result.
 _RESULT_DISCARDING_CONNECTION_METHODS = frozenset(
-    {"begin", "commit", "execute", "executemany", "query", "rollback", "sql"}
+    {"execute", "executemany", "query", "sql"}
 )
 # Cursor calls that read the open result in a form other than Python rows.
 _NATIVE_RESULT_FETCH_METHODS = frozenset(
@@ -332,6 +333,8 @@ class ConnectionWrapper:
         self.__c = c
         self.notices = list()
         self._pending_cursor: Optional["weakref.ReferenceType[CursorWrapper]"] = None
+        # Statements run since begin(); None outside a transaction begun here.
+        self._transaction_statements: Optional[int] = None
 
     def cursor(self) -> "CursorWrapper":
         return CursorWrapper(self.__c, self)
@@ -357,6 +360,25 @@ class ConnectionWrapper:
         self._pending_cursor = None
         if pending is not None and pending is not requester:
             pending._buffer_result()
+
+    def begin(self) -> None:
+        self._buffer_pending_result()
+        self.__c.begin()
+        self._transaction_statements = 0
+
+    def commit(self) -> None:
+        self._buffer_pending_result()
+        self._transaction_statements = None
+        self.__c.commit()
+
+    def rollback(self) -> None:
+        self._buffer_pending_result()
+        self._transaction_statements = None
+        self.__c.rollback()
+
+    def _count_statement(self) -> None:
+        if self._transaction_statements is not None:
+            self._transaction_statements += 1
 
     def __getattr__(self, name: str) -> Any:
         if name in _RESULT_DISCARDING_CONNECTION_METHODS:
@@ -471,6 +493,7 @@ class CursorWrapper:
         else:
             params = list(parameters)
         self._before_execute()
+        self.__connection_wrapper._count_statement()
         self.__c.executemany(statement, params)
         self._after_execute()
 
@@ -484,10 +507,13 @@ class CursorWrapper:
         try:
             norm = statement.strip().lower().rstrip(";")
             if norm == "commit":  # this is largely for ipython-sql
-                self.__c.commit()
+                self.__connection_wrapper.commit()
+                return
             elif _BEGIN_TRANSACTION_ISOLATION_RE.fullmatch(norm):
-                self.__c.begin()
-            elif _SET_TRANSACTION_ISOLATION_RE.fullmatch(norm):
+                self.__connection_wrapper.begin()
+                return
+            self.__connection_wrapper._count_statement()
+            if _SET_TRANSACTION_ISOLATION_RE.fullmatch(norm):
                 self._clear_result()
             elif _is_ignored_postgres_config_set(norm):
                 self._clear_result()
@@ -2035,11 +2061,31 @@ class Dialect(PGDialect_psycopg2):
         message = str(e).lower()
         return any(pattern in message for pattern in DISCONNECT_ERROR_PATTERNS)
 
+    def _prepare_retry(self, cursor: Any) -> bool:
+        """Return whether the failed statement can run again on this connection.
+
+        A failed statement aborts DuckDB's open transaction, so a retry inside
+        it can only fail with "Current transaction is aborted". Retrying is safe
+        outside an explicit transaction, or when the failed statement was the
+        first one in its transaction: rolling back and beginning again then
+        loses no earlier work.
+        """
+        connection: Any = getattr(cursor, "connection", None)
+        statements = getattr(connection, "_transaction_statements", None)
+        if statements is None:
+            return True
+        if statements > 1:
+            return False
+        connection.rollback()
+        connection.begin()
+        return True
+
     def _execute_with_retry(
         self,
         statement: str,
         context: Optional[Any],
         executor: Callable[[], Any],
+        cursor: Any = None,
     ) -> Any:
         options = self._get_execution_options(context)
         retry_count = int(options.get("duckdb_retry_count", 0) or 0)
@@ -2049,12 +2095,20 @@ class Dialect(PGDialect_psycopg2):
             return executor()
         backoff = options.get("duckdb_retry_backoff")
         attempt = 0
+        first_error: Optional[Exception] = None
         while True:
             try:
                 return executor()
             except Exception as exc:
+                if first_error is not None and _is_aborted_transaction_error(exc):
+                    # a transaction the dialect does not track (a raw BEGIN)
+                    # was aborted by the first failure; report that failure
+                    raise first_error from None
                 if attempt >= retry_count or not _is_transient_error(exc):
                     raise
+                if not self._prepare_retry(cursor):
+                    raise
+                first_error = first_error or exc
                 attempt += 1
                 if backoff:
                     time.sleep(float(backoff))
@@ -2071,7 +2125,7 @@ class Dialect(PGDialect_psycopg2):
                 self, cursor, statement, parameters, context
             )
 
-        self._execute_with_retry(statement, context, executor)
+        self._execute_with_retry(statement, context, executor, cursor)
 
     def do_execute_no_params(
         self, cursor: Any, statement: str, context: Optional[Any] = None
@@ -2079,7 +2133,7 @@ class Dialect(PGDialect_psycopg2):
         def executor() -> Any:
             return DefaultDialect.do_execute_no_params(self, cursor, statement, context)
 
-        self._execute_with_retry(statement, context, executor)
+        self._execute_with_retry(statement, context, executor, cursor)
 
     def _pg_class_filter_scope_schema(
         self,

@@ -30,7 +30,7 @@ from sqlalchemy.orm import (
     relationship,
 )
 
-from duckdb_sqlalchemy import Dialect
+from duckdb_sqlalchemy import Dialect, _is_idempotent_statement
 
 
 def test_numeric_round_trips_exact_decimal(engine: Engine) -> None:
@@ -287,3 +287,81 @@ def test_arrow_fetch_after_buffering_raises_clear_error(engine: Engine) -> None:
         with pytest.raises(NotImplementedError, match="buffered"):
             result.cursor.fetch_arrow_table()
         assert result.all() == [(0,), (1,), (2,)]
+
+
+class _FailOnce:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self, value: int) -> int:
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("HTTP Error: 503 Service Unavailable")
+        return value
+
+
+_FLAKY_QUERY = "SELECT flaky(i) AS value FROM range(1) t(i)"
+_RETRY_OPTIONS = {"duckdb_retry_on_transient": True, "duckdb_retry_count": 2}
+
+
+def _create_flaky_function(connection: Any) -> _FailOnce:
+    state = _FailOnce()
+
+    def flaky(value: int) -> int:
+        return state(value)
+
+    connection.create_function("flaky", flaky)
+    return state
+
+
+def _register_flaky(conn: Any) -> _FailOnce:
+    return _create_flaky_function(conn.connection.driver_connection)
+
+
+def test_retry_reruns_first_statement_of_transaction(engine: Engine) -> None:
+    with engine.connect() as conn:
+        flaky = _register_flaky(conn)
+        conn = conn.execution_options(**_RETRY_OPTIONS)
+        assert conn.execute(text(_FLAKY_QUERY)).scalar_one() == 0
+        assert flaky.calls == 2
+        assert conn.execute(text("SELECT 1")).scalar_one() == 1
+
+
+def test_retry_mid_transaction_raises_original_error(engine: Engine) -> None:
+    with engine.connect() as conn:
+        flaky = _register_flaky(conn)
+        conn.execute(text("CREATE TABLE written (i INTEGER)"))
+        conn.execute(text("INSERT INTO written VALUES (1)"))
+        with pytest.raises(sa_exc.DBAPIError, match="503 Service Unavailable"):
+            conn.execution_options(**_RETRY_OPTIONS).execute(text(_FLAKY_QUERY))
+        assert flaky.calls == 1
+
+
+def test_retry_in_untracked_transaction_raises_original_error() -> None:
+    from duckdb_sqlalchemy import ConnectionWrapper
+
+    wrapper = ConnectionWrapper(duckdb.connect(":memory:"))
+    flaky = _create_flaky_function(wrapper)
+    wrapper.execute("BEGIN TRANSACTION")
+
+    class Context:
+        execution_options = _RETRY_OPTIONS
+
+    with pytest.raises(duckdb.Error, match="503 Service Unavailable"):
+        Dialect().do_execute(wrapper.cursor(), _FLAKY_QUERY, None, Context())
+    assert flaky.calls == 1
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SELECT * FROM md_run_job('nightly')",
+        "SELECT * FROM \"md_run_job\"('nightly')",
+        "SELECT nextval('ids')",
+        "SELECT setval('ids', 10)",
+        "WITH next AS (SELECT nextval('ids') AS id) SELECT id FROM next",
+    ],
+)
+def test_side_effect_functions_are_not_idempotent(statement: str) -> None:
+    assert not _is_idempotent_statement(statement)
+    assert _is_idempotent_statement("SELECT currval('ids'), mdx FROM t")
