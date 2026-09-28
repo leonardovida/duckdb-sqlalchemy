@@ -4,7 +4,8 @@ import re
 import time
 import uuid
 import warnings
-from collections import defaultdict
+import weakref
+from collections import defaultdict, deque
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
@@ -297,6 +298,30 @@ class DuckDBInspector(PGInspector):
             raise NotImplementedError() from e
 
 
+# DuckDBPyConnection calls that replace or discard the connection's open result.
+_RESULT_DISCARDING_CONNECTION_METHODS = frozenset(
+    {"begin", "commit", "execute", "executemany", "query", "rollback", "sql"}
+)
+# Cursor calls that read the open result in a form other than Python rows.
+_NATIVE_RESULT_FETCH_METHODS = frozenset(
+    {
+        "arrow",
+        "df",
+        "fetch_arrow_reader",
+        "fetch_arrow_table",
+        "fetch_df",
+        "fetch_df_chunk",
+        "fetch_record_batch",
+        "fetchdf",
+        "fetchnumpy",
+        "pl",
+        "tf",
+        "to_arrow_table",
+        "torch",
+    }
+)
+
+
 class ConnectionWrapper:
     __c: duckdb.DuckDBPyConnection
     notices: List[str]
@@ -306,11 +331,36 @@ class ConnectionWrapper:
     def __init__(self, c: duckdb.DuckDBPyConnection) -> None:
         self.__c = c
         self.notices = list()
+        self._pending_cursor: Optional["weakref.ReferenceType[CursorWrapper]"] = None
 
     def cursor(self) -> "CursorWrapper":
         return CursorWrapper(self.__c, self)
 
+    def _set_pending_cursor(self, cursor: Optional["CursorWrapper"]) -> None:
+        self._pending_cursor = weakref.ref(cursor) if cursor is not None else None
+
+    def _buffer_pending_result(
+        self, requester: Optional["CursorWrapper"] = None
+    ) -> None:
+        """Preserve the unread rows of another cursor before they are discarded.
+
+        Every cursor shares one DuckDBPyConnection, which holds a single open
+        result, so running a statement while iterating another result (an ORM
+        lazy load inside a loop, for example) would silently truncate it. The
+        rows the earlier cursor has not fetched yet are moved into Python memory
+        instead. That costs memory proportional to the unread part of the
+        result, including results fetched incrementally with ``yield_per``, but
+        only when another statement actually runs before they are consumed.
+        Results nothing references any more are skipped (weak reference).
+        """
+        pending = self._pending_cursor() if self._pending_cursor is not None else None
+        self._pending_cursor = None
+        if pending is not None and pending is not requester:
+            pending._buffer_result()
+
     def __getattr__(self, name: str) -> Any:
+        if name in _RESULT_DISCARDING_CONNECTION_METHODS:
+            self._buffer_pending_result()
         return getattr(self.__c, name)
 
     def close(self) -> None:
@@ -374,9 +424,39 @@ class CursorWrapper:
     ) -> None:
         self.__c = c
         self.__connection_wrapper = connection_wrapper
+        # Rows moved out of the shared connection by _buffer_result.
+        self._buffered_rows: Optional[deque] = None
+        self._buffered_description: Any = None
+        self._buffered_rowcount: int = -1
 
     def _clear_result(self) -> None:
         self.__c.execute("")
+
+    def _before_execute(self) -> None:
+        self.__connection_wrapper._buffer_pending_result(self)
+        self._buffered_rows = None
+        self._buffered_description = None
+
+    def _after_execute(self) -> None:
+        if getattr(self.__c, "description", None) is not None:
+            self.__connection_wrapper._set_pending_cursor(self)
+
+    def _buffer_result(self) -> None:
+        """Fetch this cursor's unread rows before another statement replaces them."""
+        description = self.description
+        rowcount = self.__c.rowcount
+        try:
+            rows = self.__c.fetchall()
+        except duckdb.Error:
+            rows = []
+        self._buffered_rows = deque(rows)
+        self._buffered_description = description
+        self._buffered_rowcount = rowcount
+
+    def _result_consumed(self) -> None:
+        pending = self.__connection_wrapper._pending_cursor
+        if pending is not None and pending() is self:
+            self.__connection_wrapper._set_pending_cursor(None)
 
     def executemany(
         self,
@@ -390,7 +470,9 @@ class CursorWrapper:
             params = parameters
         else:
             params = list(parameters)
+        self._before_execute()
         self.__c.executemany(statement, params)
+        self._after_execute()
 
     def execute(
         self,
@@ -398,6 +480,7 @@ class CursorWrapper:
         parameters: Optional[Tuple] = None,
         context: Optional[Any] = None,
     ) -> None:
+        self._before_execute()
         try:
             norm = statement.strip().lower().rstrip(";")
             if norm == "commit":  # this is largely for ipython-sql
@@ -411,6 +494,7 @@ class CursorWrapper:
             elif norm.startswith("register"):
                 view_name, df = _parse_register_params(parameters)
                 self.__c.register(view_name, df)
+                return
             elif norm == "show transaction isolation level":
                 self.__c.execute("select 'read committed' as transaction_isolation")
             elif norm == "show standard_conforming_strings":
@@ -419,6 +503,7 @@ class CursorWrapper:
                 self.__c.execute(statement)
             else:
                 self.__c.execute(statement, parameters)
+            self._after_execute()
         except RuntimeError as e:
             message = str(e)
             if message.startswith("Not implemented Error"):
@@ -436,10 +521,14 @@ class CursorWrapper:
         return self.__connection_wrapper
 
     def close(self) -> None:
-        pass  # closing cursors is not supported in duckdb
+        # closing cursors is not supported in duckdb; just drop this cursor's rows
+        self._buffered_rows = None
+        self._result_consumed()
 
     @property
     def description(self) -> Any:
+        if self._buffered_rows is not None:
+            return self._buffered_description
         desc = self.__c.description
         if desc is None:
             return None
@@ -454,10 +543,43 @@ class CursorWrapper:
             fixed.append(col)
         return fixed
 
+    @property
+    def rowcount(self) -> int:
+        if self._buffered_rows is not None:
+            return self._buffered_rowcount
+        return self.__c.rowcount
+
     def __getattr__(self, name: str) -> Any:
+        if self._buffered_rows is not None and name in _NATIVE_RESULT_FETCH_METHODS:
+            raise NotImplementedError(
+                f"{name}() is unavailable: another statement ran on this connection "
+                "before the result was consumed, so its remaining rows were "
+                "buffered as Python tuples"
+            )
         return getattr(self.__c, name)
 
+    def fetchone(self) -> Optional[Tuple[Any, ...]]:
+        if self._buffered_rows is not None:
+            return self._buffered_rows.popleft() if self._buffered_rows else None
+        row = self.__c.fetchone()
+        if row is None:
+            self._result_consumed()
+        return row
+
+    def fetchall(self) -> List:
+        if self._buffered_rows is not None:
+            rows = list(self._buffered_rows)
+            self._buffered_rows.clear()
+            return rows
+        rows = self.__c.fetchall()
+        self._result_consumed()
+        return rows
+
     def fetchmany(self, size: Optional[int] = None) -> List:
+        if self._buffered_rows is not None:
+            count = 1 if size is None else size
+            buffered = self._buffered_rows
+            return [buffered.popleft() for _ in range(min(count, len(buffered)))]
         if size is None:
             return self.__c.fetchmany()
         else:
@@ -2114,8 +2236,8 @@ class Dialect(PGDialect_psycopg2):
             )
         return query
 
-    # FIXME: this method is a hack around the fact that we use a single cursor for all queries inside a connection,
-    #   and this is required to fix get_multi_columns
+    # Reflect columns from duckdb_columns() rather than PostgreSQL's pg_catalog
+    # queries, which do not map DuckDB types or attached databases.
     def get_multi_columns(
         self,
         connection: "Connection",

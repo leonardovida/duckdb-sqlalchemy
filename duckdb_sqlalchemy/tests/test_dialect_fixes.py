@@ -1,11 +1,12 @@
 from decimal import Decimal
-from typing import Any, Iterable
+from typing import Any, Iterable, List
 
 import duckdb
 import pytest
 from sqlalchemy import (
     Column,
     Float,
+    ForeignKey,
     Integer,
     MetaData,
     Numeric,
@@ -21,6 +22,13 @@ from sqlalchemy import (
 from sqlalchemy import exc as sa_exc
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import NoSuchTableError
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Session,
+    mapped_column,
+    relationship,
+)
 
 from duckdb_sqlalchemy import Dialect
 
@@ -209,3 +217,73 @@ def test_create_all_creates_table_shadowed_by_other_schema(engine: Engine) -> No
             ).scalar_one()
             == 1
         )
+
+
+def test_statement_inside_result_loop_keeps_remaining_rows(engine: Engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE numbers AS SELECT range AS i FROM range(5)"))
+        conn.execute(text("CREATE TABLE seen (i INTEGER)"))
+
+        result = conn.execute(text("SELECT i FROM numbers ORDER BY i"))
+        first = result.fetchone()
+        assert first is not None
+        seen = [first.i]
+        for row in result:
+            conn.execute(text("INSERT INTO seen VALUES (:i)"), {"i": row.i})
+            assert conn.execute(text("SELECT 1")).scalar_one() == 1
+            seen.append(row.i)
+
+        assert seen == [0, 1, 2, 3, 4]
+        assert conn.execute(text("SELECT count(*) FROM seen")).scalar_one() == 4
+
+
+def test_commit_inside_yield_per_loop_keeps_remaining_rows(engine: Engine) -> None:
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE numbers AS SELECT range AS i FROM range(7)"))
+        conn.commit()
+        result = conn.execution_options(yield_per=2).execute(
+            text("SELECT i FROM numbers ORDER BY i")
+        )
+        seen = []
+        for row in result:
+            seen.append(row.i)
+            conn.commit()
+        assert seen == list(range(7))
+
+
+def test_orm_lazy_load_inside_iteration_keeps_all_parents(engine: Engine) -> None:
+    class Base(DeclarativeBase):
+        pass
+
+    class Parent(Base):
+        __tablename__ = "parent"
+        id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+        children: Mapped[List["Child"]] = relationship(lazy="select")
+
+    class Child(Base):
+        __tablename__ = "child"
+        id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+        parent_id: Mapped[int] = mapped_column(ForeignKey("parent.id"))
+
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add_all(
+            [Parent(id=i, children=[Child(id=i * 10)]) for i in range(1, 5)]
+        )
+        session.commit()
+
+    with Session(engine) as session:
+        parents = session.scalars(
+            select(Parent).order_by(Parent.id).execution_options(yield_per=1)
+        )
+        loaded = [(parent.id, [c.id for c in parent.children]) for parent in parents]
+    assert loaded == [(1, [10]), (2, [20]), (3, [30]), (4, [40])]
+
+
+def test_arrow_fetch_after_buffering_raises_clear_error(engine: Engine) -> None:
+    with engine.connect() as conn:
+        result = conn.exec_driver_sql("SELECT * FROM range(3)")
+        conn.exec_driver_sql("SELECT 1").all()
+        with pytest.raises(NotImplementedError, match="buffered"):
+            result.cursor.fetch_arrow_table()
+        assert result.all() == [(0,), (1,), (2,)]
