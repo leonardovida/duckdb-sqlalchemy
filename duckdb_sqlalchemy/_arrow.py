@@ -1,5 +1,7 @@
 from typing import Any
 
+from sqlalchemy.exc import InvalidRequestError
+
 
 class DuckDBArrowResult:
     def __init__(self, result: Any) -> None:
@@ -14,6 +16,13 @@ class DuckDBArrowResult:
             cursor = getattr(self._result, "_cursor", None)
         if cursor is None:
             raise NotImplementedError("Arrow results are not available on this cursor")
+        if getattr(cursor, "_rows_fetched", False):
+            # DuckDB reads rows in chunks, so after fetchone()/fetchmany() the
+            # Arrow table would silently miss part of the result.
+            raise InvalidRequestError(
+                "Arrow results are unavailable after rows were fetched from this "
+                "result; use .arrow before fetchone(), fetchmany() or iteration"
+            )
         fetch_arrow_table = getattr(cursor, "to_arrow_table", None)
         if fetch_arrow_table is None:
             fetch_arrow_table = getattr(cursor, "fetch_arrow_table", None)

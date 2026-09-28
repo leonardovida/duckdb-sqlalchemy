@@ -555,3 +555,16 @@ def test_arraysize_option_sets_default_fetchmany_size(
             stream_results=True, **{option: 4}
         ).exec_driver_sql("SELECT * FROM range(10)")
         assert [row[0] for row in streamed] == list(range(10))
+
+
+def test_arrow_after_row_fetch_raises_instead_of_dropping_rows(engine: Engine) -> None:
+    pytest.importorskip("pyarrow")
+    with engine.connect() as conn:
+        arrow_conn = conn.execution_options(duckdb_arrow=True)
+        result = arrow_conn.exec_driver_sql("SELECT * FROM range(5000)")
+        assert result.fetchone() == (0,)
+        with pytest.raises(sa_exc.InvalidRequestError, match="after rows were fetched"):
+            result.arrow
+
+        fresh = arrow_conn.exec_driver_sql("SELECT * FROM range(5000)")
+        assert fresh.arrow.num_rows == 5000

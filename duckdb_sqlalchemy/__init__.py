@@ -463,6 +463,9 @@ class CursorWrapper:
         self._buffered_rows: Optional[deque] = None
         self._buffered_description: Any = None
         self._buffered_rowcount: int = -1
+        # True once rows of the current result were read as Python tuples;
+        # DuckDB then cannot return the rest of that result as Arrow.
+        self._rows_fetched = False
 
     def _clear_result(self) -> None:
         self.__c.execute("")
@@ -471,6 +474,7 @@ class CursorWrapper:
         self.__connection_wrapper._buffer_pending_result(self)
         self._buffered_rows = None
         self._buffered_description = None
+        self._rows_fetched = False
 
     def _after_execute(self) -> None:
         if getattr(self.__c, "description", None) is not None:
@@ -600,6 +604,7 @@ class CursorWrapper:
     def fetchone(self) -> Optional[Tuple[Any, ...]]:
         if self._buffered_rows is not None:
             return self._buffered_rows.popleft() if self._buffered_rows else None
+        self._rows_fetched = True
         row = self.__c.fetchone()
         if row is None:
             self._result_consumed()
@@ -610,6 +615,7 @@ class CursorWrapper:
             rows = list(self._buffered_rows)
             self._buffered_rows.clear()
             return rows
+        self._rows_fetched = True
         rows = self.__c.fetchall()
         self._result_consumed()
         return rows
@@ -619,6 +625,7 @@ class CursorWrapper:
         if self._buffered_rows is not None:
             buffered = self._buffered_rows
             return [buffered.popleft() for _ in range(min(count, len(buffered)))]
+        self._rows_fetched = True
         return self.__c.fetchmany(count)
 
 
