@@ -568,3 +568,125 @@ def test_arrow_after_row_fetch_raises_instead_of_dropping_rows(engine: Engine) -
 
         fresh = arrow_conn.exec_driver_sql("SELECT * FROM range(5000)")
         assert fresh.arrow.num_rows == 5000
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (Decimal("1E+5"), Decimal("100000.00")),
+        (Decimal("1.5E+3"), Decimal("1500.00")),
+        (Decimal(100).normalize(), Decimal("100.00")),
+    ],
+)
+def test_positive_exponent_decimal_binds_keep_magnitude(
+    engine: Engine, value: Decimal, expected: Decimal
+) -> None:
+    table = Table(
+        "exp_decimals",
+        MetaData(),
+        Column("n", Numeric(12, 2)),
+        Column("f", Float),
+    )
+    with engine.begin() as conn:
+        table.create(conn)
+        conn.execute(table.insert(), {"n": value, "f": value})
+        assert conn.execute(select(table.c.n, table.c.f)).one() == (
+            expected,
+            float(expected),
+        )
+        assert (
+            conn.execute(
+                select(func.count()).select_from(table).where(table.c.n == value)
+            ).scalar()
+            == 1
+        )
+
+
+@pytest.mark.parametrize("prefix", ["OR REPLACE", "OR IGNORE"])
+def test_bulk_insert_with_prefix_keeps_prefix(
+    registered_views: List[Any], prefix: str
+) -> None:
+    engine = create_engine("duckdb:///:memory:")
+    table = Table(
+        "prefixed",
+        MetaData(),
+        Column("id", Integer, primary_key=True, autoincrement=False),
+        Column("v", String),
+    )
+    rows = [{"id": 1, "v": "new"}, {"id": 2, "v": "new"}]
+    with engine.begin() as conn:
+        table.create(conn)
+        conn.execute(table.insert(), {"id": 1, "v": "old"})
+        conn.execution_options(duckdb_copy_threshold=2).execute(
+            table.insert().prefix_with(prefix), rows
+        )
+        assert conn.execute(select(func.count()).select_from(table)).scalar() == 2
+
+    assert registered_views == []
+
+
+def test_bulk_insert_with_sequence_default_uses_sequence(
+    registered_views: List[Any],
+) -> None:
+    from sqlalchemy import Sequence
+
+    engine = create_engine("duckdb:///:memory:")
+    table = Table(
+        "sequenced",
+        MetaData(),
+        Column("id", Integer, Sequence("sequenced_seq"), primary_key=True),
+        Column("v", String),
+    )
+    with engine.begin() as conn:
+        table.create(conn)
+        conn.execution_options(duckdb_copy_threshold=2).execute(
+            table.insert(), [{"v": "a"}, {"v": "b"}, {"v": "c"}]
+        )
+        assert conn.execute(
+            select(table.c.id).order_by(table.c.id)
+        ).scalars().all() == [
+            1,
+            2,
+            3,
+        ]
+
+    assert registered_views == []
+
+
+def test_bulk_insert_during_iteration_keeps_open_result() -> None:
+    engine = create_engine("duckdb:///:memory:")
+    target = Table("bulk_target", MetaData(), Column("a", Integer))
+    with engine.begin() as conn:
+        conn.exec_driver_sql("CREATE TABLE src AS SELECT range AS i FROM range(5000)")
+        target.create(conn)
+        result = conn.execute(text("SELECT i FROM src ORDER BY i"))
+        first = result.fetchone()
+        conn.execution_options(duckdb_copy_threshold=100).execute(
+            target.insert(), [{"a": i} for i in range(1000)]
+        )
+        rest = result.fetchall()
+
+    assert first == (0,)
+    assert len(rest) == 4999
+
+
+def test_rollback_does_not_buffer_partly_read_result(engine: Engine) -> None:
+    with engine.connect() as conn:
+        result = conn.execute(text("SELECT range AS i FROM range(100000)"))
+        result.fetchone()
+        cursor = result.cursor
+        conn.rollback()
+
+    assert getattr(cursor, "_buffered_rows", None) is None
+
+
+def test_search_path_into_other_database_is_reflected(engine: Engine) -> None:
+    with engine.connect() as conn:
+        conn.exec_driver_sql("ATTACH ':memory:' AS db2")
+        conn.exec_driver_sql("CREATE TABLE db2.main.only2 (a INTEGER)")
+        conn.exec_driver_sql("SET search_path = 'memory.main,db2.main'")
+
+        assert conn.exec_driver_sql("SELECT count(*) FROM only2").scalar() == 0
+        assert inspect(conn).has_table("only2")
+        reflected = Table("only2", MetaData(), autoload_with=conn)
+        assert [column.name for column in reflected.columns] == ["a"]

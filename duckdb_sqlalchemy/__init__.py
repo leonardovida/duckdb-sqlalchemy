@@ -306,7 +306,18 @@ class DuckDBInspector(PGInspector):
 
 # DuckDBPyConnection calls that replace or discard the connection's open result.
 _RESULT_DISCARDING_CONNECTION_METHODS = frozenset(
-    {"execute", "executemany", "query", "sql"}
+    {
+        "append",
+        "checkpoint",
+        "execute",
+        "executemany",
+        "install_extension",
+        "load_extension",
+        "query",
+        "register",
+        "sql",
+        "unregister",
+    }
 )
 # Cursor calls that read the open result in a form other than Python rows.
 _NATIVE_RESULT_FETCH_METHODS = frozenset(
@@ -326,6 +337,13 @@ _NATIVE_RESULT_FETCH_METHODS = frozenset(
         "torch",
     }
 )
+
+
+def _search_path_relation(entry: str, current_database: str) -> Tuple[str, str]:
+    parts = [part.strip().strip('"') for part in entry.strip().split(".", 1)]
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return current_database, parts[0]
 
 
 class ConnectionWrapper:
@@ -383,7 +401,10 @@ class ConnectionWrapper:
         self.__c.commit()
 
     def rollback(self) -> None:
-        self._buffer_pending_result()
+        # Rolling back ends the unit of work, and it runs on every pool
+        # checkin; buffering here would download the rest of any partly read
+        # result. Forget the pending cursor instead.
+        self._pending_cursor = None
         self._transaction_statements = None
         self.__c.rollback()
 
@@ -907,6 +928,16 @@ class DuckDBDDLCompiler(PGDDLCompiler):
         return colspec
 
 
+def _process_decimal_bind(value: Any) -> Any:
+    # DuckDB's binder drops a positive exponent (``Decimal("1E+5")`` binds as
+    # ``1.00000``), so rewrite such values without an exponent first.
+    if isinstance(value, decimal.Decimal) and value.is_finite():
+        exponent = value.as_tuple().exponent
+        if isinstance(exponent, int) and exponent > 0:
+            return decimal.Decimal(format(value, "f"))
+    return value
+
+
 class DuckDBNumeric(sqltypes.Numeric):
     """Numeric for a DBAPI that binds and returns ``Decimal`` natively.
 
@@ -914,6 +945,9 @@ class DuckDBNumeric(sqltypes.Numeric):
     SQLAlchemy types as Numeric (``avg()`` over a DECIMAL column, for example)
     may return DOUBLE or integer values, so only those are converted.
     """
+
+    def bind_processor(self, dialect: Any) -> Any:
+        return _process_decimal_bind
 
     def result_processor(self, dialect: Any, coltype: object) -> Any:
         if not self.asdecimal:
@@ -933,6 +967,11 @@ class DuckDBNumeric(sqltypes.Numeric):
             return value
 
         return process
+
+
+class DuckDBFloat(sqltypes.Float):
+    def bind_processor(self, dialect: Any) -> Any:
+        return _process_decimal_bind
 
 
 class DuckDBNullType(sqltypes.NullType):
@@ -967,7 +1006,7 @@ class Dialect(PGDialect_psycopg2):
             # the psycopg2 driver registers a _PGNumeric with custom logic for
             # postgres type_codes (such as 701 for float) that duckdb doesn't have
             sqltypes.Numeric: DuckDBNumeric,
-            sqltypes.Float: sqltypes.Float,
+            sqltypes.Float: DuckDBFloat,
             sqltypes.JSON: sqltypes.JSON,
             UUID: UUID,
         },
@@ -1384,12 +1423,27 @@ class Dialect(PGDialect_psycopg2):
             relations_by_table[row["table_name"]].add(
                 (row["database_name"], row["schema_name"])
             )
-        current_database, current_schema, search_path = connection.execute(
-            text("SELECT current_database(), current_schema(), current_schemas(false)")
-        ).one()
-        search_order = {
-            schema_name: index + 2 for index, schema_name in enumerate(search_path)
-        }
+        current_database, current_schema, search_path, search_path_setting = (
+            connection.execute(
+                text(
+                    "SELECT current_database(), current_schema(), "
+                    "current_schemas(false), current_setting('search_path')"
+                )
+            ).one()
+        )
+        # search_path entries may name another database ("db2.main");
+        # unqualified entries refer to the current database.
+        search_entries = [
+            _search_path_relation(entry, current_database)
+            for entry in str(search_path_setting or "").split(",")
+            if entry.strip()
+        ]
+        search_entries.extend(
+            (current_database, schema_name) for schema_name in search_path
+        )
+        search_order: Dict[Tuple[str, str], int] = {}
+        for entry in search_entries:
+            search_order.setdefault(entry, len(search_order) + 2)
 
         visible_relations: Dict[str, Tuple[str, str]] = {}
         for table_name, relations in relations_by_table.items():
@@ -1398,11 +1452,12 @@ class Dialect(PGDialect_psycopg2):
                 database_name, schema_name = relation
                 if database_name == "temp":
                     ranked.append((0, relation))
-                elif database_name == current_database:
-                    if schema_name == current_schema:
-                        ranked.append((1, relation))
-                    elif schema_name in search_order:
-                        ranked.append((search_order[schema_name], relation))
+                elif (
+                    database_name == current_database and schema_name == current_schema
+                ):
+                    ranked.append((1, relation))
+                elif relation in search_order:
+                    ranked.append((search_order[relation], relation))
             if ranked:
                 visible_relations[table_name] = min(ranked)[1]
 
@@ -2036,8 +2091,18 @@ class Dialect(PGDialect_psycopg2):
         # expressions and SQL defaults must retain their original compiled SQL.
         if getattr(stmt, "_values", None) or getattr(stmt, "_ordered_values", None):
             return None
+        # The rewritten INSERT ... SELECT would drop prefixes (OR REPLACE,
+        # OR IGNORE), hints and CTEs.
+        if (
+            getattr(stmt, "_prefixes", None)
+            or getattr(stmt, "_hints", None)
+            or getattr(stmt, "_statement_hints", None)
+            or getattr(stmt, "_independent_ctes", None)
+        ):
+            return None
         if any(
-            column.default is not None and column.default.is_clause_element
+            column.default is not None
+            and (column.default.is_clause_element or column.default.is_sequence)
             for column in table.columns
         ):
             return None
