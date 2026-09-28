@@ -658,7 +658,7 @@ def test_pool_defaults_for_memory_and_file_urls(tmp_path: Path) -> None:
 
     assert isinstance(exact_memory.pool, SingletonThreadPool)
     assert isinstance(named_memory.pool, QueuePool)
-    assert isinstance(empty_database.pool, QueuePool)
+    assert isinstance(empty_database.pool, SingletonThreadPool)
     assert isinstance(file_database.pool, QueuePool)
 
 
