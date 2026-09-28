@@ -31,7 +31,7 @@ PostgreSQL-compatible. See `ARCHITECTURE.md` for the module map and invariants.
 - Pool defaults: `SingletonThreadPool` for `:memory:` and `duckdb://`,
   `QueuePool` for files and named `:memory:name` databases, `NullPool` for
   MotherDuck (`md:`/`motherduck:`).
-- Bulk inserts over `duckdb_copy_threshold` (default 10k rows) use DataFrame/Arrow registration.
+- Bulk inserts over `duckdb_copy_threshold` (default 10k rows) register an Arrow table (pandas fallback) and run `INSERT ... SELECT`.
 - MotherDuck tokens are read from `MOTHERDUCK_TOKEN` (or `motherduck_token`) for MotherDuck databases.
 
 ## Supported Versions

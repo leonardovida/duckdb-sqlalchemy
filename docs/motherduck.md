@@ -201,6 +201,12 @@ with engine.connect() as conn:
     conn.execute(text("select 1"))
 ```
 
+Retries only happen for idempotent statements, and only when no earlier
+statement in the current transaction would be lost: either outside a
+transaction, or when the failed statement was the first one in it (the dialect
+rolls back and begins again). Otherwise the original error is raised. Queries
+that call `md_*` table functions, `nextval`, or `setval` are never retried.
+
 ### Multiple client-side instances
 
 To force distinct client instances, rotate across multiple database paths:

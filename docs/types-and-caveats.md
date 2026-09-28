@@ -68,7 +68,28 @@ with engine.connect().execution_options(
 - `duckdb_insertmanyvalues_page_size`: deprecated alias for `insertmanyvalues_page_size`; still supported for backward compatibility.
 - `duckdb_arraysize`: cursor fetch size for `stream_results` / `fetchmany` workloads.
 
-Arrow results consume the cursor; fetch rows or Arrow, not both.
+Arrow results consume the cursor; fetch rows or Arrow, not both. Reading
+`.arrow` after fetching rows raises `InvalidRequestError`.
+
+## Interleaved statements
+
+All cursors of a SQLAlchemy connection share one DuckDB connection. If you run
+another statement while an earlier result is still unread (for example an ORM
+lazy load inside a loop), the dialect first buffers the rest of the earlier
+result in memory so it is not truncated. Arrow and DataFrame fetches are not
+available on a buffered result. Read large results fully, or use a separate
+connection, to avoid the memory cost.
+
+## Isolation levels
+
+DuckDB has a single transaction isolation level. The dialect accepts
+`isolation_level="AUTOCOMMIT"` (no `BEGIN` is issued) and the default
+`"READ COMMITTED"`; other levels raise `ArgumentError`.
+
+## Numeric precision
+
+`Numeric`/`DECIMAL` values are bound and returned as `decimal.Decimal` without
+passing through float. Use `Numeric(asdecimal=False)` or `Float` for floats.
 
 ## Auto-increment columns
 

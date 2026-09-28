@@ -315,7 +315,10 @@ with engine.begin() as conn:
     conn.execute(events.insert(), rows)
 ```
 
-If `pyarrow`/`pandas` are unavailable, the dialect falls back to regular
+The fast path applies with default engine settings to plain INSERTs without
+SQL defaults or explicit VALUES. It registers an Arrow table when `pyarrow` is
+installed, otherwise a pandas DataFrame (integer columns with NULLs use nullable
+`Int64`). If neither is available, the dialect falls back to regular
 `executemany`. The bulk-register path is skipped when `RETURNING` or
 `ON CONFLICT` is in use.
 
