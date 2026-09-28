@@ -450,6 +450,9 @@ def _parse_register_params(parameters: Optional[Any]) -> Tuple[str, Any]:
 class CursorWrapper:
     __c: duckdb.DuckDBPyConnection
     __connection_wrapper: "ConnectionWrapper"
+    # rows fetchmany() returns without a size (DBAPI default: 1); set from the
+    # duckdb_arraysize/arraysize execution options
+    arraysize = 1
 
     def __init__(
         self, c: duckdb.DuckDBPyConnection, connection_wrapper: "ConnectionWrapper"
@@ -612,14 +615,11 @@ class CursorWrapper:
         return rows
 
     def fetchmany(self, size: Optional[int] = None) -> List:
+        count = self.arraysize if size is None else size
         if self._buffered_rows is not None:
-            count = 1 if size is None else size
             buffered = self._buffered_rows
             return [buffered.popleft() for _ in range(min(count, len(buffered)))]
-        if size is None:
-            return self.__c.fetchmany()
-        else:
-            return self.__c.fetchmany(size)
+        return self.__c.fetchmany(count)
 
 
 def _is_ignored_postgres_config_set(statement: str) -> bool:

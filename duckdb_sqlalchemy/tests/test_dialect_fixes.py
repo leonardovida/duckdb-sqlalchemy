@@ -536,3 +536,22 @@ def test_check_constraints_of_missing_table_raise_no_such_table(
             with pytest.raises(NoSuchTableError):
                 inspector.get_check_constraints(table_name)
         assert inspector.get_check_constraints("main_t") == []
+
+
+@pytest.mark.parametrize("option", ["duckdb_arraysize", "arraysize"])
+def test_arraysize_option_sets_default_fetchmany_size(
+    engine: Engine, option: str
+) -> None:
+    with engine.connect() as conn:
+        result = conn.execution_options(**{option: 3}).exec_driver_sql(
+            "SELECT * FROM range(10)"
+        )
+        assert result.cursor.arraysize == 3
+        assert len(result.fetchmany()) == 3
+        assert len(result.fetchmany(5)) == 5
+        assert len(result.fetchall()) == 2
+
+        streamed = conn.execution_options(
+            stream_results=True, **{option: 4}
+        ).exec_driver_sql("SELECT * FROM range(10)")
+        assert [row[0] for row in streamed] == list(range(10))
