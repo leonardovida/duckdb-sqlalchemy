@@ -9,8 +9,10 @@ import pytest
 
 import duckdb_sqlalchemy
 from duckdb_sqlalchemy import (
+    URL,
     Dialect,
 )
+from duckdb_sqlalchemy.url import make_url
 
 EXAMPLES_DIR = Path(__file__).resolve().parents[2] / "examples"
 requires_examples = pytest.mark.skipif(
@@ -94,3 +96,14 @@ def test_connect_releases_file_when_config_fails(tmp_path: Path) -> None:
     conn = duckdb.connect(db_path, config={"access_mode": "read_only"})
     conn.close()
     assert excinfo.value is not None
+
+
+# 10. duckdb_sqlalchemy.make_url is deprecated.
+
+
+def test_make_url_is_deprecated_but_still_works() -> None:
+    with pytest.warns(DeprecationWarning, match="duckdb_sqlalchemy.URL"):
+        url = make_url(database="local.db", threads=4)
+
+    assert url == URL(database="local.db", threads=4)
+    assert duckdb_sqlalchemy.make_url is make_url
