@@ -3,6 +3,7 @@ from typing import Any, Iterable, List
 
 import duckdb
 import pytest
+from packaging.version import Version
 from sqlalchemy import (
     BigInteger,
     Column,
@@ -302,6 +303,13 @@ class _FailOnce:
 
 
 _FLAKY_QUERY = "SELECT flaky(i) AS value FROM range(1) t(i)"
+# DuckDB 2.0 streams results, so the UDF error surfaces on fetch, after the
+# retry wrapper around execute has returned.
+_streams_execution_errors = pytest.mark.xfail(
+    Version(duckdb.__version__) >= Version("2.0.0.dev0"),
+    reason="DuckDB 2.0 raises execution errors while fetching, outside retries",
+    strict=True,
+)
 _RETRY_OPTIONS = {"duckdb_retry_on_transient": True, "duckdb_retry_count": 2}
 
 
@@ -319,6 +327,7 @@ def _register_flaky(conn: Any) -> _FailOnce:
     return _create_flaky_function(conn.connection.driver_connection)
 
 
+@_streams_execution_errors
 def test_retry_reruns_first_statement_of_transaction(engine: Engine) -> None:
     with engine.connect() as conn:
         flaky = _register_flaky(conn)
@@ -328,6 +337,7 @@ def test_retry_reruns_first_statement_of_transaction(engine: Engine) -> None:
         assert conn.execute(text("SELECT 1")).scalar_one() == 1
 
 
+@_streams_execution_errors
 def test_retry_mid_transaction_raises_original_error(engine: Engine) -> None:
     with engine.connect() as conn:
         flaky = _register_flaky(conn)
@@ -338,6 +348,7 @@ def test_retry_mid_transaction_raises_original_error(engine: Engine) -> None:
         assert flaky.calls == 1
 
 
+@_streams_execution_errors
 def test_retry_in_untracked_transaction_raises_original_error() -> None:
     from duckdb_sqlalchemy import ConnectionWrapper
 

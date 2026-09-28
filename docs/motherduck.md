@@ -205,7 +205,8 @@ Retries only happen for idempotent statements, and only when no earlier
 statement in the current transaction would be lost: either outside a
 transaction, or when the failed statement was the first one in it (the dialect
 rolls back and begins again). Otherwise the original error is raised. Queries
-that call `md_*` table functions, `nextval`, or `setval` are never retried.
+that call `md_*` table functions, `nextval`, or `setval` are never retried. Only errors raised while the statement executes are retried; an error raised later while
+rows are fetched from a streaming result is not.
 
 ### Multiple client-side instances
 
