@@ -1,8 +1,10 @@
 """Regression tests for connection URL, pooling, and token handling fixes."""
 
+import importlib.util
 import warnings
 from pathlib import Path
-from typing import Any, Dict
+from types import ModuleType
+from typing import Any, Dict, cast
 from urllib.parse import parse_qs
 
 import duckdb
@@ -19,6 +21,8 @@ from duckdb_sqlalchemy import (
     DuckDBEngineWarning,
     MotherDuckURL,
     _apply_motherduck_defaults,
+    create_engine_from_paths,
+    create_motherduck_engine,
 )
 from duckdb_sqlalchemy import motherduck as md
 from duckdb_sqlalchemy.url import make_url
@@ -329,6 +333,118 @@ def test_validate_motherduck_database_name_is_case_insensitive(
 
 def test_validate_allows_commas_in_local_paths() -> None:
     md.validate_motherduck_database_name("local,file.db")
+
+
+# 8. create_motherduck_engine / create_engine_from_paths engine kwargs.
+
+
+def test_create_motherduck_engine_routes_engine_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MOTHERDUCK_TOKEN", "fake")
+
+    engine = create_motherduck_engine(
+        database="md:my_db",
+        attach_mode="single",
+        threads=4,
+        pool_size=3,
+        max_overflow=2,
+        pool_timeout=5,
+        echo=True,
+        execution_options={"duckdb_arraysize": 10},
+    )
+
+    assert isinstance(engine.pool, pool.QueuePool)
+    assert engine.pool.size() == 3
+    assert engine.echo is True
+    assert engine.get_execution_options()["duckdb_arraysize"] == 10
+    assert dict(engine.url.query) == {"threads": "4", "attach_mode": "single"}
+    _, kwargs = engine.dialect.create_connect_args(engine.url)
+    assert kwargs["database"] == "md:my_db?attach_mode=single"
+    assert kwargs["url_config"] == {"threads": "4"}
+
+
+def test_create_motherduck_engine_keeps_nullpool_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MOTHERDUCK_TOKEN", "fake")
+
+    engine = create_motherduck_engine(database="md:my_db", pool_recycle=60)
+
+    assert isinstance(engine.pool, pool.NullPool)
+
+
+def test_create_engine_from_paths_with_pool_sizing_uses_queue_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MOTHERDUCK_TOKEN", "fake")
+    calls = []
+
+    def fake_connect(self: Any, *cargs: Any, **cparams: Any) -> object:
+        calls.append(cparams)
+        return object()
+
+    monkeypatch.setattr(duckdb_sqlalchemy.Dialect, "connect", fake_connect)
+
+    engine = create_engine_from_paths(
+        ["md:db?user=1", "md:db?user=2"], pool_size=2, max_overflow=1
+    )
+
+    assert isinstance(engine.pool, pool.QueuePool)
+    assert engine.pool.size() == 2
+    creator = cast(Any, engine.pool)._creator
+    creator()
+    creator()
+    creator()
+    assert [c["database"] for c in calls] == [
+        "md:db?user=1",
+        "md:db?user=2",
+        "md:db?user=1",
+    ]
+
+
+def _load_example(name: str) -> ModuleType:
+    path = EXAMPLES_DIR / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"example_{name}", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@requires_examples
+def test_example_multi_instance_pool_builds_offline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MOTHERDUCK_TOKEN", "fake")
+    module = _load_example("motherduck_multi_instance_pool")
+
+    engine = module.build_engine()
+
+    assert isinstance(engine.pool, pool.QueuePool)
+    assert engine.pool.size() == 5
+    assert engine.url.database == "md:my_db?attach_mode=single&user=1"
+
+
+@requires_examples
+def test_example_read_scaling_per_user_builds_offline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MOTHERDUCK_TOKEN", "fake")
+    module = _load_example("motherduck_read_scaling_per_user")
+
+    engine = module.get_engine_for_user("user-123")
+
+    assert isinstance(engine.pool, pool.QueuePool)
+    assert engine.pool.size() == 5
+    assert engine.url.database == "md:my_db"
+    _, kwargs = engine.dialect.create_connect_args(engine.url)
+    assert _query(kwargs["database"]) == {
+        "attach_mode": ["single"],
+        "access_mode": ["read_only"],
+        "session_name": [engine.url.query["session_name"]],
+    }
+    assert kwargs["url_config"] == {}
 
 
 # 9. Connection setup failures close the DuckDB connection.

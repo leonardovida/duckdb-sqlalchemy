@@ -101,6 +101,40 @@ MOTHERDUCK_CREDENTIAL_KEYS = frozenset(
 DIALECT_QUERY_KEYS = {"duckdb_sqlalchemy_pool", "pool"}
 CONNECT_ARG_MAPPING_KEYS = ("config", "url_config")
 
+# ``sqlalchemy.create_engine`` keyword arguments that ``create_motherduck_engine``
+# forwards to the engine instead of treating them as DuckDB/MotherDuck config.
+CREATE_ENGINE_KWARGS = frozenset(
+    {
+        "creator",
+        "echo",
+        "echo_pool",
+        "enable_from_linting",
+        "execution_options",
+        "hide_parameters",
+        "insertmanyvalues_page_size",
+        "isolation_level",
+        "json_deserializer",
+        "json_serializer",
+        "label_length",
+        "logging_name",
+        "max_identifier_length",
+        "max_overflow",
+        "paramstyle",
+        "plugins",
+        "pool_logging_name",
+        "pool_reset_on_return",
+        "pool_size",
+        "pool_timeout",
+        "pool_use_lifo",
+        "query_cache_size",
+        "use_insertmanyvalues",
+    }
+)
+# Arguments only ``QueuePool`` accepts; passing them implies pooling.
+QUEUE_POOL_KWARGS = frozenset(
+    {"pool_size", "max_overflow", "pool_timeout", "pool_use_lifo"}
+)
+
 
 def _warn_deprecated_ttl_alias() -> None:
     warnings.warn(
@@ -387,6 +421,13 @@ def stable_session_hint(
     return stable_session_name(value, salt=salt, length=length)
 
 
+def _default_to_queue_pool(engine_kwargs: Dict[str, Any]) -> None:
+    if "poolclass" in engine_kwargs or "pool" in engine_kwargs:
+        return
+    if any(key in engine_kwargs for key in QUEUE_POOL_KWARGS):
+        engine_kwargs["poolclass"] = QueuePool
+
+
 def create_motherduck_engine(
     *,
     database: str,
@@ -398,9 +439,23 @@ def create_motherduck_engine(
     pool_recycle: Optional[int] = None,
     **path_params: Any,
 ) -> sqlalchemy.engine.Engine:
+    """
+    Create an engine for a MotherDuck database.
+
+    Extra keyword arguments are MotherDuck path params or DuckDB config, except
+    for known ``sqlalchemy.create_engine`` arguments (``pool_size``,
+    ``max_overflow``, ``echo``, ``execution_options``, ...), which are passed
+    to ``create_engine``. Pool sizing arguments without an explicit
+    ``poolclass`` select ``QueuePool``.
+    """
+
+    engine_kwargs: Dict[str, Any] = {
+        key: path_params.pop(key)
+        for key in list(path_params)
+        if key in CREATE_ENGINE_KWARGS
+    }
     url = MotherDuckURL(database=database, query=query, **path_params)
 
-    engine_kwargs: Dict[str, Any] = {}
     if poolclass is not None:
         engine_kwargs["poolclass"] = poolclass
     if pool_pre_ping is not None:
@@ -412,6 +467,7 @@ def create_motherduck_engine(
         engine_kwargs.setdefault("poolclass", QueuePool)
         engine_kwargs.setdefault("pool_pre_ping", True)
         engine_kwargs.setdefault("pool_recycle", 23 * 3600)
+    _default_to_queue_pool(engine_kwargs)
 
     return create_engine(url, connect_args=dict(connect_args or {}), **engine_kwargs)
 
@@ -476,4 +532,5 @@ def create_engine_from_paths(
         params = _copy_connect_params(next(params_cycle))
         return dialect.connect(**params)
 
+    _default_to_queue_pool(engine_kwargs)
     return create_engine(urls[0], creator=creator, **engine_kwargs)
