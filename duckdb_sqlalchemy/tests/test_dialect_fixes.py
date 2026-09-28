@@ -525,3 +525,14 @@ def test_format_schema_does_not_requote_quoted_component(engine: Engine) -> None
         table.create(conn)
         conn.execute(table.insert(), [{"id": 1}])
         assert conn.execute(select(table.c.id)).scalars().all() == [1]
+
+
+def test_check_constraints_of_missing_table_raise_no_such_table(
+    multi_catalog_engine: Engine,
+) -> None:
+    with multi_catalog_engine.connect() as conn:
+        inspector = inspect(conn)
+        for table_name in ("does_not_exist", "only_in_other"):
+            with pytest.raises(NoSuchTableError):
+                inspector.get_check_constraints(table_name)
+        assert inspector.get_check_constraints("main_t") == []

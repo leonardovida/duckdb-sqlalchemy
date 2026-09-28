@@ -297,6 +297,8 @@ class DuckDBInspector(PGInspector):
     ) -> Any:
         try:
             return super().get_check_constraints(table_name, schema, **kw)
+        except NoSuchTableError:
+            raise
         except Exception as e:
             raise NotImplementedError() from e
 
