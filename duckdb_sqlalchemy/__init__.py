@@ -1,3 +1,4 @@
+import decimal
 import os
 import re
 import time
@@ -38,6 +39,7 @@ from sqlalchemy.dialects.postgresql.base import (
     PGInspector,
 )
 from sqlalchemy.dialects.postgresql.psycopg2 import PGDialect_psycopg2
+from sqlalchemy.engine import processors
 from sqlalchemy.engine.default import DefaultDialect, DefaultExecutionContext
 from sqlalchemy.engine.reflection import ReflectionDefaults, cache
 from sqlalchemy.engine.url import URL as SAURL
@@ -714,6 +716,34 @@ class DuckDBDDLCompiler(PGDDLCompiler):
         return colspec
 
 
+class DuckDBNumeric(sqltypes.Numeric):
+    """Numeric for a DBAPI that binds and returns ``Decimal`` natively.
+
+    DECIMAL columns come back as exact ``Decimal`` values, but expressions
+    SQLAlchemy types as Numeric (``avg()`` over a DECIMAL column, for example)
+    may return DOUBLE or integer values, so only those are converted.
+    """
+
+    def result_processor(self, dialect: Any, coltype: object) -> Any:
+        if not self.asdecimal:
+            return processors.to_float
+        float_to_decimal = processors.to_decimal_processor_factory(
+            decimal.Decimal,
+            self.scale
+            if self.scale is not None
+            else self._default_decimal_return_scale,
+        )
+
+        def process(value: Any) -> Any:
+            if isinstance(value, float):
+                return float_to_decimal(value)
+            if isinstance(value, int) and not isinstance(value, bool):
+                return decimal.Decimal(value)
+            return value
+
+        return process
+
+
 class DuckDBNullType(sqltypes.NullType):
     def result_processor(self, dialect: Any, coltype: object) -> Any:
         if coltype == "JSON":
@@ -730,6 +760,8 @@ class Dialect(PGDialect_psycopg2):
     supports_comments = False
     supports_sane_rowcount = False
     supports_server_side_cursors = False
+    # duckdb binds and returns decimal.Decimal without going through float
+    supports_native_decimal = True
     execution_ctx_cls = DuckDBExecutionContext
     div_is_floordiv = False  # TODO: tweak this to be based on DuckDB version
     inspector = DuckDBInspector
@@ -743,7 +775,8 @@ class Dialect(PGDialect_psycopg2):
         {
             # the psycopg2 driver registers a _PGNumeric with custom logic for
             # postgres type_codes (such as 701 for float) that duckdb doesn't have
-            sqltypes.Numeric: sqltypes.Numeric,
+            sqltypes.Numeric: DuckDBNumeric,
+            sqltypes.Float: sqltypes.Float,
             sqltypes.JSON: sqltypes.JSON,
             UUID: UUID,
         },
