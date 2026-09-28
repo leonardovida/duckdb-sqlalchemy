@@ -251,8 +251,8 @@ def test_create_connect_args_defaults_to_memory_before_path_query() -> None:
     args, kwargs = dialect.create_connect_args(url)
 
     assert args == ()
-    assert kwargs["database"] == ":memory:?access_mode=read_only"
-    assert kwargs["url_config"] == {"threads": "4"}
+    assert kwargs["database"] == ":memory:"
+    assert kwargs["url_config"] == {"access_mode": "read_only", "threads": "4"}
 
 
 def test_create_connect_args_strips_pool_override() -> None:
@@ -444,15 +444,22 @@ def test_motherduck_url_builder_moves_path_params() -> None:
             query={"memory_limit": "1GB"},
         )
 
-    assert url.database is not None
-    database, query = url.database.split("?", 1)
+    assert url.database == "md:my_db"
+    assert url.query == {
+        "memory_limit": "1GB",
+        "session_name": "team-a",
+        "attach_mode": "single",
+        "dbinstance_inactivity_ttl": "15m",
+    }
+    _, kwargs = Dialect().create_connect_args(url)
+    database, query = kwargs["database"].split("?", 1)
     assert database == "md:my_db"
     assert parse_qs(query) == {
         "session_name": ["team-a"],
         "attach_mode": ["single"],
         "dbinstance_inactivity_ttl": ["15m"],
     }
-    assert url.query == {"memory_limit": "1GB"}
+    assert kwargs["url_config"] == {"memory_limit": "1GB"}
 
 
 def test_stable_session_name_is_deterministic() -> None:
@@ -563,14 +570,17 @@ def test_get_core_config_includes_motherduck_keys() -> None:
 def test_looks_like_motherduck_detection() -> None:
     assert _looks_like_motherduck("md:db", {}) is True
     assert _looks_like_motherduck("motherduck:db", {}) is True
-    assert _looks_like_motherduck("local.db", {"token": "x"}) is True
-    assert _looks_like_motherduck("local.db", {"motherduck_token": "x"}) is True
-    assert _looks_like_motherduck("local.db", {"motherduck_oauth_token": "x"}) is True
+    # Detection is based on the database string only.
+    assert _looks_like_motherduck("local.db", {"token": "x"}) is False
+    assert _looks_like_motherduck("local.db", {"motherduck_token": "x"}) is False
+    assert _looks_like_motherduck("local.db", {"motherduck_oauth_token": "x"}) is False
     assert (
         _looks_like_motherduck("local.db", {"motherduck_host": "api.motherduck.com"})
-        is True
+        is False
     )
-    assert _looks_like_motherduck("local.db", {"host": "custom.motherduck.com"}) is True
+    assert (
+        _looks_like_motherduck("local.db", {"host": "custom.motherduck.com"}) is False
+    )
     assert _looks_like_motherduck("local.db", {}) is False
 
 
@@ -1424,9 +1434,15 @@ def test_engine_url_without_database_keeps_memory_database(
 ) -> None:
     monkeypatch.chdir(tmp_path)
 
-    engine = create_engine("duckdb://?access_mode=read_only")
+    engine = create_engine("duckdb://?threads=2")
     with engine.connect() as conn:
         assert conn.execute(text("select current_database()")).scalar() == "memory"
+
+    # access_mode is DuckDB config for in-memory databases (not part of a file
+    # name), so DuckDB rejects read-only in-memory databases explicitly.
+    read_only_engine = create_engine("duckdb://?access_mode=read_only")
+    with pytest.raises(sa_exc.DBAPIError, match="read-only"):
+        read_only_engine.connect()
 
     assert list(tmp_path.iterdir()) == []
 
@@ -2319,9 +2335,8 @@ def test_motherduck_helpers() -> None:
         query={"memory_limit": "1GB"},
         path_query={"user": "alice", "session_name": "team"},
     )
-    assert url.database is not None
-    assert url.database.startswith("md:db?")
-    assert url.query == {"memory_limit": "1GB"}
+    assert url.database == "md:db"
+    assert url.query == {"memory_limit": "1GB", "user": "alice", "session_name": "team"}
 
     appended = md.append_query_to_database("md:db?user=alice", {"session_hint": "s"})
     assert appended == "md:db?user=alice&session_hint=s"
@@ -2365,14 +2380,12 @@ def test_motherduck_url_coerces_path_and_query_values() -> None:
             "cache_buster": None,
         },
     )
-    assert url.database is not None
-    database, query = url.database.split("?", 1)
-    assert database == "md:db"
-    assert parse_qs(query) == {
-        "session_name": ["team"],
-        "attach_mode": ["single", "workspace"],
+    assert url.database == "md:db"
+    assert url.query == {
+        "saas_mode": "false",
+        "session_name": "team",
+        "attach_mode": ("single", "workspace"),
     }
-    assert url.query == {"saas_mode": "false"}
 
 
 def test_motherduck_url_rejects_database_names_with_commas() -> None:
@@ -2394,16 +2407,15 @@ def test_motherduck_url_merges_and_overrides_across_inputs() -> None:
         cache_buster=None,
     )
 
-    assert url.database is not None
-    database, query = url.database.split("?", 1)
-    assert database == "md:db"
-    assert parse_qs(query) == {
-        "session_name": ["new-team"],
-        "user": ["alice"],
-        "attach_mode": ["single", "workspace"],
-        "motherduck_enable_server_side_temp_tables": ["true"],
+    assert url.database == "md:db"
+    assert url.query == {
+        "memory_limit": "1GB",
+        "saas_mode": "true",
+        "session_name": "new-team",
+        "user": "alice",
+        "attach_mode": ("single", "workspace"),
+        "motherduck_enable_server_side_temp_tables": "true",
     }
-    assert url.query == {"memory_limit": "1GB", "saas_mode": "true"}
 
 
 def test_motherduck_url_normalizes_deprecated_session_aliases() -> None:
@@ -2416,7 +2428,8 @@ def test_motherduck_url_normalizes_deprecated_session_aliases() -> None:
             motherduck_session_name="prefixed-team",
         )
 
-    assert url.database == "md:db?session_name=old-team"
+    assert url.database == "md:db"
+    assert url.query == {"session_name": "old-team"}
     assert [str(w.message) for w in recorded] == [
         "`session_hint` is deprecated; use `session_name` instead.",
         "`motherduck_session_hint` is deprecated; use `session_name` instead.",
@@ -2432,7 +2445,8 @@ def test_motherduck_url_prefers_canonical_ttl_over_alias() -> None:
             dbinstance_inactivity_ttl="15m",
         )
 
-    assert url.database == "md:db?dbinstance_inactivity_ttl=15m"
+    assert url.database == "md:db"
+    assert url.query == {"dbinstance_inactivity_ttl": "15m"}
 
 
 def test_motherduck_url_normalizes_deprecated_path_aliases() -> None:
@@ -2446,16 +2460,13 @@ def test_motherduck_url_normalizes_deprecated_path_aliases() -> None:
             cachebust="abc123",
         )
 
-    assert url.database is not None
-    database, query = url.database.split("?", 1)
-    assert database == "md:db"
-    assert parse_qs(query) == {
-        "session_name": ["team-a"],
-        "attach_mode": ["single"],
-        "saas_mode": ["true"],
-        "cache_buster": ["abc123"],
+    assert url.database == "md:db"
+    assert url.query == {
+        "session_name": "team-a",
+        "attach_mode": "single",
+        "saas_mode": "true",
+        "cache_buster": "abc123",
     }
-    assert url.query == {}
     messages = [str(w.message) for w in recorded]
     assert messages == [
         "`motherduck_session_hint` is deprecated; use `session_name` instead.",

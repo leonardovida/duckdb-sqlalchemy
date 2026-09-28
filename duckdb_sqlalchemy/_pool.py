@@ -7,7 +7,7 @@ from typing import Any, Mapping, Optional
 from sqlalchemy import pool
 from sqlalchemy.engine.url import URL as SAURL
 
-from .motherduck import MOTHERDUCK_CONFIG_KEYS
+from .motherduck import is_motherduck_database
 
 _POOL_CLASS_OVERRIDES: Mapping[str, type[pool.Pool]] = {
     "queue": pool.QueuePool,
@@ -19,10 +19,19 @@ _POOL_CLASS_OVERRIDES: Mapping[str, type[pool.Pool]] = {
 }
 
 
-def _looks_like_motherduck(database: Optional[str], config: Mapping[str, Any]) -> bool:
-    if database is not None and database.startswith(("md:", "motherduck:")):
-        return True
-    return any(key in config for key in MOTHERDUCK_CONFIG_KEYS)
+def _looks_like_motherduck(
+    database: Optional[str], config: Optional[Mapping[str, Any]] = None
+) -> bool:
+    """
+    Return True for ``md:``/``motherduck:`` databases.
+
+    Detection is based on the database string only: config keys such as
+    ``access_mode`` or ``motherduck_token`` are also valid for local files
+    (for example a local session that later attaches MotherDuck), so they do
+    not make a local database MotherDuck. ``config`` is accepted for backward
+    compatibility and ignored.
+    """
+    return is_motherduck_database(database)
 
 
 def _pool_override_from_url(url: SAURL) -> Optional[str]:

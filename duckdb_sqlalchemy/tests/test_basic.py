@@ -764,9 +764,10 @@ def test_with_cache(tmp_path: Path) -> None:
 
 
 def test_no_cache(tmp_path: Path) -> None:
-    tmp_db_path = str(tmp_path / "db_no_cache")
-    engine1 = create_engine(f"duckdb:///{tmp_db_path}?threads=1&user=1")
-    engine2 = create_engine(f"duckdb:///{tmp_db_path}?threads=2&user=2")
+    # DuckDB refuses to open one file twice with different configs, so use
+    # separate in-memory databases to check per-engine config is not cached.
+    engine1 = create_engine("duckdb:///:memory:?threads=1&user=1")
+    engine2 = create_engine("duckdb:///:memory:?threads=2&user=2")
     with engine1.connect() as conn1:
         with engine2.connect() as conn2:
             res1 = conn1.execute(

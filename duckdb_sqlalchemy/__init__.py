@@ -73,13 +73,13 @@ from .datatypes import ISCHEMA_NAMES, register_extension_types
 from .motherduck import (
     DIALECT_QUERY_KEYS,
     MotherDuckURL,
-    _database_with_path_query,
     _normalize_config_aliases,
     append_query_to_database,
     create_engine_from_paths,
     create_motherduck_engine,
-    extract_path_query_from_config,
-    split_url_query,
+    has_explicit_motherduck_credential,
+    move_path_query_to_database,
+    split_database_and_url_config,
     stable_session_hint,
     stable_session_name,
     validate_motherduck_database_name,
@@ -561,9 +561,11 @@ class DuckDBExecutionContext(_PGExecutionContext):
 
 
 def _apply_motherduck_defaults(config: Dict[str, Any], database: Optional[str]) -> None:
-    if "motherduck_token" not in config:
+    if _looks_like_motherduck(database) and not has_explicit_motherduck_credential(
+        database, config
+    ):
         token = os.getenv("MOTHERDUCK_TOKEN") or os.getenv("motherduck_token")
-        if token and _looks_like_motherduck(database, config):
+        if token:
             config["motherduck_token"] = token
 
     if "motherduck_token" in config and not isinstance(config["motherduck_token"], str):
@@ -592,8 +594,7 @@ def _prepare_connection_params(
     if cparams.get("database") in {None, ""}:
         cparams["database"] = ":memory:"
     _apply_motherduck_defaults(config, cparams.get("database"))
-    path_query = extract_path_query_from_config(config)
-    cparams["database"] = _database_with_path_query(cparams.get("database"), path_query)
+    cparams["database"] = move_path_query_to_database(cparams.get("database"), config)
     _normalize_motherduck_config(config)
     application_name = _pop_application_name(config)
     ext = {k: config.pop(k) for k in list(config) if k not in core_keys}
@@ -1700,12 +1701,12 @@ class Dialect(PGDialect_psycopg2):
 
     def create_connect_args(self, url: SAURL) -> Tuple[tuple, dict]:
         opts = url.translate_connect_args(database="database")
-        path_query, url_config = split_url_query(dict(url.query))
-        opts["url_config"] = url_config
         database = opts.get("database")
         if database in {None, ""}:
             database = ":memory:"
-        opts["database"] = _database_with_path_query(database, path_query)
+        opts["database"], opts["url_config"] = split_database_and_url_config(
+            database, dict(url.query)
+        )
         return (), opts
 
     @classmethod
