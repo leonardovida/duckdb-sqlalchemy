@@ -257,6 +257,21 @@ __all__ = [
 ]
 
 
+_DUCKDB_CONNECTION_EXCEPTIONS: Tuple[type, ...] = tuple(
+    cls
+    for cls in (getattr(duckdb, "ConnectionException", None),)
+    if isinstance(cls, type)
+)
+_DUCKDB_IO_EXCEPTIONS: Tuple[type, ...] = tuple(
+    cls
+    for cls in (
+        getattr(duckdb, "IOException", None),
+        getattr(duckdb, "HTTPException", None),
+    )
+    if isinstance(cls, type)
+)
+
+
 class DBAPI:
     paramstyle = "numeric_dollar" if SQLALCHEMY_2 else "qmark"
     apilevel = duckdb.apilevel
@@ -1851,8 +1866,17 @@ class Dialect(PGDialect_psycopg2):
         )
 
     def is_disconnect(self, e: Exception, connection: Any, cursor: Any) -> bool:
-        if isinstance(e, duckdb.Error) and not isinstance(e, duckdb.OperationalError):
-            return False
+        if isinstance(e, duckdb.Error):
+            if isinstance(e, _DUCKDB_CONNECTION_EXCEPTIONS):
+                return True
+            # IOException and HTTPException subclass OperationalError but report
+            # file or remote I/O failures (a missing CSV, an S3 timeout) on a
+            # connection that is still usable. Invalidating it would discard
+            # the pooled connection and, for :memory:, the whole database.
+            if not isinstance(e, duckdb.OperationalError) or isinstance(
+                e, _DUCKDB_IO_EXCEPTIONS
+            ):
+                return False
         message = str(e).lower()
         return any(pattern in message for pattern in DISCONNECT_ERROR_PATTERNS)
 

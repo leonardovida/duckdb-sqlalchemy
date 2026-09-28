@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+import duckdb
+import pytest
 from sqlalchemy import (
     Column,
     Float,
@@ -7,11 +9,16 @@ from sqlalchemy import (
     MetaData,
     Numeric,
     Table,
+    create_engine,
     func,
     select,
+    text,
     type_coerce,
 )
+from sqlalchemy import exc as sa_exc
 from sqlalchemy.engine import Engine
+
+from duckdb_sqlalchemy import Dialect
 
 
 def test_numeric_round_trips_exact_decimal(engine: Engine) -> None:
@@ -47,3 +54,38 @@ def test_numeric_round_trips_exact_decimal(engine: Engine) -> None:
     assert isinstance(row.as_float, float)
     # avg(DECIMAL) is DOUBLE in DuckDB; Numeric still promises a Decimal.
     assert isinstance(averaged, Decimal)
+
+
+def test_io_error_mentioning_socket_timeout_keeps_memory_database() -> None:
+    engine = create_engine("duckdb:///:memory:")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE keep_me (id INTEGER)"))
+
+    with pytest.raises(sa_exc.DBAPIError) as captured:
+        with engine.connect() as conn:
+            conn.execute(
+                text("SELECT * FROM read_csv('/nonexistent/socket_timeout.csv')")
+            )
+
+    assert isinstance(captured.value.orig, duckdb.IOException)
+    assert not captured.value.connection_invalidated
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM keep_me")).scalar_one() == 0
+
+
+def test_is_disconnect_ignores_io_and_http_errors() -> None:
+    dialect = Dialect()
+    assert not dialect.is_disconnect(
+        duckdb.IOException("IO Error: connection timed out on socket"), None, None
+    )
+    assert not dialect.is_disconnect(
+        duckdb.HTTPException("HTTP Error: timeout"), None, None
+    )
+    assert dialect.is_disconnect(
+        duckdb.ConnectionException("Connection Error: Connection already closed!"),
+        None,
+        None,
+    )
+    assert dialect.is_disconnect(
+        duckdb.OperationalError("connection reset by peer"), None, None
+    )
