@@ -18,6 +18,11 @@ boundaries:
 - `duckdb_sqlalchemy/datatypes.py` implements custom DuckDB type support and
   SQL compilation helpers.
 - `duckdb_sqlalchemy/bulk.py` provides COPY helpers for files and row streams.
+- `duckdb_sqlalchemy/alembic_impl.py` is the Alembic implementation
+  (`DuckDBImpl`): server default and nested type comparison, unique
+  constraint matching, nested type rendering, and `COMMENT ON COLUMN`. The
+  dialect imports it when Alembic is loaded, and an implementation registered
+  earlier keeps precedence.
 - `duckdb_sqlalchemy/olap.py` wraps DuckDB table functions (`read_parquet`,
   `read_csv`, `pragma_storage_info`, `quack_query`) and the MotherDuck `md_*`
   and `prompt_jev` SQL functions.

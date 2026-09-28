@@ -111,6 +111,8 @@ databases.
 - `get_temp_table_names()` and `get_temp_view_names()` list temporary
   relations, and `has_schema()` accepts `schema` or `db.schema`, matching the
   names `get_schema_names()` returns.
+- `get_multi_columns()` honors `kind`: `kind=ObjectKind.TABLE` (the default)
+  returns tables only and `kind=ObjectKind.VIEW` views only.
 
 ```python
 from sqlalchemy import inspect
@@ -131,10 +133,20 @@ to a table in the same schema.
 
 ### Nested types
 
-`STRUCT`, `MAP`, and `UNION` columns reflect as `NullType`, because their field
-types are not parsed yet. Declare them with `Struct`, `Map`, or `Union` in your
-models instead of reflecting them. Lists and fixed-size arrays reflect as
-`ARRAY` of the element type.
+`STRUCT`, `MAP`, and `UNION` columns reflect as `Struct`, `Map`, and `Union`
+with their member types, so a reflected table recreates the same columns.
+Lists and fixed-size arrays reflect as `ARRAY` of the element type, including
+lists of structs.
+
+A nested type reflects as `NullType` when one of its members is an ENUM, because
+DuckDB does not report the enum's type name inside a nested type, or when a
+member type is not recognized. Declare those columns in your models.
+
+### Enums
+
+`inspector.get_enums()` lists the ENUM types created with `CREATE TYPE` in the
+current database and schema, with their labels. Pass `schema="name"` or
+`schema="db.schema"` for another schema, or `schema="*"` for all of them.
 
 ## Unsupported statements
 
