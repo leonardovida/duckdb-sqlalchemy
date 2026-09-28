@@ -1784,6 +1784,20 @@ class Dialect(PGDialect_psycopg2):
         except NoSuchTableError:
             return False
 
+    def has_multi_table(
+        self,
+        connection: "Connection",
+        table_names: Sequence[str],
+        schema: Optional[str] = None,
+        **kw: Any,
+    ) -> Iterable[Tuple[Tuple[Optional[str], str], bool]]:
+        # SQLAlchemy 2.1 create_all()/drop_all() check tables here; PostgreSQL's
+        # pg_catalog query would ignore the dialect's database scoping.
+        return [
+            ((schema, table_name), self.has_table(connection, table_name, schema))
+            for table_name in table_names
+        ]
+
     @cache  # type: ignore[call-arg]
     def get_columns(  # type: ignore[no-untyped-def]
         self, connection: "Connection", table_name: str, schema=None, **kw: "Any"
