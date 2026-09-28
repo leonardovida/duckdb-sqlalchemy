@@ -28,6 +28,9 @@ engine = create_engine(
 ## Tokens
 
 Set `MOTHERDUCK_TOKEN` (or `motherduck_token`) in the environment and it will be picked up automatically when you connect to `md:` databases.
+The environment token is not added when the URL or `connect_args` already carry a credential
+(`token`, `motherduck_token`, `motherduck_oauth_token`, `oauth_token`, or `slt`), and it is never added
+for local DuckDB files.
 If you authenticate with an OAuth flow instead, pass `motherduck_oauth_token` through the
 URL or `connect_args["config"]`.
 
@@ -56,8 +59,8 @@ engines/connections inside the child process.
 ### Connection-string parameters (instance cache key)
 
 MotherDuck (and DuckDB) cache client instances by database path/connection string. Parameters that affect
-routing or instance identity must live in the database string so pooling and caching behave predictably.
-You can still pass them via `connect_args["config"]`, but the dialect will move them into the database
+routing or instance identity must end up in the database string so pooling and caching behave predictably.
+Pass them as URL query params or via `connect_args["config"]`; the dialect moves them into the database
 string for MotherDuck connections.
 
 Parameters that are treated as part of the database string:
@@ -77,6 +80,9 @@ For backward compatibility the dialect also accepts `session_hint`,
 `motherduck_session_hint`, `motherduck_session_name`,
 `motherduck_attach_mode`, `motherduck_saas_mode`, and `cachebust`, but it
 normalizes them to the canonical keys above and emits a `DeprecationWarning`.
+The same applies to the `motherduck_host`, `motherduck_region_host`,
+`motherduck_port`, `motherduck_use_tls`, and
+`motherduck_grpc_local_subchannel_pool` spellings.
 
 Example:
 
@@ -84,8 +90,7 @@ Example:
 duckdb:///md:my_db?attach_mode=single&access_mode=read_only&session_name=team-a
 ```
 
-For local or staging routing, keep the endpoint override in the database string
-as well:
+For local or staging routing, pass the endpoint override the same way:
 
 ```
 duckdb:///md:my_db?host=localhost&port=1984&tls=off
@@ -117,7 +122,7 @@ engine = create_engine(
 
 ### MotherDuck URL builder
 
-Use `MotherDuckURL` to ensure routing/instance-cache parameters live in the database string:
+Use `MotherDuckURL` to validate routing/instance-cache parameters; the dialect moves them into the database string when it connects:
 
 ```python
 from duckdb_sqlalchemy import MotherDuckURL
@@ -165,7 +170,10 @@ routing, rotate the `session_name` or recycle the connection/pool.
 ### Performance-first engine helper
 
 `create_motherduck_engine(..., performance=True)` applies MotherDuck-friendly pooling defaults
-(`QueuePool`, `pool_pre_ping=True`, `pool_recycle=23h`):
+(`QueuePool`, `pool_pre_ping=True`, `pool_recycle=23h`). Standard `create_engine`
+keyword arguments such as `pool_size`, `max_overflow`, `echo`, or `connect_args` are passed
+to `create_engine`; the remaining keyword arguments become URL params. Pool sizing
+arguments without an explicit `poolclass` select `QueuePool`:
 
 ```python
 from duckdb_sqlalchemy import create_motherduck_engine
@@ -202,5 +210,10 @@ from duckdb_sqlalchemy import create_engine_from_paths
 
 engine = create_engine_from_paths(
     ["md:my_db?user=1", "md:my_db?user=2", "md:my_db?user=3"],
+    pool_size=3,
+    max_overflow=0,
 )
 ```
+
+Passing `pool_size` or `max_overflow` selects `QueuePool`, and each new pooled
+connection rotates to the next path.
