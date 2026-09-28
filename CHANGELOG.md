@@ -8,13 +8,57 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+### Compatibility
+
+- require Python 3.10+ and DuckDB 1.3.0+. Python 3.9 is end-of-life and DuckDB releases before 1.3 were untested (0.5.0 failed on connect); installs on those versions keep resolving 1.5.5.10
+- reflection without a schema (`get_table_names`, `has_table`, `create_all`) is limited to the current database and schema instead of every schema and attached database; pass `schema=` to reach others
+- `duckdb://` with no database uses `SingletonThreadPool` like `:memory:`, so all connections share one in-memory database
+- MotherDuck path keys such as `access_mode` are only moved into `md:`/`motherduck:` database strings; for local files they are DuckDB config, so unknown path keys on local files now raise DuckDB's "unrecognized configuration" error
+- `MotherDuckURL` keeps routing params in `URL.query` (they still move into the `md:` string on connect), so `str(url)` round-trips
+- only `AUTOCOMMIT` and `READ COMMITTED` isolation levels are accepted; other levels raise `ArgumentError`
+- `Numeric(asdecimal=False)` returns floats
+- reading `.arrow` after fetching rows from a `duckdb_arrow` result raises `InvalidRequestError`
+
+### Deprecations
+
+- `duckdb_sqlalchemy.make_url` emits `DeprecationWarning`; use `duckdb_sqlalchemy.URL` to build URLs or `sqlalchemy.engine.make_url` to parse strings
+
 ### Features
 
 - expose MotherDuck Guide SQL functions and named `prompt_jev` arguments through SQLAlchemy helpers
+- support `isolation_level="AUTOCOMMIT"`
+- register the `duckdb+duckdb_sqlalchemy://` driver name
+- accept `queuepool` as a pool override and warn on unknown pool override values
+- pass SQLAlchemy engine kwargs (`pool_size`, `max_overflow`, `echo`, ...) through `create_motherduck_engine` and `create_engine_from_paths`, selecting `QueuePool` when pool sizing is requested
+- accept `os.PathLike` paths in `read_parquet`, `read_csv`, and `read_csv_auto`, and pass a `columns` mapping to DuckDB as column types
 
 ### Bug Fixes
 
 - expose the `md_user_info` region column by default only on DuckDB clients that support it
+- keep full `Numeric`/`DECIMAL` precision instead of round-tripping through float
+- opening `duckdb:///file.db?access_mode=read_only` opens the existing file read-only instead of creating a new file named after the query string
+- stop DuckDB I/O and HTTP errors from invalidating the connection, which wiped `:memory:` databases
+- `create_all` no longer skips a table because a table with the same name exists in another schema or attached database, and explicit schemas that exist in several catalogs are found
+- running a statement while an earlier result is unread no longer truncates that result (for example ORM lazy loads in a loop)
+- `duckdb_retry_count` no longer masks the original error with "Current transaction is aborted", and never retries `md_*` functions, `nextval`, or `setval`
+- the `duckdb_copy_threshold` bulk insert path runs with default engine settings, prefers Arrow, and keeps large integers in columns with NULLs
+- only inject `MOTHERDUCK_TOKEN` for MotherDuck databases without explicit credentials
+- close the DuckDB connection when connection setup fails, releasing the file lock
+- the `create_motherduck_engine` and `create_engine_from_paths` examples work with pool sizing
+- `copy_from_rows` writes UTF-8, keeps empty strings distinct from NULL, and rejects binary values
+- COPY helpers honor `schema_translate_map`, render mapping options such as `kv_metadata` as struct literals, and reject non-finite floats
+- implicit autoincrement sequences honor `schema_translate_map`
+- `duckdb_arraysize` sets the `fetchmany()` default size
+- `get_check_constraints` raises `NoSuchTableError` for missing tables
+- `format_schema` no longer double-quotes an already quoted schema
+
+### Maintenance
+
+- run CI on `main`, add a minimum-versions job and a dependency-aware `ty` job, restrict workflow tokens, and check the tag, distributions, and wheel before publishing
+- exclude tests from the wheel and repository tooling files from the sdist
+- replace the unused Renovate config with Dependabot (`uv`, GitHub Actions, pre-commit)
+- remove dead SQLAlchemy 1.x code paths
+- fix stale docs and keep internal planning pages off the documentation site
 
 ## [1.5.5.10](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.9...v1.5.5.10) (2026-09-26)
 
