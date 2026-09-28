@@ -6,24 +6,29 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
-## Unreleased
+## [1.5.5.12](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.11...v1.5.5.12) (2026-09-28)
 
 ### Compatibility
 
-- `regexp_match()` compiles to `regexp_matches()` and matches anywhere in the string, like PostgreSQL. It used DuckDB's `~` operator, which only matches the whole string; anchor the pattern with `^...$` to keep full-string matching
-- `CursorResult.rowcount` reports the rows an INSERT, UPDATE, DELETE, or MERGE changed instead of `-1`, and the dialect sets `supports_sane_rowcount`, so ORM version counters raise `StaleDataError` on a mismatch instead of skipping the check
-- reflected foreign key and check constraint names are DuckDB's constraint names (`child_parent_id_id_fkey`, `parent_n_check`) instead of the constraint SQL text
+- `regexp_match()` compiles to `regexp_matches()` and matches anywhere in the string, like PostgreSQL. It used DuckDB's `~` operator, which only matches the whole string; anchor the pattern with `^...$` to keep full-string matching ([#176](https://github.com/leonardovida/duckdb-sqlalchemy/pull/176))
+- `CursorResult.rowcount` reports the rows an INSERT, UPDATE, DELETE, or MERGE changed instead of `-1`, and the dialect sets `supports_sane_rowcount`, so ORM version counters raise `StaleDataError` on a mismatch instead of skipping the check ([#176](https://github.com/leonardovida/duckdb-sqlalchemy/pull/176))
+- reflected foreign key and check constraint names are DuckDB's constraint names (`child_parent_id_id_fkey`, `parent_n_check`) instead of the constraint SQL text ([#176](https://github.com/leonardovida/duckdb-sqlalchemy/pull/176))
 
 ### Bug Fixes
 
-- `regexp_match(..., flags="i")` works instead of failing with "Scalar Function with name ~* does not exist"
-- `get_unique_constraints` returns the table's UNIQUE constraints instead of an empty list
-- `get_foreign_keys` no longer returns an empty list when a table with the same name exists in another schema, and foreign key, unique, check, and comment reflection is scoped to the requested database and schema
-- a temp table that shadows a table of the same name no longer reflects that table's primary key and indexes
-- `get_table_comment` returns the comment of the requested table instead of a same-named table in another schema or attached database
-- `get_temp_table_names` and `get_temp_view_names` list temporary tables and views instead of returning an empty list
-- `has_schema` accepts `database.schema` names, as returned by `get_schema_names`
-- `duckdb_retry_on_transient` retries HTTP 429, 502, 503, and 504 errors in the format httpfs reports them (`... (HTTP 503)`), including `504 Gateway Timeout`
+- `regexp_match(..., flags="i")` works instead of failing with "Scalar Function with name ~* does not exist" ([#176](https://github.com/leonardovida/duckdb-sqlalchemy/pull/176))
+- `get_unique_constraints` returns the table's UNIQUE constraints instead of an empty list ([#176](https://github.com/leonardovida/duckdb-sqlalchemy/pull/176))
+- `get_foreign_keys` no longer returns an empty list when a table with the same name exists in another schema, and foreign key, unique, check, and comment reflection is scoped to the requested database and schema ([#176](https://github.com/leonardovida/duckdb-sqlalchemy/pull/176))
+- a temp table that shadows a table of the same name no longer reflects that table's primary key and indexes ([#176](https://github.com/leonardovida/duckdb-sqlalchemy/pull/176))
+- `get_table_comment` returns the comment of the requested table instead of a same-named table in another schema or attached database ([#176](https://github.com/leonardovida/duckdb-sqlalchemy/pull/176))
+- `get_temp_table_names` and `get_temp_view_names` list temporary tables and views instead of returning an empty list ([#176](https://github.com/leonardovida/duckdb-sqlalchemy/pull/176))
+- `has_schema` accepts `database.schema` names, as returned by `get_schema_names` ([#176](https://github.com/leonardovida/duckdb-sqlalchemy/pull/176))
+- `duckdb_retry_on_transient` retries HTTP 429, 502, 503, and 504 errors in the format httpfs reports them (`... (HTTP 503)`), including `504 Gateway Timeout` ([#176](https://github.com/leonardovida/duckdb-sqlalchemy/pull/176))
+
+### Maintenance
+
+- stop SQLAlchemy and DuckDB prerelease jobs from blocking merges, test SQLAlchemy 2.0 on Python 3.13 and 3.14 in CI, keep Codecov upload failures from failing Dependabot PRs, and add DuckDB 1.5.6 to the nox matrix ([#177](https://github.com/leonardovida/duckdb-sqlalchemy/pull/177))
+- document that pandas 3 needs SQLAlchemy 2.0.36+ and DuckDB 1.4.4+ ([#177](https://github.com/leonardovida/duckdb-sqlalchemy/pull/177))
 
 ## [1.5.5.11](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.10...v1.5.5.11) (2026-09-28)
 
