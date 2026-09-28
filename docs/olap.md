@@ -34,6 +34,20 @@ csv = read_csv(
 stmt = select(csv.c.event_id, csv.c.ts)
 ```
 
+Pass `columns` as a mapping to set DuckDB column types instead of letting
+DuckDB detect them. The mapping is sent as DuckDB's `columns` parameter, and its
+keys also name the SQLAlchemy columns. The values are DuckDB type names, not
+SQLAlchemy types. This works with `read_csv` and `read_csv_auto`:
+
+```python
+csv = read_csv(
+    "data/events.csv",
+    columns={"event_id": "BIGINT", "ts": "TIMESTAMP"},
+    header=True,
+)
+stmt = select(csv.c.event_id, csv.c.ts)
+```
+
 ## Other table functions
 
 Use `table_function` for any DuckDB table function that does not have a helper:
@@ -62,8 +76,9 @@ storage = pragma_storage_info("events")
 stmt = select(storage.c.column_name, storage.c.segment_type, storage.c.compression)
 ```
 
-The helper names DuckDB's released columns by default. On engines that support
-the optional segment-info argument, pass `include_segment_info=True`.
+The helper names DuckDB's released columns by default. `include_segment_info=True`
+is passed to DuckDB as a named argument. DuckDB 1.5.x releases reject it with
+"Invalid named parameter"; only DuckDB development builds accept it.
 
 ## Quack remote queries
 
@@ -208,6 +223,33 @@ versions = md_list_dive_versions(id="00000000-0000-0000-0000-000000000000")
 versions_stmt = select(versions.c.version, versions.c.created_at)
 ```
 
+Metadata, version, and delete helpers:
+
+```python
+from duckdb_sqlalchemy import (
+    md_delete_dive,
+    md_get_dive_version,
+    md_update_dive_metadata,
+)
+
+renamed = md_update_dive_metadata(
+    id="00000000-0000-0000-0000-000000000000",
+    title="Sales overview (EMEA)",
+    description="Weekly revenue by region",
+)
+rename_stmt = select(renamed.c.title, renamed.c.description)
+
+version = md_get_dive_version(id="00000000-0000-0000-0000-000000000000", version=2)
+version_stmt = select(version.c.version, version.c.content)
+
+deleted = md_delete_dive(id="00000000-0000-0000-0000-000000000000")
+delete_stmt = select(deleted.c.success)
+```
+
+`md_update_dive_metadata` changes the title or description without creating a
+new version. `md_delete_dive` removes the Dive and its version history when the
+statement runs.
+
 ## MotherDuck Flights
 
 MotherDuck also exposes preview table functions for Flight metadata. The
@@ -252,6 +294,22 @@ versions_stmt = select(
     versions.c.requirements_txt,
     versions.c.max_runtime_sec,
 )
+```
+
+To fetch one Flight or one version, use `md_get_flight` and
+`md_get_flight_version`:
+
+```python
+from duckdb_sqlalchemy import md_get_flight, md_get_flight_version
+
+flight = md_get_flight(flight_id="00000000-0000-0000-0000-000000000000")
+flight_stmt = select(flight.c.flight_name, flight.c.schedule_cron, flight.c.status)
+
+version = md_get_flight_version(
+    flight_id="00000000-0000-0000-0000-000000000000",
+    version_number=1,
+)
+version_stmt = select(version.c.flight_version, version.c.source_code)
 ```
 
 Mutating Flight functions are available as helpers too:

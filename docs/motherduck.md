@@ -136,6 +136,26 @@ url = MotherDuckURL(
 )
 ```
 
+### Database string helpers
+
+`append_query_to_database` adds routing params to an `md:` database string.
+Keys you pass replace the same keys already in the string.
+`validate_motherduck_database_name` raises `ValueError` for names DuckDB cannot
+route, such as names that contain a comma, and does nothing for non-MotherDuck
+databases:
+
+```python
+from duckdb_sqlalchemy import (
+    append_query_to_database,
+    validate_motherduck_database_name,
+)
+
+append_query_to_database("md:analytics", {"attach_mode": "single"})
+# 'md:analytics?attach_mode=single'
+
+validate_motherduck_database_name("md:analytics")
+```
+
 ### Explicit read-scaling engine
 
 ```python

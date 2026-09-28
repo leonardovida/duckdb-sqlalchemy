@@ -6,6 +6,12 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## Unreleased
+
+### Maintenance
+
+- document reflection scoping (temp tables, `db.schema` names, `has_schema`), nested-type reflection, and statements DuckDB does not support; test and document Alembic autogenerate, the batch-mode workaround for adding constraints, and its known limitations; document the `read_csv` `columns` type mapping, the remaining Dive and Flight helpers, and the MotherDuck database string helpers; refresh the architecture module map
+
 ## [1.5.5.12](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.11...v1.5.5.12) (2026-09-28)
 
 ### Compatibility

@@ -8,6 +8,14 @@ Key entry points:
 - duckdb_sqlalchemy table functions (read_parquet, read_csv, table_function)
 - duckdb_sqlalchemy COPY helpers (copy_from_parquet, copy_from_csv, copy_from_rows, copy_to_parquet)
 - duckdb_sqlalchemy.checkpoint
+- MotherDuck SQL function helpers (md_list_dives, md_get_guide, md_list_flights, prompt_jev, ...)
+
+Behavior notes:
+- Reflection without a schema covers the current database and schema; pass schema="db.schema" for attached databases
+- result.rowcount reports rows changed by INSERT/UPDATE/DELETE/MERGE
+- regexp_match compiles to regexp_matches() (substring match)
+- DuckDB has no SAVEPOINT, no SELECT ... FOR UPDATE, and cannot add UNIQUE, FOREIGN KEY, or CHECK constraints to an existing table
+- Alembic needs a DefaultImpl subclass with __dialect__ = "duckdb" (see alembic.html)
 
 Docs (https://leonardovida.github.io/duckdb-sqlalchemy/):
 - getting-started.html

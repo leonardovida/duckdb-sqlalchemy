@@ -13,7 +13,7 @@ Most SQLAlchemy core types map directly to DuckDB. DuckDB-specific helpers live 
 | --- | --- | --- |
 | `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UTinyInteger`, `USmallInteger`, `UInteger`, `UBigInteger` | UTINYINT, USMALLINT, UINTEGER, UBIGINT | Unsigned integers |
 | `TinyInteger` | TINYINT | Signed 1-byte integer |
-| `HugeInteger`, `UHugeInteger`, `VarInt` | HUGEINT, UHUGEINT, VARINT | 128-bit and variable-length integers (VarInt requires DuckDB >= 1.0) |
+| `HugeInteger`, `UHugeInteger`, `VarInt` | HUGEINT, UHUGEINT, VARINT | 128-bit and variable-length integers |
 | `Struct` | STRUCT | Nested fields via dict of SQLAlchemy types |
 | `Map` | MAP | Key/value mapping |
 | `Union` | UNION | Union types via dict of SQLAlchemy types |
@@ -34,7 +34,7 @@ events = Table(
     Column("payload", Struct({"user": String, "action": String})),
     Column("tags", Map(String, String)),
     Column("attributes", Union({"priority": Integer, "label": String})),
-    Column("trace_id", VarInt),  # requires DuckDB >= 1.0
+    Column("trace_id", VarInt),
 )
 ```
 
@@ -89,13 +89,64 @@ DELETE; multi-row INSERTs are counted). `column.regexp_match(pattern)` compiles 
 `regexp_matches()`, which matches anywhere in the string; `flags` are passed as
 DuckDB regex options (for example `flags="i"`).
 
-## Constraint reflection
+## Reflection
+
+Reflection reads DuckDB's catalog functions (`duckdb_tables()`,
+`duckdb_columns()`, `duckdb_constraints()`, `duckdb_indexes()`), not the
+PostgreSQL `pg_catalog` emulation, so it sees DuckDB types and attached
+databases.
+
+### Which table a name refers to
+
+- `schema=None` lists (`get_table_names()`, `get_view_names()`,
+  `MetaData.reflect()`) cover the current database and schema only.
+- A single table looked up without a schema (`get_columns("t")`,
+  `Table("t", metadata, autoload_with=conn)`) resolves the way DuckDB binds an
+  unqualified name: a temp table first, then the current schema, then the
+  `search_path`. Its columns, keys, indexes, and comment all come from that one
+  table, even when tables with the same name exist elsewhere.
+- Pass `schema="db.schema"` to reach another attached database. A bare schema
+  name is looked up in the current database first, then in the first attached
+  database that has it.
+- `get_temp_table_names()` and `get_temp_view_names()` list temporary
+  relations, and `has_schema()` accepts `schema` or `db.schema`, matching the
+  names `get_schema_names()` returns.
+
+```python
+from sqlalchemy import inspect
+
+inspector = inspect(conn)
+inspector.get_table_names(schema="analytics.main")
+inspector.get_foreign_keys("orders", schema="analytics.main")
+inspector.has_schema("analytics.staging")
+```
+
+### Constraint names
 
 DuckDB names every constraint itself (`child_parent_id_id_fkey`,
 `parent_code_key`, `parent_n_check`) and ignores names given in DDL, so
 reflected constraint names can differ from the names in your models. Foreign
 keys cannot cross schemas in DuckDB, so a reflected foreign key always refers
 to a table in the same schema.
+
+### Nested types
+
+`STRUCT`, `MAP`, and `UNION` columns reflect as `NullType`, because their field
+types are not parsed yet. Declare them with `Struct`, `Map`, or `Union` in your
+models instead of reflecting them. Lists and fixed-size arrays reflect as
+`ARRAY` of the element type.
+
+## Unsupported statements
+
+DuckDB does not support these, so the statements SQLAlchemy emits for them fail:
+
+- savepoints: `Connection.begin_nested()` and `Session.begin_nested()` emit
+  `SAVEPOINT`, which DuckDB rejects with a parser error
+- row locks: `select(...).with_for_update()` fails with "SELECT locking clause
+  is not supported"
+- adding or dropping UNIQUE, FOREIGN KEY, or CHECK constraints on an existing
+  table (`ALTER TABLE ... ADD CONSTRAINT`); see
+  [Alembic integration](alembic) for a batch-mode workaround
 
 ## Isolation levels
 
