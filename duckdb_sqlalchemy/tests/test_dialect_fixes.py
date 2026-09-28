@@ -888,3 +888,91 @@ def test_temp_relation_names_and_qualified_has_schema(
         assert inspector.has_schema("other.s")
         assert not inspector.has_schema("other.aux")
         assert not inspector.has_schema("missing")
+
+
+def test_get_multi_columns_respects_kind(engine: Engine) -> None:
+    from sqlalchemy.engine.reflection import ObjectKind
+
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE kind_t (a INTEGER)"))
+        conn.execute(text("CREATE VIEW kind_v AS SELECT a FROM kind_t"))
+        conn.execute(text("CREATE SCHEMA kind_s"))
+        conn.execute(text("CREATE TABLE kind_s.t2 (b INTEGER)"))
+        conn.execute(text("CREATE VIEW kind_s.v2 AS SELECT b FROM kind_s.t2"))
+
+        insp = inspect(conn)
+
+        def names(**kw: Any) -> List[Any]:
+            return sorted(key[1] for key in insp.get_multi_columns(**kw))
+
+        assert names(kind=ObjectKind.TABLE) == ["kind_t"]
+        assert names(kind=ObjectKind.VIEW) == ["kind_v"]
+        assert names(kind=ObjectKind.ANY) == ["kind_t", "kind_v"]
+        assert names() == ["kind_t"]
+        assert names(schema="kind_s", kind=ObjectKind.VIEW) == ["v2"]
+        assert names(kind=ObjectKind.MATERIALIZED_VIEW) == []
+
+
+def test_get_enums_lists_user_enums_only(engine: Engine) -> None:
+    with engine.connect() as conn:
+        # a DuckDB transaction writes to a single database
+        for statement in (
+            "CREATE TYPE mood AS ENUM ('sad', 'happy')",
+            "CREATE SCHEMA enum_s",
+            "CREATE TYPE enum_s.color AS ENUM ('red')",
+            "ATTACH ':memory:' AS enum_db",
+            "CREATE TYPE enum_db.main.size AS ENUM ('s', 'l')",
+        ):
+            conn.execute(text(statement))
+            conn.commit()
+
+        insp = inspect(conn)
+        assert insp.get_enums() == [
+            {
+                "name": "mood",
+                "schema": "main",
+                "visible": True,
+                "labels": ["sad", "happy"],
+            }
+        ]
+        assert insp.get_enums("enum_s") == [
+            {"name": "color", "schema": "enum_s", "visible": False, "labels": ["red"]}
+        ]
+        assert insp.get_enums("enum_db.main") == [
+            {
+                "name": "size",
+                "schema": "enum_db.main",
+                "visible": False,
+                "labels": ["s", "l"],
+            }
+        ]
+        assert sorted(enum["name"] for enum in insp.get_enums("*")) == [
+            "color",
+            "mood",
+            "size",
+        ]
+
+
+def test_mock_engine_ddl_includes_sequences_and_comments() -> None:
+    from sqlalchemy import create_mock_engine
+
+    statements: List[str] = []
+    mock = create_mock_engine(
+        "duckdb://",
+        lambda sql, *args, **kwargs: statements.append(
+            str(sql.compile(dialect=mock.dialect)).strip()
+        ),
+    )
+    metadata = MetaData()
+    Table(
+        "mock_t",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("name", String, comment="the name"),
+        comment="a table",
+    )
+    metadata.create_all(mock, checkfirst=False)
+
+    assert statements[0] == "CREATE SEQUENCE IF NOT EXISTS mock_t_id_seq"
+    assert "COMMENT ON TABLE mock_t IS 'a table'" in statements
+    assert "COMMENT ON COLUMN mock_t.name IS 'the name'" in statements

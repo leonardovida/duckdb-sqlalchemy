@@ -28,7 +28,7 @@ from sqlalchemy.types import FLOAT, JSON
 
 from .. import Dialect
 from .._supports import duckdb_version, has_uhugeint_support
-from ..datatypes import Map, Struct, Variant, types
+from ..datatypes import Map, Struct, Union, Variant, types
 
 
 @mark.parametrize("coltype", types)
@@ -316,13 +316,12 @@ def test_all_types_reflection(engine: Engine) -> None:
             name = col.name
             if name.endswith("_enum") and duckdb_version < Version("0.7.1"):
                 continue
-            if any(
-                nested_type in name
-                for nested_type in ("struct", "map", "union", "tuple")
-            ):
+            if "tuple" in name:
                 assert col.type == sqltypes.NULLTYPE, name
             else:
                 assert col.type != sqltypes.NULLTYPE, name
+            if name in ("struct", "map", "union"):
+                assert isinstance(col.type, (Struct, Map, Union)), name
         assert not capture
 
 
@@ -370,6 +369,95 @@ def test_tuple_reflection_is_deliberately_unsupported() -> None:
     )
 
     assert reflected == sqltypes.NULLTYPE
+
+
+def test_nested_type_reflection_round_trips(engine: Engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE nested_source ("
+                'profile STRUCT(city VARCHAR, "zip code" INTEGER, '
+                "amount DECIMAL(10, 2)), "
+                "tags MAP(VARCHAR, INTEGER[]), "
+                "choice UNION(num INTEGER, str VARCHAR), "
+                'history STRUCT("at" TIMESTAMPTZ, v HUGEINT)[])'
+            )
+        )
+        source = Table("nested_source", MetaData(), autoload_with=conn)
+
+        profile = source.c.profile.type
+        assert isinstance(profile, Struct)
+        assert [name for name, _ in profile._fields or ()] == [
+            "city",
+            "zip code",
+            "amount",
+        ]
+        assert isinstance(source.c.tags.type, Map)
+        assert isinstance(source.c.choice.type, Union)
+        history = source.c.history.type
+        assert isinstance(history, sqltypes.ARRAY)
+        assert isinstance(history.item_type, Struct)
+
+        clone = source.to_metadata(MetaData(), name="nested_clone")
+        clone.create(conn)
+        columns = {
+            row[0]: row[1]
+            for row in conn.execute(
+                text(
+                    "SELECT column_name, data_type FROM duckdb_columns() "
+                    "WHERE table_name = :name ORDER BY column_index"
+                ),
+                {"name": "nested_source"},
+            )
+        }
+        cloned = {
+            row[0]: row[1]
+            for row in conn.execute(
+                text(
+                    "SELECT column_name, data_type FROM duckdb_columns() "
+                    "WHERE table_name = :name ORDER BY column_index"
+                ),
+                {"name": "nested_clone"},
+            )
+        }
+        assert cloned == columns
+
+        conn.execute(
+            clone.insert().values(
+                profile={"city": "Ghent", "zip code": 9000, "amount": None},
+                tags={"a": [1, 2]},
+            )
+        )
+        row = conn.execute(select(clone.c.profile, clone.c.tags)).one()
+        assert row.profile == {"city": "Ghent", "zip code": 9000, "amount": None}
+        assert row.tags == {"a": [1, 2]}
+
+
+def test_nested_types_with_enum_members_reflect_as_null_type(engine: Engine) -> None:
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TYPE mood AS ENUM ('sad', 'happy')"))
+        conn.execute(
+            text(
+                "CREATE TABLE nested_enum ("
+                "s STRUCT(m mood), l STRUCT(m mood[]), k MAP(mood, INTEGER))"
+            )
+        )
+        table = Table("nested_enum", MetaData(), autoload_with=conn)
+
+    for column in table.columns:
+        assert column.type == sqltypes.NULLTYPE, column.name
+
+
+@mark.parametrize(
+    "field, expected",
+    [
+        ("a INTEGER", ("a", "INTEGER")),
+        ('"my field" VARCHAR', ("my field", "VARCHAR")),
+        ('"say ""hi""" STRUCT(x INTEGER)', ('say "hi"', "STRUCT(x INTEGER)")),
+    ],
+)
+def test_split_duckdb_field(field: str, expected: Any) -> None:
+    assert Dialect()._split_duckdb_field(field) == expected
 
 
 def test_nested_types(engine: Engine, session: Session) -> None:

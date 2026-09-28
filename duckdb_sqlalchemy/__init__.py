@@ -1,6 +1,7 @@
 import decimal
 import os
 import re
+import sys
 import time
 import uuid
 import warnings
@@ -77,7 +78,8 @@ from ._validation import validate_extension_name
 from .bulk import copy_from_csv, copy_from_parquet, copy_from_rows, copy_to_parquet
 from .capabilities import get_capabilities
 from .config import apply_config, get_core_config
-from .datatypes import ISCHEMA_NAMES, register_extension_types
+from .datatypes import ISCHEMA_NAMES, Map, Struct, register_extension_types
+from .datatypes import Union as UnionType
 from .motherduck import (
     DIALECT_QUERY_KEYS,
     MotherDuckURL,
@@ -295,6 +297,15 @@ class DBAPI:
 
 
 class DuckDBInspector(PGInspector):
+    def get_enums(self, schema: Optional[str] = None) -> Any:
+        """Return the user-defined ENUM types of ``schema`` (``"*"`` for all).
+
+        Without a schema, the current database and schema are listed.
+        """
+        with self._operation_context() as conn:
+            dialect = cast("Dialect", self.dialect)
+            return dialect.get_enums(conn, schema, info_cache=self.info_cache)
+
     def get_check_constraints(
         self, table_name: str, schema: Optional[str] = None, **kw: Any
     ) -> Any:
@@ -946,8 +957,11 @@ def _execute_implicit_sequence_ddl(
     if connection.dialect.name != "duckdb":
         return
     preparer = connection.dialect.identifier_preparer
-    schema_translate_map = connection.get_execution_options().get(
-        "schema_translate_map"
+    # a MockConnection (create_mock_engine, Alembic's --sql mode) has neither
+    # execution options nor exec_driver_sql
+    mock = not hasattr(connection, "exec_driver_sql")
+    schema_translate_map = (
+        None if mock else connection.get_execution_options().get("schema_translate_map")
     )
     if schema_translate_map:
         preparer = preparer._with_schema_translate(schema_translate_map)
@@ -960,7 +974,10 @@ def _execute_implicit_sequence_ddl(
                 statement = preparer._render_schema_translates(
                     statement, schema_translate_map
                 )
-            connection.exec_driver_sql(statement)
+            if mock:
+                connection.execute(sa_schema.DDL(statement.replace("%", "%%")))
+            else:
+                connection.exec_driver_sql(statement)
 
 
 def _create_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
@@ -1075,7 +1092,9 @@ class Dialect(PGDialect_psycopg2):
     driver = "duckdb_sqlalchemy"
     _has_events = False
     supports_statement_cache = True
-    supports_comments = False
+    # COMMENT ON exists in every supported DuckDB; initialize() re-checks, and
+    # the class default covers DDL compiled without connecting (--sql mode)
+    supports_comments = True
     # single-statement DML rowcount comes from DuckDB's "Count" result
     supports_sane_rowcount = True
     supports_server_side_cursors = False
@@ -1115,6 +1134,7 @@ class Dialect(PGDialect_psycopg2):
         self._capabilities = get_capabilities(duckdb.__version__)
 
     def initialize(self, connection: "Connection") -> None:
+        _register_alembic_support()
         DefaultDialect.initialize(self, connection)
         self._capabilities = get_capabilities(duckdb.__version__)
         self.supports_comments = has_comment_support()
@@ -1579,6 +1599,25 @@ class Dialect(PGDialect_psycopg2):
             for row in rows
         }
 
+    def _duckdb_view_relations(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+    ) -> set[Tuple[str, str, str]]:
+        stmt, params = self._duckdb_reflection_stmt(
+            "(SELECT database_name, schema_name, view_name AS table_name, internal "
+            "FROM duckdb_views())",
+            "database_name, schema_name, table_name",
+            schema=schema,
+            filter_names=filter_names,
+            include_internal_filter=True,
+        )
+        return {
+            (row["database_name"], row["schema_name"], row["table_name"])
+            for row in connection.execute(stmt, params).mappings()
+        }
+
     def _duckdb_table_names(
         self,
         connection: "Connection",
@@ -1704,6 +1743,63 @@ class Dialect(PGDialect_psycopg2):
         if value.startswith("'") and value.endswith("'"):
             return value[1:-1].replace("''", "'")
         return value
+
+    def _split_duckdb_field(self, field: str) -> Tuple[str, str]:
+        """Split a STRUCT/UNION member (``"my field" VARCHAR``) into name and type."""
+        field = field.strip()
+        if field.startswith('"'):
+            index = 1
+            while index < len(field):
+                if field[index] == '"':
+                    if field[index + 1 : index + 2] == '"':
+                        index += 2
+                        continue
+                    break
+                index += 1
+            name = field[1:index].replace('""', '"')
+            return name, field[index + 1 :].strip()
+        name, _, field_type = field.partition(" ")
+        return name, field_type.strip()
+
+    def _reflect_duckdb_nested_type(
+        self, data_type: str, *, type_description: str
+    ) -> Any:
+        """Reflect STRUCT(...), MAP(...) and UNION(...) into the dialect's types.
+
+        Falls back to NullType when a member type is not recognized or is an
+        ENUM, whose type name DuckDB does not report inside nested types, so a
+        reflected type always compiles back to valid DDL.
+        """
+        kind = data_type[: data_type.index("(")].strip().upper()
+        members = self._split_duckdb_list(data_type[data_type.index("(") + 1 : -1])
+
+        def reflect(member_type: str) -> Any:
+            reflected = self._reflect_duckdb_data_type(
+                member_type, None, {}, type_description=type_description
+            )
+            item_type = getattr(reflected, "item_type", reflected)
+            if isinstance(item_type, sqltypes.Enum):
+                return sqltypes.NULLTYPE
+            return reflected
+
+        if kind == "MAP":
+            if len(members) != 2:
+                return sqltypes.NULLTYPE
+            key_type, value_type = (reflect(member) for member in members)
+            if sqltypes.NULLTYPE in (key_type, value_type):
+                return sqltypes.NULLTYPE
+            return Map(key_type, value_type)
+
+        fields: Dict[str, Any] = {}
+        for member in members:
+            name, member_type = self._split_duckdb_field(member)
+            reflected = reflect(member_type) if name and member_type else None
+            if reflected is None or reflected == sqltypes.NULLTYPE:
+                return sqltypes.NULLTYPE
+            fields[name] = reflected
+        if not fields:
+            return sqltypes.NULLTYPE
+        return Struct(fields) if kind == "STRUCT" else UnionType(fields)
 
     def _unquote_duckdb_identifier(self, value: str) -> Optional[str]:
         if value.startswith('"') and value.endswith('"'):
@@ -1851,9 +1947,13 @@ class Dialect(PGDialect_psycopg2):
                 normalized, enum_rows.get(data_type_id)
             )
             reflected = sqltypes.Enum(*labels, name=enum_name)
-        elif upper == "STRUCT" or upper.startswith(
-            ("STRUCT(", "MAP(", "UNION(", "TUPLE(")
+        elif upper.startswith(("STRUCT(", "MAP(", "UNION(")) and normalized.endswith(
+            ")"
         ):
+            reflected = self._reflect_duckdb_nested_type(
+                normalized, type_description=type_description
+            )
+        elif upper == "STRUCT" or upper.startswith("TUPLE("):
             reflected = sqltypes.NULLTYPE
         else:
             reflected = self._reflect_pg_type_compat(
@@ -2273,6 +2373,42 @@ class Dialect(PGDialect_psycopg2):
         )
         return [view_name for (view_name,) in rows]
 
+    @cache  # type: ignore[call-arg]
+    def get_enums(  # type: ignore[no-untyped-def]
+        self, connection: "Connection", schema: "Optional[str]" = None, **kw: "Any"
+    ):
+        """User-defined ENUM types; ``schema="*"`` lists every schema.
+
+        PostgreSQL's pg_type query also returned DuckDB's built-in ``enum``
+        type, without labels.
+        """
+        sql = (
+            "SELECT database_name, schema_name, type_name, labels, "
+            "database_name = current_database() AS in_current_database, "
+            "database_name = current_database() "
+            "AND schema_name = current_schema() AS visible "
+            "FROM duckdb_types() WHERE logical_type = 'ENUM' AND NOT internal\n"
+        )
+        params: Dict[str, Any] = {}
+        if schema != "*":
+            where_sql, params = self._build_query_where(
+                schema_name=schema, default_to_current_schema=True
+            )
+            sql += where_sql
+        sql += "ORDER BY database_name, schema_name, type_name"
+        quote = self.identifier_preparer.quote
+        return [
+            {
+                "name": row["type_name"],
+                "schema": row["schema_name"]
+                if row["in_current_database"]
+                else f"{quote(row['database_name'])}.{quote(row['schema_name'])}",
+                "visible": bool(row["visible"]),
+                "labels": list(row["labels"] or []),
+            }
+            for row in connection.execute(text(sql), params).mappings()
+        ]
+
     def has_schema(self, connection: "Connection", schema: str, **kw: Any) -> bool:
         """Whether ``schema`` (``schema`` or ``database.schema``) exists."""
         database_name, schema_name = self.identifier_preparer._separate(schema)
@@ -2576,12 +2712,51 @@ class Dialect(PGDialect_psycopg2):
         rows = self._duckdb_column_rows(
             connection, schema=schema, filter_names=filter_names
         )
+        include_tables = kind is None or ObjectKind.TABLE in kind
+        include_views = kind is None or ObjectKind.VIEW in kind
+        if not (include_tables or include_views):
+            # DuckDB has no materialized views
+            rows = []
+        elif not (include_tables and include_views):
+            # duckdb_columns() covers tables and views alike
+            views = self._duckdb_view_relations(connection, schema, filter_names)
+            rows = [
+                row
+                for row in rows
+                if (
+                    (row["database_name"], row["schema_name"], row["table_name"])
+                    in views
+                )
+                == include_views
+            ]
         columns = self._duckdb_columns_from_rows(connection, rows)
         schema_key = self._reflection_schema_key(schema)
         return (
             ((schema_key, table_name), table_columns)
             for table_name, table_columns in columns.items()
         )
+
+
+def _register_alembic_support() -> None:
+    """Register the Alembic implementation once Alembic has been imported.
+
+    Alembic is optional and heavy to import, so it is only loaded when the
+    application (for example the ``alembic`` command running ``env.py``) has
+    imported it already.
+    """
+    if "alembic" not in sys.modules or "duckdb_sqlalchemy.alembic_impl" in sys.modules:
+        return
+    try:
+        from . import alembic_impl  # noqa: F401
+    except Exception as exc:  # pragma: no cover - depends on the Alembic version
+        warnings.warn(
+            f"duckdb_sqlalchemy could not register its Alembic support: {exc}",
+            DuckDBEngineWarning,
+            stacklevel=2,
+        )
+
+
+_register_alembic_support()
 
 
 if SQLALCHEMY_VERSION >= Version("2.0.14"):

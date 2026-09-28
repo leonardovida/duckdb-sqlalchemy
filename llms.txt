@@ -15,7 +15,8 @@ Behavior notes:
 - result.rowcount reports rows changed by INSERT/UPDATE/DELETE/MERGE
 - regexp_match compiles to regexp_matches() (substring match)
 - DuckDB has no SAVEPOINT, no SELECT ... FOR UPDATE, and cannot add UNIQUE, FOREIGN KEY, or CHECK constraints to an existing table
-- Alembic needs a DefaultImpl subclass with __dialect__ = "duckdb" (see alembic.html)
+- Alembic works without an env.py implementation class; duckdb_sqlalchemy registers DuckDBImpl when Alembic is loaded (see alembic.html)
+- STRUCT, MAP, and UNION columns reflect as Struct, Map, and Union
 
 Docs (https://leonardovida.github.io/duckdb-sqlalchemy/):
 - getting-started.html

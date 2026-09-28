@@ -8,8 +8,24 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+### Compatibility
+
+- `STRUCT`, `MAP`, and `UNION` columns reflect as `Struct`, `Map`, and `Union` with their member types instead of `NullType`, so reflected tables recreate the same columns and Alembic autogenerate sees them. A nested type with an ENUM member still reflects as `NullType` (PR_LINK)
+- an Alembic implementation class for `duckdb` defined in `env.py` keeps precedence over the built-in `DuckDBImpl`. Remove it to get the DuckDB-specific autogenerate behavior below (PR_LINK)
+
+### Features
+
+- Alembic works without an implementation class in `env.py`: `duckdb_sqlalchemy.alembic_impl.DuckDBImpl` registers when Alembic is loaded. It renders `Struct`, `Map`, and `Union` columns as valid migration code, reports changed nested types, matches named unique constraints to the names DuckDB generates, compares server defaults in DuckDB's spelling, and supports `op.alter_column(..., comment=...)` (PR_LINK)
+
+### Bug Fixes
+
+- `get_multi_columns(kind=ObjectKind.TABLE)` no longer returns views, and `kind=ObjectKind.VIEW` returns only views (PR_LINK)
+- `inspector.get_enums()` returns the ENUM types created with `CREATE TYPE`, with their labels and schema, instead of a single label-less `enum` entry for DuckDB's built-in type (PR_LINK)
+- `alembic upgrade --sql` and `create_mock_engine` no longer fail with "'MockConnection' object has no attribute 'get_execution_options'" for tables with an autoincrement primary key, and their DDL includes table and column comments (PR_LINK)
+
 ### Maintenance
 
+- add Alembic to the `dev` extra for the Alembic tests (PR_LINK)
 - document reflection scoping (temp tables, `db.schema` names, `has_schema`), nested-type reflection, and statements DuckDB does not support; test and document Alembic autogenerate, the batch-mode workaround for adding constraints, and its known limitations; document the `read_csv` `columns` type mapping, the remaining Dive and Flight helpers, and the MotherDuck database string helpers; refresh the architecture module map
 
 ## [1.5.5.12](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.11...v1.5.5.12) (2026-09-28)
