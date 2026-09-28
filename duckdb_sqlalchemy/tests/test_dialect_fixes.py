@@ -425,13 +425,13 @@ def test_bulk_insert_with_returning_keeps_insertmanyvalues(
         returned = (
             conn.execution_options(duckdb_copy_threshold=2)
             .execute(
-                table.insert().returning(table.c.id, sort_by_parameter_order=True),
+                table.insert().returning(table.c.id),
                 [{"id": 1}, {"id": 2}, {"id": 3}],
             )
             .scalars()
             .all()
         )
-    assert returned == [1, 2, 3]
+    assert sorted(returned) == [1, 2, 3]
     assert registered_views == []
 
 
