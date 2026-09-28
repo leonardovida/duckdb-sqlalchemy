@@ -22,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/configure-pages@v6
       - uses: actions/jekyll-build-pages@v1
         with:

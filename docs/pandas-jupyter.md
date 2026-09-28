@@ -7,6 +7,8 @@ title: Pandas and Jupyter
 
 These examples require pandas 2.2 or newer. Older pandas releases do not
 support SQLAlchemy 2.x engines.
+pandas 3 needs SQLAlchemy 2.0.36 or newer, and DuckDB 1.4.4 or newer to read
+its default `str` columns; with older DuckDB releases, use pandas 2.x.
 
 ## Register a DataFrame
 

@@ -37,5 +37,6 @@ PostgreSQL-compatible. See `ARCHITECTURE.md` for the module map and invariants.
 ## Supported Versions
 
 `noxfile.py` is the source of truth. It tests Python 3.10-3.14, SQLAlchemy
-2.0.0 / 2.0.52 / 2.1 prereleases, and DuckDB 1.3.0-1.5.x. Hosted CI runs the
-latest SQLAlchemy and DuckDB on each Python version plus prerelease jobs.
+2.0.0 / 2.0.52 / 2.1.1, and DuckDB 1.3.0-1.5.x. Hosted CI runs the latest
+SQLAlchemy and DuckDB on each Python version, SQLAlchemy 2.0 on Python 3.13 and
+3.14, the minimum versions, and informational prerelease jobs.
