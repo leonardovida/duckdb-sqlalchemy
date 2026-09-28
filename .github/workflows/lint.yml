@@ -1,22 +1,39 @@
 name: Lint
 
 on:
+  push:
+    branches: [main]
   pull_request:
-    paths:
-      - "duckdb_sqlalchemy/**"
-      - "examples/**"
-      - "pyproject.toml"
-      - "noxfile.py"
-      - "test.cfg"
-      - ".github/workflows/lint.yml"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - uses: pre-commit/action@v3.0.1
+        env:
+          # ty needs the project dependencies; the ty job below runs it.
+          SKIP: ty
+
+  ty:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
+      - name: Type check
+        run: uv run --locked ty check --exclude 'duckdb_sqlalchemy/tests/**' duckdb_sqlalchemy/
