@@ -80,6 +80,23 @@ result in memory so it is not truncated. Arrow and DataFrame fetches are not
 available on a buffered result. Read large results fully, or use a separate
 connection, to avoid the memory cost.
 
+## Row counts and regular expressions
+
+`result.rowcount` reports the rows changed by an INSERT, UPDATE, DELETE, or
+MERGE. It is `-1` for statements with a RETURNING clause and when several
+parameter sets run through DuckDB's `executemany()` (batched UPDATE and
+DELETE; multi-row INSERTs are counted). `column.regexp_match(pattern)` compiles to
+`regexp_matches()`, which matches anywhere in the string; `flags` are passed as
+DuckDB regex options (for example `flags="i"`).
+
+## Constraint reflection
+
+DuckDB names every constraint itself (`child_parent_id_id_fkey`,
+`parent_code_key`, `parent_n_check`) and ignores names given in DDL, so
+reflected constraint names can differ from the names in your models. Foreign
+keys cannot cross schemas in DuckDB, so a reflected foreign key always refers
+to a table in the same schema.
+
 ## Isolation levels
 
 DuckDB has a single transaction isolation level. The dialect accepts

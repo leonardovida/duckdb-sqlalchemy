@@ -17,6 +17,7 @@ from sqlalchemy import (
     create_engine,
     func,
     inspect,
+    literal,
     select,
     text,
     type_coerce,
@@ -701,3 +702,189 @@ def test_search_path_into_other_database_is_reflected(engine: Engine) -> None:
         assert inspect(conn).has_table("only2")
         reflected = Table("only2", MetaData(), autoload_with=conn)
         assert [column.name for column in reflected.columns] == ["a"]
+
+
+def test_regexp_match_searches_like_postgresql(engine: Engine) -> None:
+    value = literal("abc")
+    with engine.connect() as conn:
+        # DuckDB's ~ operator requires the whole string to match
+        assert conn.execute(select(value.regexp_match("b"))).scalar_one() is True
+        assert conn.execute(select(value.regexp_match("B"))).scalar_one() is False
+        assert conn.execute(select(~value.regexp_match("b"))).scalar_one() is False
+        assert (
+            conn.execute(select(value.regexp_match("B", flags="i"))).scalar_one()
+            is True
+        )
+    compiled = str(
+        (~value.regexp_match("B", flags="i")).compile(
+            dialect=engine.dialect, compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert compiled == "NOT regexp_matches('abc', 'B', 'i')"
+
+
+def test_dml_rowcount_reports_changed_rows(engine: Engine) -> None:
+    table = Table("counted", MetaData(), Column("id", Integer, primary_key=True))
+    with engine.begin() as conn:
+        table.create(conn)
+        assert conn.execute(table.insert(), {"id": 1}).rowcount == 1
+        assert conn.execute(table.insert(), [{"id": 2}, {"id": 3}]).rowcount == 2
+        assert conn.execute(table.update().values(id=table.c.id + 10)).rowcount == 3
+        assert conn.execute(table.delete().where(table.c.id == 99)).rowcount == 0
+        assert conn.execute(table.delete().where(table.c.id == 11)).rowcount == 1
+        # textual DML keeps returning DuckDB's "Count" row
+        result = conn.exec_driver_sql("DELETE FROM counted")
+        assert result.rowcount == 2
+        assert result.fetchall() == [(2,)]
+        assert engine.dialect.supports_sane_rowcount
+
+
+def test_orm_version_counter_detects_stale_rows(engine: Engine) -> None:
+    from sqlalchemy.orm.exc import StaleDataError
+
+    class Base(DeclarativeBase):
+        pass
+
+    class Versioned(Base):
+        __tablename__ = "versioned"
+        id: Mapped[int] = mapped_column(primary_key=True)
+        name: Mapped[str]
+        version: Mapped[int] = mapped_column(nullable=False)
+        __mapper_args__ = {"version_id_col": version}
+
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        row = Versioned(id=1, name="a")
+        session.add(row)
+        session.commit()
+        row.name = "b"
+        session.commit()
+        assert row.version == 2
+
+        session.execute(text("UPDATE versioned SET version = 99"))
+        row.name = "c"
+        with pytest.raises(StaleDataError):
+            session.commit()
+
+
+def test_constraint_reflection_uses_duckdb_catalog(engine: Engine) -> None:
+    with engine.connect() as conn:
+        conn.exec_driver_sql(
+            "CREATE TABLE parent (id INTEGER PRIMARY KEY, code VARCHAR UNIQUE, "
+            "a INTEGER, b INTEGER, n INTEGER CHECK (n > 0 AND (n < 10 OR n = 99)), "
+            "UNIQUE (a, b))"
+        )
+        conn.exec_driver_sql(
+            "CREATE TABLE child (id INTEGER, parent_id INTEGER REFERENCES parent (id), "
+            "a INTEGER, b INTEGER, FOREIGN KEY (a, b) REFERENCES parent (a, b))"
+        )
+        # a same-named table elsewhere must not hide or add constraints
+        conn.exec_driver_sql("CREATE SCHEMA other")
+        conn.exec_driver_sql("CREATE TABLE other.child (id INTEGER UNIQUE)")
+        inspector = inspect(conn)
+
+        assert inspector.get_unique_constraints("parent") == [
+            {"name": "parent_code_key", "column_names": ["code"], "comment": None},
+            {"name": "parent_a_b_key", "column_names": ["a", "b"], "comment": None},
+        ]
+        assert [
+            (check["sqltext"], bool(check["name"]))
+            for check in inspector.get_check_constraints("parent")
+        ] == [("(n > 0) AND ((n < 10) OR (n = 99))", True)]
+        foreign_keys = inspector.get_foreign_keys("child")
+        assert [
+            (
+                fk["constrained_columns"],
+                fk["referred_schema"],
+                fk["referred_table"],
+                fk["referred_columns"],
+            )
+            for fk in foreign_keys
+        ] == [
+            (["parent_id"], None, "parent", ["id"]),
+            (["a", "b"], None, "parent", ["a", "b"]),
+        ]
+        assert all(fk["name"].endswith("_fkey") for fk in foreign_keys)
+        assert (
+            inspector.get_foreign_keys("child", schema="main")[0]["referred_schema"]
+            == "main"
+        )
+        assert inspector.get_foreign_keys("child", schema="other") == []
+        assert [
+            uc["column_names"]
+            for uc in inspector.get_unique_constraints("child", schema="other")
+        ] == [["id"]]
+
+        metadata = MetaData()
+        child = Table("child", metadata, autoload_with=conn)
+        assert {fk.target_fullname for fk in child.foreign_keys} == {
+            "parent.id",
+            "parent.a",
+            "parent.b",
+        }
+        assert len(metadata.tables["parent"].constraints) == 4
+
+
+def test_temp_table_does_not_inherit_shadowed_table_metadata(engine: Engine) -> None:
+    with engine.connect() as conn:
+        conn.exec_driver_sql("CREATE TABLE shadowed (id INTEGER PRIMARY KEY, v INT)")
+        conn.exec_driver_sql("CREATE INDEX shadowed_v ON shadowed (v)")
+        conn.exec_driver_sql("CREATE TEMP TABLE shadowed (x INTEGER)")
+        inspector = inspect(conn)
+
+        assert [col["name"] for col in inspector.get_columns("shadowed")] == ["x"]
+        assert inspector.get_pk_constraint("shadowed")["constrained_columns"] == []
+        assert inspector.get_indexes("shadowed") == []
+        assert inspector.get_pk_constraint("shadowed", schema="main")[
+            "constrained_columns"
+        ] == ["id"]
+        assert [
+            ix["name"] for ix in inspector.get_indexes("shadowed", schema="main")
+        ] == ["shadowed_v"]
+
+
+def test_table_comment_is_scoped_to_schema_and_database(
+    multi_catalog_engine: Engine,
+) -> None:
+    with multi_catalog_engine.connect() as conn:
+        _run_each(
+            conn,
+            [
+                "COMMENT ON TABLE main_t IS 'main'",
+                "COMMENT ON TABLE other.main_t IS 'other'",
+                "COMMENT ON TABLE s.t IS 's'",
+                "COMMENT ON TABLE other.s.t IS 'other s'",
+                "COMMENT ON VIEW main_v IS 'view'",
+            ],
+        )
+        inspector = inspect(conn)
+        assert inspector.get_table_comment("main_t") == {"text": "main"}
+        assert inspector.get_table_comment("main_t", schema="other.main") == {
+            "text": "other"
+        }
+        assert inspector.get_table_comment("t", schema="s") == {"text": "s"}
+        assert inspector.get_table_comment("t", schema="other.s") == {"text": "other s"}
+        assert inspector.get_table_comment("main_v") == {"text": "view"}
+        assert dict(inspector.get_multi_table_comment()) == {
+            (None, "main_t"): {"text": "main"}
+        }
+        with pytest.raises(NoSuchTableError):
+            inspector.get_table_comment("only_in_other")
+
+
+def test_temp_relation_names_and_qualified_has_schema(
+    multi_catalog_engine: Engine,
+) -> None:
+    with multi_catalog_engine.connect() as conn:
+        conn.exec_driver_sql("CREATE TEMP TABLE temp_b (x INTEGER)")
+        conn.exec_driver_sql("CREATE TEMP TABLE temp_a (x INTEGER)")
+        conn.exec_driver_sql("CREATE TEMP VIEW temp_v AS SELECT 1 AS x")
+        inspector = inspect(conn)
+
+        assert inspector.get_temp_table_names() == ["temp_a", "temp_b"]
+        assert inspector.get_temp_view_names() == ["temp_v"]
+        assert inspector.has_schema("aux")
+        assert inspector.has_schema("memory.aux")
+        assert inspector.has_schema("other.s")
+        assert not inspector.has_schema("other.aux")
+        assert not inspector.has_schema("missing")

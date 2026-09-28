@@ -29,11 +29,12 @@ from typing import (
 import duckdb
 import sqlalchemy
 from packaging.version import Version
-from sqlalchemy import event, pool, select, sql, text, util
+from sqlalchemy import event, pool, text, util
 from sqlalchemy import schema as sa_schema
 from sqlalchemy import types as sqltypes
 from sqlalchemy.dialects.postgresql import UUID, insert
 from sqlalchemy.dialects.postgresql.base import (
+    PGCompiler,
     PGDDLCompiler,
     PGDialect,
     PGIdentifierPreparer,
@@ -43,12 +44,13 @@ from sqlalchemy.dialects.postgresql.psycopg2 import PGDialect_psycopg2
 from sqlalchemy.engine import processors
 from sqlalchemy.engine.default import DefaultDialect, DefaultExecutionContext
 from sqlalchemy.engine.interfaces import ExecuteStyle
-from sqlalchemy.engine.reflection import ReflectionDefaults, cache
+from sqlalchemy.engine.reflection import ObjectKind, ReflectionDefaults, cache
 from sqlalchemy.engine.url import URL as SAURL
 from sqlalchemy.exc import NoSuchTableError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import bindparam
 from sqlalchemy.sql.compiler import IdentifierPreparer
+from sqlalchemy.sql.elements import BindParameter
 from sqlalchemy.sql.selectable import Select
 
 from ._arrow import DuckDBArrowResult
@@ -339,11 +341,45 @@ _NATIVE_RESULT_FETCH_METHODS = frozenset(
 )
 
 
+# Tables and views with their comments, as one relation for reflection queries.
+_DUCKDB_RELATION_COMMENTS = """(
+    SELECT database_name, schema_name, table_name, comment, internal,
+        'table' AS relation_kind
+    FROM duckdb_tables()
+    UNION ALL BY NAME
+    SELECT database_name, schema_name, view_name AS table_name, comment, internal,
+        'view' AS relation_kind
+    FROM duckdb_views()
+)"""
+
+
 def _search_path_relation(entry: str, current_database: str) -> Tuple[str, str]:
     parts = [part.strip().strip('"') for part in entry.strip().split(".", 1)]
     if len(parts) == 2:
         return parts[0], parts[1]
     return current_database, parts[0]
+
+
+def _strip_enclosing_parentheses(expression: str) -> str:
+    """Drop parentheses that wrap all of ``expression``: ``(a > 0)`` -> ``a > 0``."""
+    expression = expression.strip()
+    while expression.startswith("(") and expression.endswith(")"):
+        depth = 0
+        quote: Optional[str] = None
+        for index, char in enumerate(expression):
+            if quote is not None:
+                if char == quote:
+                    quote = None
+            elif char in "'\"":
+                quote = char
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0 and index != len(expression) - 1:
+                    return expression
+        expression = expression[1:-1].strip()
+    return expression
 
 
 class ConnectionWrapper:
@@ -444,6 +480,7 @@ _BEGIN_TRANSACTION_ISOLATION_RE = re.compile(
     r"^begin\s+(?:transaction\s+)?isolation\s+level\s+"
     r"(?:serializable|repeatable\s+read|read\s+committed|read\s+uncommitted)$"
 )
+_DML_ROWCOUNT_PREFIXES = ("insert", "update", "delete", "merge")
 
 
 def _first_present_register_value(
@@ -485,6 +522,9 @@ class CursorWrapper:
         self._buffered_rows: Optional[deque] = None
         self._buffered_description: Any = None
         self._buffered_rowcount: int = -1
+        # Rows changed by the last INSERT/UPDATE/DELETE/MERGE, which DuckDB
+        # reports as a "Count" result while its own rowcount stays -1.
+        self._dml_rowcount: Optional[int] = None
         # True once rows of the current result were read as Python tuples;
         # DuckDB then cannot return the rest of that result as Arrow.
         self._rows_fetched = False
@@ -496,7 +536,27 @@ class CursorWrapper:
         self.__connection_wrapper._buffer_pending_result(self)
         self._buffered_rows = None
         self._buffered_description = None
+        self._dml_rowcount = None
         self._rows_fetched = False
+
+    def _capture_dml_rowcount(self, statement: str) -> bool:
+        """Read the "Count" result of a DML statement into ``rowcount``.
+
+        The count row stays readable, buffered like any other result. A
+        RETURNING clause yields its own columns instead, so it is left alone.
+        """
+        if not statement.startswith(_DML_ROWCOUNT_PREFIXES):
+            return False
+        description = self.description
+        if not description or len(description) != 1 or description[0][0] != "Count":
+            return False
+        rows = self.__c.fetchall()
+        if len(rows) == 1 and isinstance(rows[0][0], int):
+            self._dml_rowcount = rows[0][0]
+        self._buffered_rows = deque(rows)
+        self._buffered_description = description
+        self._buffered_rowcount = -1
+        return True
 
     def _after_execute(self) -> None:
         if getattr(self.__c, "description", None) is not None:
@@ -567,6 +627,8 @@ class CursorWrapper:
             self.__c.execute(statement)
         else:
             self.__c.execute(statement, parameters)
+        if self._capture_dml_rowcount(norm):
+            return
         self._after_execute()
 
     @property
@@ -598,6 +660,8 @@ class CursorWrapper:
 
     @property
     def rowcount(self) -> int:
+        if self._dml_rowcount is not None:
+            return self._dml_rowcount
         if self._buffered_rows is not None:
             return self._buffered_rowcount
         return self.__c.rowcount
@@ -928,6 +992,30 @@ class DuckDBDDLCompiler(PGDDLCompiler):
         return colspec
 
 
+class DuckDBCompiler(PGCompiler):
+    # DuckDB's ``~`` operator is a full-string match (regexp_full_match) and it
+    # has no ``~*``; regexp_matches() searches like PostgreSQL's ``~`` and takes
+    # the flags as options.
+    def _regexp_matches(self, binary: Any, **kw: Any) -> str:
+        args = [self.process(binary.left, **kw), self.process(binary.right, **kw)]
+        flags = binary.modifiers["flags"]
+        if flags is not None:
+            # SQLAlchemy before 2.0.18 passes the flags as a bound parameter
+            value = flags.value if isinstance(flags, BindParameter) else flags
+            args.append(self.render_literal_value(value, sqltypes.STRINGTYPE))
+        return "regexp_matches(%s)" % ", ".join(args)
+
+    def visit_regexp_match_op_binary(
+        self, binary: Any, operator: Any, **kw: Any
+    ) -> str:
+        return self._regexp_matches(binary, **kw)
+
+    def visit_not_regexp_match_op_binary(
+        self, binary: Any, operator: Any, **kw: Any
+    ) -> str:
+        return "NOT %s" % self._regexp_matches(binary, **kw)
+
+
 def _process_decimal_bind(value: Any) -> Any:
     # DuckDB's binder drops a positive exponent (``Decimal("1E+5")`` binds as
     # ``1.00000``), so rewrite such values without an exponent first.
@@ -988,7 +1076,8 @@ class Dialect(PGDialect_psycopg2):
     _has_events = False
     supports_statement_cache = True
     supports_comments = False
-    supports_sane_rowcount = False
+    # single-statement DML rowcount comes from DuckDB's "Count" result
+    supports_sane_rowcount = True
     supports_server_side_cursors = False
     # duckdb binds and returns decimal.Decimal without going through float
     supports_native_decimal = True
@@ -1017,6 +1106,7 @@ class Dialect(PGDialect_psycopg2):
     )
     preparer = DuckDBIdentifierPreparer
     identifier_preparer: DuckDBIdentifierPreparer
+    statement_compiler = DuckDBCompiler
     ddl_compiler = DuckDBDDLCompiler
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -1319,39 +1409,6 @@ class Dialect(PGDialect_psycopg2):
         )
         return bool(rows)
 
-    def _get_reflection_or_empty_for_existing_table(
-        self,
-        getter: Callable[[], List[Any]],
-        connection: "Connection",
-        table_name: str,
-        schema: Optional[str],
-    ) -> List[Any]:
-        try:
-            return getter()
-        except NoSuchTableError:
-            if self._duckdb_relation_exists(connection, table_name, schema):
-                return []
-            raise
-
-    def _get_super_reflection_or_empty(
-        self,
-        getter: Callable[..., List[Any]],
-        connection: "Connection",
-        table_name: str,
-        schema: Optional[str],
-        **kw: Any,
-    ) -> List[Any]:
-        # PostgreSQL's pg_catalog queries do not scope by database, so check
-        # existence with the dialect's own scoping first.
-        if not self._duckdb_relation_exists(connection, table_name, schema):
-            raise NoSuchTableError(table_name)
-        return self._get_reflection_or_empty_for_existing_table(
-            lambda: getter(connection, table_name, schema=schema, **kw),
-            connection,
-            table_name,
-            schema,
-        )
-
     def _duckdb_columns(
         self, connection: "Connection", table_name: str, schema: Optional[str]
     ) -> Optional[List[Dict[str, Any]]]:
@@ -1373,7 +1430,7 @@ class Dialect(PGDialect_psycopg2):
     ) -> Tuple[Any, Dict[str, Any]]:
         sql = f"""
             SELECT {columns}
-            FROM {relation}()
+            FROM {relation}
             WHERE schema_name NOT LIKE 'pg\\_%' ESCAPE '\\'
             """
         params: Dict[str, Any] = {}
@@ -1485,7 +1542,7 @@ class Dialect(PGDialect_psycopg2):
         filter_names: Optional[Collection[str]] = None,
     ) -> List[Dict[str, Any]]:
         stmt, params = self._duckdb_reflection_stmt(
-            "duckdb_columns",
+            "duckdb_columns()",
             (
                 "database_name, schema_name, table_name, column_name, column_default, "
                 "is_nullable, data_type, data_type_id, comment, column_index"
@@ -1499,14 +1556,15 @@ class Dialect(PGDialect_psycopg2):
             connection, stmt, params, schema
         )
 
-    def _duckdb_table_names(
+    def _duckdb_tables(
         self,
         connection: "Connection",
         schema: Optional[str] = None,
         filter_names: Optional[Collection[str]] = None,
-    ) -> List[str]:
+    ) -> Dict[str, Tuple[str, str]]:
+        """Map each table name to the (database, schema) it resolves to."""
         stmt, params = self._duckdb_reflection_stmt(
-            "duckdb_tables",
+            "duckdb_tables()",
             "database_name, schema_name, table_name",
             schema=schema,
             filter_names=filter_names,
@@ -1516,7 +1574,54 @@ class Dialect(PGDialect_psycopg2):
         rows = self._execute_visible_duckdb_relation_rows(
             connection, stmt, params, schema
         )
-        return [row["table_name"] for row in rows]
+        return {
+            row["table_name"]: (row["database_name"], row["schema_name"])
+            for row in rows
+        }
+
+    def _duckdb_table_names(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+    ) -> List[str]:
+        return list(self._duckdb_tables(connection, schema, filter_names))
+
+    def _duckdb_constraint_rows(
+        self,
+        connection: "Connection",
+        constraint_type: str,
+        tables: Mapping[str, Tuple[str, str]],
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """duckdb_constraints() rows of ``tables``, grouped by table name.
+
+        Rows are matched on the database and schema of each table, so a table
+        that shadows another of the same name (a temp table, or a table in an
+        attached database) does not pick up the other table's constraints.
+        """
+        stmt, params = self._duckdb_reflection_stmt(
+            "duckdb_constraints()",
+            (
+                "database_name, schema_name, table_name, constraint_name, "
+                "constraint_column_names, expression, referenced_table, "
+                "referenced_column_names"
+            ),
+            schema=schema,
+            filter_names=filter_names,
+            suffix=(
+                "AND constraint_type = :constraint_type\n"
+                "ORDER BY table_name, constraint_index"
+            ),
+        )
+        params["constraint_type"] = constraint_type
+        constraints: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for row in connection.execute(stmt, params).mappings():
+            table_name = row["table_name"]
+            if tables.get(table_name) == (row["database_name"], row["schema_name"]):
+                constraints[table_name].append(dict(row))
+        return constraints
 
     def _duckdb_enum_rows(
         self, connection: "Connection", type_ids: Collection[Any]
@@ -1893,39 +1998,19 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        table_names = self._duckdb_table_names(
-            connection, schema=schema, filter_names=filter_names
-        )
-        constraint_name = (
-            "constraint_name"
-            if self._capabilities.version >= Version("1.1.0")
-            else "NULL AS constraint_name"
-        )
-        stmt, params = self._duckdb_reflection_stmt(
-            "duckdb_constraints",
-            (
-                "database_name, schema_name, table_name, "
-                f"{constraint_name}, constraint_column_names"
-            ),
-            schema=schema,
-            filter_names=filter_names,
-            suffix=(
-                "AND constraint_type = 'PRIMARY KEY'\n"
-                "ORDER BY table_name, constraint_index"
-            ),
-        )
-        constraint_rows = self._execute_visible_duckdb_relation_rows(
-            connection, stmt, params, schema
+        tables = self._duckdb_tables(connection, schema, filter_names)
+        rows = self._duckdb_constraint_rows(
+            connection, "PRIMARY KEY", tables, schema, filter_names
         )
         constraints = {
-            row["table_name"]: {
+            table_name: {
                 "name": row["constraint_name"],
                 "constrained_columns": list(row["constraint_column_names"] or []),
             }
-            for row in constraint_rows
+            for table_name, (row, *_) in rows.items()
         }
         return self._iter_reflection_results(
-            schema, table_names, constraints, ReflectionDefaults.pk_constraint
+            schema, tables, constraints, ReflectionDefaults.pk_constraint
         )
 
     @cache  # type: ignore[call-arg]
@@ -1937,13 +2022,48 @@ class Dialect(PGDialect_psycopg2):
         postgresql_ignore_search_path: bool = False,
         **kw: Any,
     ) -> List["ReflectedForeignKeyConstraint"]:
-        return self._get_super_reflection_or_empty(
-            super().get_foreign_keys,
+        return self._get_single_reflection_result(
             connection,
             table_name,
             schema,
-            postgresql_ignore_search_path=postgresql_ignore_search_path,
+            self.get_multi_foreign_keys,
+            ReflectionDefaults.foreign_keys,
             **kw,
+        )
+
+    def get_multi_foreign_keys(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+        scope: Any = None,
+        kind: Any = None,
+        postgresql_ignore_search_path: bool = False,
+        **kw: Any,
+    ) -> Iterable[Tuple[Any, Any]]:
+        tables = self._duckdb_tables(connection, schema, filter_names)
+        rows = self._duckdb_constraint_rows(
+            connection, "FOREIGN KEY", tables, schema, filter_names
+        )
+        # DuckDB only allows foreign keys within one schema, so the referred
+        # table is in the schema being reflected.
+        foreign_keys = {
+            table_name: [
+                {
+                    "name": row["constraint_name"],
+                    "constrained_columns": list(row["constraint_column_names"]),
+                    "referred_schema": schema,
+                    "referred_table": row["referenced_table"],
+                    "referred_columns": list(row["referenced_column_names"]),
+                    "options": {},
+                    "comment": None,
+                }
+                for row in table_rows
+            ]
+            for table_name, table_rows in rows.items()
+        }
+        return self._iter_reflection_results(
+            schema, tables, foreign_keys, ReflectionDefaults.foreign_keys
         )
 
     @cache  # type: ignore[call-arg]
@@ -1954,12 +2074,41 @@ class Dialect(PGDialect_psycopg2):
         schema: Optional[str] = None,
         **kw: Any,
     ) -> List["ReflectedUniqueConstraint"]:
-        return self._get_super_reflection_or_empty(
-            super().get_unique_constraints,
+        return self._get_single_reflection_result(
             connection,
             table_name,
             schema,
+            self.get_multi_unique_constraints,
+            ReflectionDefaults.unique_constraints,
             **kw,
+        )
+
+    def get_multi_unique_constraints(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+        scope: Any = None,
+        kind: Any = None,
+        **kw: Any,
+    ) -> Iterable[Tuple[Any, Any]]:
+        tables = self._duckdb_tables(connection, schema, filter_names)
+        rows = self._duckdb_constraint_rows(
+            connection, "UNIQUE", tables, schema, filter_names
+        )
+        unique_constraints = {
+            table_name: [
+                {
+                    "name": row["constraint_name"],
+                    "column_names": list(row["constraint_column_names"]),
+                    "comment": None,
+                }
+                for row in table_rows
+            ]
+            for table_name, table_rows in rows.items()
+        }
+        return self._iter_reflection_results(
+            schema, tables, unique_constraints, ReflectionDefaults.unique_constraints
         )
 
     @cache  # type: ignore[call-arg]
@@ -1970,12 +2119,41 @@ class Dialect(PGDialect_psycopg2):
         schema: Optional[str] = None,
         **kw: Any,
     ) -> List["ReflectedCheckConstraint"]:
-        return self._get_super_reflection_or_empty(
-            super().get_check_constraints,
+        return self._get_single_reflection_result(
             connection,
             table_name,
             schema,
+            self.get_multi_check_constraints,
+            ReflectionDefaults.check_constraints,
             **kw,
+        )
+
+    def get_multi_check_constraints(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+        scope: Any = None,
+        kind: Any = None,
+        **kw: Any,
+    ) -> Iterable[Tuple[Any, Any]]:
+        tables = self._duckdb_tables(connection, schema, filter_names)
+        rows = self._duckdb_constraint_rows(
+            connection, "CHECK", tables, schema, filter_names
+        )
+        check_constraints = {
+            table_name: [
+                {
+                    "name": row["constraint_name"],
+                    "sqltext": _strip_enclosing_parentheses(row["expression"] or ""),
+                    "comment": None,
+                }
+                for row in table_rows
+            ]
+            for table_name, table_rows in rows.items()
+        }
+        return self._iter_reflection_results(
+            schema, tables, check_constraints, ReflectionDefaults.check_constraints
         )
 
     def get_indexes(
@@ -2004,11 +2182,9 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        table_names = self._duckdb_table_names(
-            connection, schema=schema, filter_names=filter_names
-        )
+        tables = self._duckdb_tables(connection, schema, filter_names)
         stmt, params = self._duckdb_reflection_stmt(
-            "duckdb_indexes",
+            "duckdb_indexes()",
             (
                 "database_name, schema_name, table_name, index_name, "
                 "expressions, is_unique"
@@ -2017,11 +2193,13 @@ class Dialect(PGDialect_psycopg2):
             filter_names=filter_names,
             suffix="ORDER BY table_name, index_name",
         )
-        index_rows = self._execute_visible_duckdb_relation_rows(
-            connection, stmt, params, schema
-        )
         indexes: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for row in index_rows:
+        for row in connection.execute(stmt, params).mappings():
+            if tables.get(row["table_name"]) != (
+                row["database_name"],
+                row["schema_name"],
+            ):
+                continue
             expressions, column_names = self._reflect_duckdb_index_expressions(
                 row["expressions"]
             )
@@ -2034,8 +2212,76 @@ class Dialect(PGDialect_psycopg2):
                 reflected_index["expressions"] = expressions
             indexes[row["table_name"]].append(reflected_index)
         return self._iter_reflection_results(
-            schema, table_names, indexes, ReflectionDefaults.indexes
+            schema, tables, indexes, ReflectionDefaults.indexes
         )
+
+    def get_multi_table_comment(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+        scope: Any = None,
+        kind: Any = None,
+        **kw: Any,
+    ) -> Iterable[Tuple[Any, Any]]:
+        # PostgreSQL's pg_description query matches tables by name only, so a
+        # same-named table in another schema or database supplied the comment.
+        stmt, params = self._duckdb_reflection_stmt(
+            _DUCKDB_RELATION_COMMENTS,
+            "database_name, schema_name, table_name, comment, relation_kind",
+            schema=schema,
+            filter_names=filter_names,
+            include_internal_filter=True,
+            suffix="ORDER BY table_name",
+        )
+        rows = self._execute_visible_duckdb_relation_rows(
+            connection, stmt, params, schema
+        )
+        kinds = set()
+        if kind is None or ObjectKind.TABLE in kind:
+            kinds.add("table")
+        if kind is None or ObjectKind.VIEW in kind:
+            kinds.add("view")
+        schema_key = self._reflection_schema_key(schema)
+        return [
+            ((schema_key, row["table_name"]), {"text": row["comment"]})
+            for row in rows
+            if row["relation_kind"] in kinds
+        ]
+
+    @cache  # type: ignore[call-arg]
+    def get_temp_table_names(  # type: ignore[no-untyped-def]
+        self, connection: "Connection", **kw: "Any"
+    ):
+        rows = connection.execute(
+            text(
+                "SELECT table_name FROM duckdb_tables() "
+                "WHERE temporary AND NOT internal ORDER BY table_name"
+            )
+        )
+        return [table_name for (table_name,) in rows]
+
+    @cache  # type: ignore[call-arg]
+    def get_temp_view_names(  # type: ignore[no-untyped-def]
+        self, connection: "Connection", schema: "Optional[str]" = None, **kw: "Any"
+    ):
+        rows = connection.execute(
+            text(
+                "SELECT view_name FROM duckdb_views() "
+                "WHERE temporary AND NOT internal ORDER BY view_name"
+            )
+        )
+        return [view_name for (view_name,) in rows]
+
+    def has_schema(self, connection: "Connection", schema: str, **kw: Any) -> bool:
+        """Whether ``schema`` (``schema`` or ``database.schema``) exists."""
+        database_name, schema_name = self.identifier_preparer._separate(schema)
+        sql = "SELECT 1 FROM duckdb_schemas() WHERE schema_name = :schema_name"
+        params = {"schema_name": schema_name}
+        if database_name is not None:
+            sql += " AND database_name = :database_name"
+            params["database_name"] = database_name
+        return connection.execute(text(sql + " LIMIT 1"), params).first() is not None
 
     def get_multi_table_options(
         self,
@@ -2336,45 +2582,6 @@ class Dialect(PGDialect_psycopg2):
             ((schema_key, table_name), table_columns)
             for table_name, table_columns in columns.items()
         )
-
-    # fix for https://github.com/leonardovida/duckdb-sqlalchemy/issues/1128
-    # (Overrides sqlalchemy method)
-    @lru_cache()
-    def _comment_query(  # type: ignore[no-untyped-def]
-        self, schema: str, has_filter_names: bool, scope: Any, kind: Any
-    ):
-        if SQLALCHEMY_VERSION >= Version("2.0.36"):
-            from sqlalchemy.dialects.postgresql import base as pg_base
-
-            pg_catalog = getattr(pg_base, "pg_catalog")
-
-            relkinds = getattr(super(), "_kind_to_relkinds")(kind)
-            query = (
-                select(
-                    pg_catalog.pg_class.c.relname,
-                    pg_catalog.pg_description.c.description,
-                )
-                .select_from(pg_catalog.pg_class)
-                .outerjoin(
-                    pg_catalog.pg_description,
-                    sql.and_(
-                        pg_catalog.pg_class.c.oid == pg_catalog.pg_description.c.objoid,
-                        pg_catalog.pg_description.c.objsubid == 0,
-                    ),
-                )
-                .where(getattr(super(), "_pg_class_relkind_condition")(relkinds))
-            )
-            query = self._pg_class_filter_scope_schema(query, schema, scope)
-            if has_filter_names:
-                query = query.where(
-                    pg_catalog.pg_class.c.relname.in_(bindparam("filter_names"))
-                )
-            return query
-        else:
-            if hasattr(super(), "_comment_query"):
-                return getattr(super(), "_comment_query")(
-                    schema, has_filter_names, scope, kind
-                )
 
 
 if SQLALCHEMY_VERSION >= Version("2.0.14"):

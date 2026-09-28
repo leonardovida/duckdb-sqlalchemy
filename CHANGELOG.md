@@ -6,6 +6,25 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## Unreleased
+
+### Compatibility
+
+- `regexp_match()` compiles to `regexp_matches()` and matches anywhere in the string, like PostgreSQL. It used DuckDB's `~` operator, which only matches the whole string; anchor the pattern with `^...$` to keep full-string matching
+- `CursorResult.rowcount` reports the rows an INSERT, UPDATE, DELETE, or MERGE changed instead of `-1`, and the dialect sets `supports_sane_rowcount`, so ORM version counters raise `StaleDataError` on a mismatch instead of skipping the check
+- reflected foreign key and check constraint names are DuckDB's constraint names (`child_parent_id_id_fkey`, `parent_n_check`) instead of the constraint SQL text
+
+### Bug Fixes
+
+- `regexp_match(..., flags="i")` works instead of failing with "Scalar Function with name ~* does not exist"
+- `get_unique_constraints` returns the table's UNIQUE constraints instead of an empty list
+- `get_foreign_keys` no longer returns an empty list when a table with the same name exists in another schema, and foreign key, unique, check, and comment reflection is scoped to the requested database and schema
+- a temp table that shadows a table of the same name no longer reflects that table's primary key and indexes
+- `get_table_comment` returns the comment of the requested table instead of a same-named table in another schema or attached database
+- `get_temp_table_names` and `get_temp_view_names` list temporary tables and views instead of returning an empty list
+- `has_schema` accepts `database.schema` names, as returned by `get_schema_names`
+- `duckdb_retry_on_transient` retries HTTP 429, 502, 503, and 504 errors in the format httpfs reports them (`... (HTTP 503)`), including `504 Gateway Timeout`
+
 ## [1.5.5.11](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.10...v1.5.5.11) (2026-09-28)
 
 ### Compatibility
