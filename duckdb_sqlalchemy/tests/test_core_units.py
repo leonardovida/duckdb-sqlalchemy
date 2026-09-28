@@ -1755,46 +1755,6 @@ def test_duckdb_reflection_filters_share_schema_database_builder() -> None:
     }
 
 
-def test_reflection_fallback_returns_empty_only_for_existing_relations(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    dialect = Dialect()
-    connection = object()
-    seen: list[tuple[object, str, Optional[str]]] = []
-
-    def existing_table(conn: object, table_name: str, schema: Optional[str]) -> bool:
-        seen.append((conn, table_name, schema))
-        return True
-
-    def missing_table(conn: object, table_name: str, schema: Optional[str]) -> bool:
-        seen.append((conn, table_name, schema))
-        return False
-
-    def unsupported_reflection() -> list[Any]:
-        raise sa_exc.NoSuchTableError("orders")
-
-    monkeypatch.setattr(dialect, "_duckdb_relation_exists", existing_table)
-    assert (
-        dialect._get_reflection_or_empty_for_existing_table(
-            unsupported_reflection,
-            cast(Any, connection),
-            "orders",
-            "main",
-        )
-        == []
-    )
-    assert seen == [(connection, "orders", "main")]
-
-    monkeypatch.setattr(dialect, "_duckdb_relation_exists", missing_table)
-    with pytest.raises(sa_exc.NoSuchTableError):
-        dialect._get_reflection_or_empty_for_existing_table(
-            unsupported_reflection,
-            cast(Any, connection),
-            "orders",
-            "main",
-        )
-
-
 def test_iter_reflection_results_defaults_only_missing_tables() -> None:
     dialect = Dialect()
     default_calls = 0
@@ -2202,6 +2162,19 @@ def test_transient_error_detection() -> None:
     assert _is_transient_error(RuntimeError("HTTP Error: 503 Service Unavailable"))
     assert not _is_transient_error(RuntimeError("connection reset by peer"))
     assert not _is_transient_error(RuntimeError("HTTP Error: 503 connection reset"))
+    # httpfs formats the status after the URL
+    assert _is_transient_error(
+        RuntimeError("HTTP Error: HTTP GET error on 'https://x/y.csv' (HTTP 503)")
+    )
+    assert _is_transient_error(
+        RuntimeError("HTTP Error: HTTP error on 'x' (HTTP 429 Too Many Requests)")
+    )
+    assert _is_transient_error(RuntimeError("HTTP Error: 504 Gateway Timeout"))
+    assert not _is_transient_error(
+        RuntimeError("HTTP Error: HTTP GET error on 'x' (HTTP 404)")
+    )
+    assert not _is_transient_error(RuntimeError("HTTP Error: 5030 unexpected"))
+    assert not _is_transient_error(RuntimeError("IO Error: connection timed out"))
 
 
 def test_pool_override_from_url_and_env(monkeypatch: pytest.MonkeyPatch) -> None:

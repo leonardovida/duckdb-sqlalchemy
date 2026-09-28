@@ -17,10 +17,12 @@ DISCONNECT_ERROR_PATTERNS = (
 TRANSIENT_ERROR_PATTERNS = (
     "temporarily unavailable",
     "service unavailable",
-    "http error: 429",
-    "http error: 503",
-    "http error: 504",
     "rate limit",
+)
+# Transient HTTP statuses, as "HTTP Error: 503 ..." or as httpfs reports them:
+# "HTTP Error: HTTP GET error on '<url>' (HTTP 503)".
+HTTP_TRANSIENT_STATUS_PATTERN = re.compile(
+    r"(?:\(http |http error: )(?:429|502|503|504)\b"
 )
 
 IDEMPOTENT_STATEMENT_PREFIXES = (
@@ -127,9 +129,15 @@ def _is_idempotent_statement(statement: str) -> bool:
 
 def _is_transient_error(error: BaseException) -> bool:
     message = str(error).lower()
-    if any(pattern in message for pattern in DISCONNECT_ERROR_PATTERNS):
+    # A "504 Gateway Timeout" is a response from the server, not a lost
+    # connection, so it does not match the "timeout" disconnect pattern.
+    connection_message = message.replace("gateway timeout", "")
+    if any(pattern in connection_message for pattern in DISCONNECT_ERROR_PATTERNS):
         return False
-    return any(pattern in message for pattern in TRANSIENT_ERROR_PATTERNS)
+    return (
+        any(pattern in message for pattern in TRANSIENT_ERROR_PATTERNS)
+        or HTTP_TRANSIENT_STATUS_PATTERN.search(message) is not None
+    )
 
 
 def _is_aborted_transaction_error(error: BaseException) -> bool:
