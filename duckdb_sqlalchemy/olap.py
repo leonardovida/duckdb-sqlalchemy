@@ -1,5 +1,6 @@
+import os
 import warnings
-from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Union
 
 from duckdb import __version__ as duckdb_version
 from packaging.version import Version
@@ -276,22 +277,55 @@ def table_function(
     return fn
 
 
-def read_parquet(
-    path: str, *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+_PathArg = Union[str, os.PathLike[str], Iterable[Union[str, os.PathLike[str]]]]
+
+
+def _coerce_path(path: Any) -> Any:
+    # DuckDB cannot bind os.PathLike values, so pass them as plain strings.
+    if isinstance(path, os.PathLike):
+        return os.fspath(path)
+    if isinstance(path, (list, tuple)):
+        return [_coerce_path(item) for item in path]
+    return path
+
+
+def _read_csv_function(
+    name: str,
+    path: _PathArg,
+    columns: Optional[Union[Iterable[str], Mapping[str, str]]],
+    kwargs: Dict[str, Any],
 ) -> Any:
-    return table_function("read_parquet", path, columns=columns, **kwargs)
+    args: List[Any] = [_coerce_path(path)]
+    if isinstance(columns, Mapping):
+        # A mapping is DuckDB's own ``columns`` name -> type parameter; its keys
+        # also name the SQLAlchemy output columns.
+        args.append(_named_parameter("columns", dict(columns)))
+        columns = tuple(columns)
+    return table_function(name, *args, columns=columns, **kwargs)
+
+
+def read_parquet(
+    path: _PathArg, *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+) -> Any:
+    return table_function("read_parquet", _coerce_path(path), columns=columns, **kwargs)
 
 
 def read_csv(
-    path: str, *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+    path: _PathArg,
+    *,
+    columns: Optional[Union[Iterable[str], Mapping[str, str]]] = None,
+    **kwargs: Any,
 ) -> Any:
-    return table_function("read_csv", path, columns=columns, **kwargs)
+    return _read_csv_function("read_csv", path, columns, kwargs)
 
 
 def read_csv_auto(
-    path: str, *, columns: Optional[Iterable[str]] = None, **kwargs: Any
+    path: _PathArg,
+    *,
+    columns: Optional[Union[Iterable[str], Mapping[str, str]]] = None,
+    **kwargs: Any,
 ) -> Any:
-    return table_function("read_csv_auto", path, columns=columns, **kwargs)
+    return _read_csv_function("read_csv_auto", path, columns, kwargs)
 
 
 def pragma_storage_info(

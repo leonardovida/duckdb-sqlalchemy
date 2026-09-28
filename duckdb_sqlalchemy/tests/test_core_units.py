@@ -2060,6 +2060,7 @@ def test_copy_from_rows_closes_rotated_tempfiles(
         newline: str,
         suffix: str,
         delete: bool,
+        encoding: Optional[str] = None,
     ) -> TrackingTempFile:
         path = tmp_path / f"chunk-{len(created)}{suffix}"
         return TrackingTempFile(path)
