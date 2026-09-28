@@ -66,7 +66,8 @@ jobs:
           files: ./coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
           env_vars: PYTHON
-          fail_ci_if_error: true
+          # Dependabot PRs cannot read the Actions CODECOV_TOKEN secret
+          fail_ci_if_error: ${{ github.actor != 'dependabot[bot]' }}
           use_pypi: true
           verbose: true
 
@@ -89,7 +90,36 @@ jobs:
       - name: Run tests
         run: pytest -q -rs
 
+  sqlalchemy_2_0:
+    # build_backend picks SQLAlchemy 2.1 on Python 3.11+, so test 2.0 there too.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.13"
+            sqlalchemy: "SQLAlchemy<2.1"
+          # the SQLAlchemy floor for Python 3.14 in pyproject.toml
+          - python: "3.14"
+            sqlalchemy: "SQLAlchemy==2.0.45"
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install SQLAlchemy 2.0
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install "${{ matrix.sqlalchemy }}"
+      - name: Run tests
+        run: pytest -q -rs
+
   sqlalchemy_prerelease:
+    # Informational: upstream prerelease regressions do not block merges.
     runs-on: ubuntu-latest
 
     steps:
@@ -109,6 +139,7 @@ jobs:
         run: pytest -q
 
   duckdb_prerelease:
+    # Informational: upstream nightly regressions do not block merges.
     runs-on: ubuntu-latest
 
     steps:
@@ -130,7 +161,7 @@ jobs:
   tests_passed:
     # Single status check to require in branch rules.
     if: always()
-    needs: [build_backend, minimum_versions, sqlalchemy_prerelease, duckdb_prerelease]
+    needs: [build_backend, minimum_versions, sqlalchemy_2_0]
     runs-on: ubuntu-latest
     steps:
       - name: Check job results

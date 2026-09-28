@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from typing import Generator
 
 import nox
+from packaging.version import Version
 
 nox.options.default_venv_backend = "uv"
 nox.options.error_on_external_run = True
@@ -46,6 +47,7 @@ def group(title: str) -> Generator[None, None, None]:
         "1.5.3",
         "1.5.4",
         "1.5.5",
+        "1.5.6",
     ],
 )
 @nox.parametrize("sqlalchemy", ["2.0.0", "2.0.52", "2.1.1"])
@@ -54,6 +56,8 @@ def tests(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
         session.skip("SQLAlchemy 2.0.0 is not compatible with Python 3.14")
     if session.python == "3.10" and sqlalchemy.startswith("2.1"):
         session.skip("SQLAlchemy 2.1 requires Python 3.11 or newer")
+    if session.python == "3.14" and Version(duckdb) < Version("1.4.2"):
+        session.skip("DuckDB before 1.4.2 has no Python 3.14 wheels")
     tests_core(session, duckdb, sqlalchemy)
 
 
@@ -77,6 +81,12 @@ def tests_core(
             session.install("duckdb", "--pre", "-U")
         else:
             session.install(f"duckdb=={duckdb}")
+            # pandas 3 needs SQLAlchemy 2.0.36+, and DuckDB before 1.4.4
+            # cannot read its default "str" dtype.
+            if Version(sqlalchemy) < Version("2.0.36") or Version(duckdb) < Version(
+                "1.4.4"
+            ):
+                session.install("pandas<3")
     with group(f"{session.name} Test"):
         pytest_args = [
             "pytest",
