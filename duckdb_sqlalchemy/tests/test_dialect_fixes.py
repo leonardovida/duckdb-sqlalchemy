@@ -480,3 +480,35 @@ def test_unsupported_isolation_level_raises_argument_error() -> None:
     engine = create_engine("duckdb:///:memory:", isolation_level="SERIALIZABLE")
     with pytest.raises(sa_exc.ArgumentError, match="AUTOCOMMIT"):
         engine.connect()
+
+
+@pytest.mark.parametrize("logical_schema", ["logical", None])
+def test_implicit_sequence_follows_schema_translate_map(
+    engine: Engine, logical_schema: Any
+) -> None:
+    metadata = MetaData()
+    table = Table(
+        "seq_items",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("v", String),
+        schema=logical_schema,
+    )
+    with engine.begin() as conn:
+        conn.exec_driver_sql("CREATE SCHEMA physical")
+        translated = conn.execution_options(
+            schema_translate_map={logical_schema: "physical"}
+        )
+        metadata.create_all(translated)
+        translated.execute(table.insert(), [{"v": "a"}, {"v": "b"}])
+        assert translated.execute(select(table.c.id).order_by(table.c.id)).all() == [
+            (1,),
+            (2,),
+        ]
+        sequences = text(
+            "SELECT schema_name FROM duckdb_sequences() "
+            "WHERE sequence_name = 'seq_items_id_seq'"
+        )
+        assert conn.execute(sequences).scalars().all() == ["physical"]
+        metadata.drop_all(translated)
+        assert conn.execute(sequences).scalars().all() == []

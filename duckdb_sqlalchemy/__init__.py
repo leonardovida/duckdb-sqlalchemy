@@ -845,7 +845,9 @@ def _column_needs_implicit_sequence(column: Any) -> bool:
 
 def _implicit_sequence_ddl_name(preparer: IdentifierPreparer, column: Any) -> str:
     name = preparer.quote(f"{column.table.name}_{column.name}_seq")
-    schema = column.table.schema
+    # schema_for_object renders a schema_translate_map placeholder when the
+    # preparer translates schemas, like the table name in the same DDL
+    schema = preparer.schema_for_object(column.table)
     if schema:
         name = f"{preparer.quote_schema(schema)}.{name}"
     return name
@@ -857,11 +859,21 @@ def _execute_implicit_sequence_ddl(
     if connection.dialect.name != "duckdb":
         return
     preparer = connection.dialect.identifier_preparer
+    schema_translate_map = connection.get_execution_options().get(
+        "schema_translate_map"
+    )
+    if schema_translate_map:
+        preparer = preparer._with_schema_translate(schema_translate_map)
     for column in target.columns:
         if _column_needs_implicit_sequence(column):
-            connection.exec_driver_sql(
+            statement = (
                 f"{statement_prefix} {_implicit_sequence_ddl_name(preparer, column)}"
             )
+            if schema_translate_map:
+                statement = preparer._render_schema_translates(
+                    statement, schema_translate_map
+                )
+            connection.exec_driver_sql(statement)
 
 
 def _create_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:

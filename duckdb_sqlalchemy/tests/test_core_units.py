@@ -1631,6 +1631,9 @@ def test_implicit_sequence_event_handlers_share_ddl_execution(
         def exec_driver_sql(self, statement: str) -> None:
             self.statements.append(statement)
 
+        def get_execution_options(self) -> dict[str, Any]:
+            return {}
+
     connection = DummyConnection()
     handler(table, connection)
 
