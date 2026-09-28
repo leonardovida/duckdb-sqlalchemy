@@ -1,12 +1,12 @@
 # Project Tracker
 
-Last updated: 2025-12-24
+Last updated: 2026-09-28
 
 ## MotherDuck performance plan (duckdb-sqlalchemy)
 
 ### Data movement performance
 - [ ] Optimize _bulk_insert_via_register (avoid copies)
-- [ ] Add COPY from parquet/csv examples
+- [x] Add COPY from parquet/csv examples (`bulk.py`, `docs/olap.md`)
 - [ ] Explore appender/chunked ingest improvements
 
 ### Observability

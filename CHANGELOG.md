@@ -27,6 +27,11 @@ preserved from the upstream project for historical context.
 ### Bug Fixes
 
 - reflect primary keys on DuckDB 0.10 and 1.0, whose constraint catalog does not expose names. Generated names remain available on DuckDB 1.1 and newer ([#171](https://github.com/leonardovida/duckdb-sqlalchemy/pull/171))
+- stop a cached `copy_to_parquet` statement from writing a later export to an earlier destination or with earlier COPY options, and keep string partition keys when reading snapshots back ([#170](https://github.com/leonardovida/duckdb-sqlalchemy/pull/170))
+
+### Documentation
+
+- add a partitioned Parquet snapshot recipe ([#169](https://github.com/leonardovida/duckdb-sqlalchemy/pull/169))
 
 ## [1.5.5.8](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.7...v1.5.5.8) (2026-09-18)
 
