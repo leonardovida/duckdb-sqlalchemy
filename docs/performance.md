@@ -156,3 +156,24 @@ def tag_query(conn, cursor, statement, parameters, context, executemany):
 
 Use a constant tag or validate dynamic labels before including them in SQL.
 Commented writes retain the dialect's DML row counts.
+
+## Recorded comparison
+
+A same-runner CI smoke comparison at commit
+`4a8e2c00426322c4e6e688aa816c3a6d04e2acd4` used 10000 rows and two
+fresh-process samples per case. SQLAlchemy, DuckDB, pandas and Arrow versions
+are recorded in the [raw benchmark job](https://github.com/leonardovida/duckdb-sqlalchemy/actions/runs/36757147809/job/110030166866).
+
+| Path | Reviewed baseline | This sweep |
+| --- | ---: | ---: |
+| Core inserts | 0.316 s | 0.317 s |
+| Bulk registration | 0.183 s | 0.194 s |
+| pandas registration | 0.061 s | 0.089 s |
+| Batched existence reflection | 0.214 s / 201 queries | 0.013 s / 2 queries |
+| Direct typed Arrow inserts | unavailable | 0.025 s |
+
+Reflection improved roughly 17 times in this sample. Core insert speed was
+unchanged; bulk and pandas paths pay for checks that prevent silent coercion.
+Direct Arrow avoids Python parameter construction when the source is already
+typed Arrow. Two samples are a smoke comparison; rerun on representative
+production data before treating timing differences as stable estimates.

@@ -676,7 +676,8 @@ def test_literals_and_comments_preserve_backslashes(engine: Any) -> None:
 
 @pytest.mark.parametrize("options", [{"start": 100}, {"start": 0}, {"increment": 0}])
 def test_default_identity_uses_sequence_and_rejects_unsupported_options(
-    engine: Any, options: Any,
+    engine: Any,
+    options: Any,
 ) -> None:
     from sqlalchemy import Identity
     from sqlalchemy.exc import CompileError

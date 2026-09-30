@@ -959,7 +959,10 @@ class DuckDBExecutionContext(_PGExecutionContext):
                 self._rowcount = len(returning_rows)
             else:
                 if self.execution_options.get("duckdb_arrow"):
-                    arrow_table = cursor.fetch_arrow_table()
+                    fetch_arrow = getattr(cursor, "to_arrow_table", None)
+                    if fetch_arrow is None:
+                        fetch_arrow = cursor.fetch_arrow_table
+                    arrow_table = fetch_arrow()
                     self._duckdb_returning_arrow = arrow_table
                     cursor._store_buffered_result(
                         zip(*(column.to_pylist() for column in arrow_table.columns)),
@@ -1097,7 +1100,14 @@ def _column_needs_implicit_sequence(column: Any) -> bool:
         )
         or any(
             getattr(identity, option, None)
-            for option in ("always", "nominvalue", "nomaxvalue", "cycle", "order", "on_null")
+            for option in (
+                "always",
+                "nominvalue",
+                "nomaxvalue",
+                "cycle",
+                "order",
+                "on_null",
+            )
         )
     ):
         raise CompileError(
