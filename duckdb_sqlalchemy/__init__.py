@@ -1167,10 +1167,11 @@ class DuckDBTypeCompiler(PGTypeCompiler):
         )
 
 
-
 def _json_pointer(value: Any) -> str:
     parts = value if isinstance(value, (tuple, list)) else (value,)
-    return "/" + "/".join(str(part).replace("~", "~0").replace("/", "~1") for part in parts)
+    return "/" + "/".join(
+        str(part).replace("~", "~0").replace("/", "~1") for part in parts
+    )
 
 
 class DuckDBJSONIndex(sqltypes.JSON.JSONIndexType):
@@ -1190,6 +1191,7 @@ class DuckDBJSONPath(sqltypes.JSON.JSONPathType):
         render = sqltypes.String().literal_processor(dialect)
         return lambda value: render(_json_pointer(value))
 
+
 class DuckDBCompiler(PGCompiler):
     def _json_extract(self, binary: Any, **kw: Any) -> str:
         as_json = isinstance(binary.type, sqltypes.JSON)
@@ -1200,10 +1202,14 @@ class DuckDBCompiler(PGCompiler):
         target_type = self.dialect.type_compiler_instance.process(binary.type)
         return f"CAST({expression} AS {target_type})"
 
-    def visit_json_getitem_op_binary(self, binary: Any, operator: Any, **kw: Any) -> str:
+    def visit_json_getitem_op_binary(
+        self, binary: Any, operator: Any, _cast_applied: bool = False, **kw: Any
+    ) -> str:
         return self._json_extract(binary, **kw)
 
-    def visit_json_path_getitem_op_binary(self, binary: Any, operator: Any, **kw: Any) -> str:
+    def visit_json_path_getitem_op_binary(
+        self, binary: Any, operator: Any, **kw: Any
+    ) -> str:
         return self._json_extract(binary, **kw)
 
     # DuckDB's ``~`` operator is a full-string match (regexp_full_match) and it
@@ -1334,6 +1340,7 @@ class Dialect(PGDialect_psycopg2):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         kwargs["use_native_hstore"] = False
         super().__init__(*args, **kwargs)
+        self._backslash_escapes = False
         self._capabilities = get_capabilities(duckdb.__version__)
 
     @classmethod
@@ -1499,15 +1506,46 @@ class Dialect(PGDialect_psycopg2):
         return [".".join(quote(identifier) for identifier in nspname) for nspname in rs]
 
     @cache  # type: ignore[call-arg]
-    def has_sequence(self, connection: "Connection", sequence_name: str, schema: Optional[str] = None, **kw: Any) -> bool:
-        where, params = self._build_query_where(schema_name=schema, default_to_current_schema=True)
+    def has_sequence(
+        self,
+        connection: "Connection",
+        sequence_name: str,
+        schema: Optional[str] = None,
+        **kw: Any,
+    ) -> bool:
+        where, params = self._build_query_where(
+            schema_name=schema, default_to_current_schema=True
+        )
         params["sequence_name"] = sequence_name
-        return connection.execute(text("SELECT 1 FROM duckdb_sequences() WHERE sequence_name = :sequence_name " + where + " LIMIT 1"), params).first() is not None
+        return (
+            connection.execute(
+                text(
+                    "SELECT 1 FROM duckdb_sequences() WHERE sequence_name = :sequence_name "
+                    + where
+                    + " LIMIT 1"
+                ),
+                params,
+            ).first()
+            is not None
+        )
 
     @cache  # type: ignore[call-arg]
-    def get_sequence_names(self, connection: "Connection", schema: Optional[str] = None, **kw: Any) -> List[str]:
-        where, params = self._build_query_where(schema_name=schema, default_to_current_schema=True)
-        return list(connection.execute(text("SELECT sequence_name FROM duckdb_sequences() WHERE 1 = 1 " + where + " ORDER BY sequence_name"), params).scalars())
+    def get_sequence_names(
+        self, connection: "Connection", schema: Optional[str] = None, **kw: Any
+    ) -> List[str]:
+        where, params = self._build_query_where(
+            schema_name=schema, default_to_current_schema=True
+        )
+        return list(
+            connection.execute(
+                text(
+                    "SELECT sequence_name FROM duckdb_sequences() WHERE 1 = 1 "
+                    + where
+                    + " ORDER BY sequence_name"
+                ),
+                params,
+            ).scalars()
+        )
 
     def _build_query_where(
         self,

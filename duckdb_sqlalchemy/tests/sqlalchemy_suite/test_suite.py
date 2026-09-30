@@ -1,13 +1,13 @@
 import re
 
 from sqlalchemy import (
-    UniqueConstraint,
     Boolean,
     Column,
     Integer,
     MetaData,
     String,
     Table,
+    UniqueConstraint,
     func,
     inspect,
     literal_column,
@@ -107,7 +107,10 @@ class ComponentReflectionTest(_Components):
     def test_get_schema_names(self, connection):
         # Existing public contract uses qualified catalog.schema names.
         database = connection.exec_driver_sql("SELECT current_database()").scalar_one()
-        assert f"{database}.{testing.config.test_schema}" in inspect(connection).get_schema_names()
+        assert (
+            f"{database}.{testing.config.test_schema}"
+            in inspect(connection).get_schema_names()
+        )
 
     @testing.requires.schema_reflection
     def test_get_schema_names_w_translate_map(self, connection):
@@ -118,31 +121,44 @@ class ComponentReflectionTest(_Components):
     def test_reflect_table_temp_table(self, connection):
         table = self.tables[self.temp_table_name()]
         reflected = Table(table.name, MetaData(), autoload_with=connection)
-        assert [(c.name, c.nullable) for c in reflected.c] == [(c.name, c.nullable) for c in table.c]
+        assert [(c.name, c.nullable) for c in reflected.c] == [
+            (c.name, c.nullable) for c in table.c
+        ]
         assert isinstance(reflected.c.name.type, String)
         assert reflected.c.name.type.length is None
 
-    @testing.combinations(False, (True, testing.requires.schemas), argnames="use_schema")
+    @testing.combinations(
+        False, (True, testing.requires.schemas), argnames="use_schema"
+    )
     @testing.requires.unique_constraint_reflection
     def test_get_unique_constraints(self, connection, metadata, use_schema):
         schema = testing.config.test_schema if use_schema else None
         table = Table(
-            "unique_columns", metadata,
-            Column("a", Integer), Column("b", Integer), Column("c", Integer),
+            "unique_columns",
+            metadata,
+            Column("a", Integer),
+            Column("b", Integer),
+            Column("c", Integer),
             UniqueConstraint("a", "b", name="original_name"),
             UniqueConstraint("c", name="i have spaces"),
             schema=schema,
         )
         table.create(connection)
-        reflected = inspect(connection).get_unique_constraints(table.name, schema=schema)
+        reflected = inspect(connection).get_unique_constraints(
+            table.name, schema=schema
+        )
         assert {tuple(c["column_names"]) for c in reflected} == {("a", "b"), ("c",)}
         assert all(c["name"] for c in reflected)
 
-    @testing.combinations("uq_email", "UQ_email", "mixedCaseUQ", "uq.with.dots", argnames="name")
+    @testing.combinations(
+        "uq_email", "UQ_email", "mixedCaseUQ", "uq.with.dots", argnames="name"
+    )
     @testing.requires.unique_constraint_reflection
     def test_get_unique_constraints_quoted_name(self, connection, metadata, name):
         table = Table(
-            "test_table", metadata, Column("email", String),
+            "test_table",
+            metadata,
+            Column("email", String),
             UniqueConstraint("email", name=name),
         )
         table.create(connection)
