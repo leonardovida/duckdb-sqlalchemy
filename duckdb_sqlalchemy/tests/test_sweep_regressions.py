@@ -326,7 +326,9 @@ def test_direct_arrow_insert_preserves_typed_values_and_rollback(kind: str) -> N
 
 
 @pytest.mark.parametrize("backend", ["arrow", "pandas", "ordinary"])
-@pytest.mark.parametrize("case", ["decimal", "binary", "timezone", "json", "null_nan", "integer"])
+@pytest.mark.parametrize(
+    "case", ["decimal", "binary", "timezone", "json", "null_nan", "integer"]
+)
 def test_bulk_insert_matches_ordinary_bindings(
     backend: str, case: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -338,13 +340,23 @@ def test_bulk_insert_matches_ordinary_bindings(
     from .. import _bulk_insert
 
     if backend != "arrow":
-        monkeypatch.setattr(_bulk_insert, "build_bulk_insert_arrow_table", lambda *args: None)
+        monkeypatch.setattr(
+            _bulk_insert, "build_bulk_insert_arrow_table", lambda *args: None
+        )
     if backend == "ordinary":
-        monkeypatch.setattr(_bulk_insert, "build_bulk_insert_dataframe", lambda *args: None)
+        monkeypatch.setattr(
+            _bulk_insert, "build_bulk_insert_dataframe", lambda *args: None
+        )
     scenarios = {
-        "decimal": (Numeric(38, 12), [Decimal("12345678901234567890.123456789012"), None]),
+        "decimal": (
+            Numeric(38, 12),
+            [Decimal("12345678901234567890.123456789012"), None],
+        ),
         "binary": (LargeBinary(), [b"\x00\xff", b"", None]),
-        "timezone": (DateTime(timezone=True), [datetime(2026, 9, 30, 12, 34, 56, 123456, timezone.utc), None]),
+        "timezone": (
+            DateTime(timezone=True),
+            [datetime(2026, 9, 30, 12, 34, 56, 123456, timezone.utc), None],
+        ),
         "json": (JSON(), [{"nested": [1, None, "x"]}, None]),
         "null_nan": (Float(), [None, float("nan"), 1.5]),
         "integer": (BigInteger(), [2**53 + 1, None, 1]),
@@ -352,16 +364,37 @@ def test_bulk_insert_matches_ordinary_bindings(
     column_type, values = scenarios[case]
     engine = create_engine("duckdb:///:memory:")
     metadata = MetaData()
-    baseline = Table("ordinary_values", metadata, Column("position", Integer), Column("value", column_type))
-    candidate = Table("bulk_values", metadata, Column("position", Integer), Column("value", column_type))
+    baseline = Table(
+        "ordinary_values",
+        metadata,
+        Column("position", Integer),
+        Column("value", column_type),
+    )
+    candidate = Table(
+        "bulk_values",
+        metadata,
+        Column("position", Integer),
+        Column("value", column_type),
+    )
     try:
         with engine.begin() as connection:
             metadata.create_all(connection)
-            rows = [{"position": position, "value": value} for position, value in enumerate(values)]
-            connection.execution_options(duckdb_copy_threshold=0).execute(baseline.insert(), rows)
-            connection.execution_options(duckdb_copy_threshold=1).execute(candidate.insert(), rows)
-            expected = connection.execute(select(baseline).order_by(baseline.c.position)).all()
-            actual = connection.execute(select(candidate).order_by(candidate.c.position)).all()
+            rows = [
+                {"position": position, "value": value}
+                for position, value in enumerate(values)
+            ]
+            connection.execution_options(duckdb_copy_threshold=0).execute(
+                baseline.insert(), rows
+            )
+            connection.execution_options(duckdb_copy_threshold=1).execute(
+                candidate.insert(), rows
+            )
+            expected = connection.execute(
+                select(baseline).order_by(baseline.c.position)
+            ).all()
+            actual = connection.execute(
+                select(candidate).order_by(candidate.c.position)
+            ).all()
             assert len(actual) == len(expected)
             for left, right in zip(actual, expected):
                 assert left[0] == right[0]
@@ -373,10 +406,13 @@ def test_bulk_insert_matches_ordinary_bindings(
         engine.dispose()
 
 
-@pytest.mark.parametrize("options", [
-    {"delimiter": "|", "quote": "'", "escape": "\\"},
-    {"sep": "\t", "quote": "'"},
-])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"delimiter": "|", "quote": "'", "escape": "\\"},
+        {"sep": "\t", "quote": "'"},
+    ],
+)
 def test_copy_csv_options_round_trip(options: dict[str, str]) -> None:
     engine = create_engine("duckdb:///:memory:")
     table = Table("csv_options", MetaData(), Column("value", String))
@@ -384,7 +420,13 @@ def test_copy_csv_options_round_trip(options: dict[str, str]) -> None:
     try:
         with engine.begin() as connection:
             table.create(connection)
-            copy_from_rows(connection, table, [(value,) for value in values], columns=["value"], **options)
+            copy_from_rows(
+                connection,
+                table,
+                [(value,) for value in values],
+                columns=["value"],
+                **options,
+            )
             assert connection.execute(select(table)).scalars().all() == values
     finally:
         engine.dispose()

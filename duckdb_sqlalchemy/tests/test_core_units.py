@@ -1,5 +1,5 @@
-import os
 import importlib.metadata
+import os
 import threading
 import time
 import warnings

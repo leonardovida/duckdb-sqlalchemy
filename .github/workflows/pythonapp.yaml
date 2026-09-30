@@ -235,11 +235,21 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m pip install -e ".[dev]"
+      - uses: actions/checkout@v7
+        with:
+          ref: 6b41e798d7525a94176ada4e6a7ac1cb3d648df3
+          path: .benchmark-baseline
+          persist-credentials: false
+      - run: python -m pip install -e ".benchmark-baseline[dev]"
+      - run: python benchmarks/run.py --baseline --cases startup native_insert core_insert bulk_insert pandas_insert tuple_read arrow_read reflection --rows 10000 --repeats 2 --output baseline.json
+      - run: python -m pip install -e ".[dev]"
       - run: python benchmarks/run.py --rows 10000 --repeats 2 --output benchmark.json
       - uses: actions/upload-artifact@v7
         with:
           name: benchmark-results
-          path: benchmark.json
+          path: |
+            benchmark.json
+            baseline.json
 
   tests_passed:
     # Single status check to require in branch rules.

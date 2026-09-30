@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 CASES = [
+    "startup",
     "native_insert",
     "core_insert",
     "bulk_insert",
@@ -25,7 +26,21 @@ CASES = [
 ]
 
 
-def worker(case: str, rows: int) -> dict[str, Any]:
+def worker(case: str, rows: int, baseline: bool = False) -> dict[str, Any]:
+    if case == "startup":
+        tracemalloc.start()
+        started = time.perf_counter()
+        from sqlalchemy import create_engine, text
+        import duckdb_sqlalchemy
+        engine = create_engine("duckdb:///:memory:")
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT 1")).scalar_one() == 1
+        engine.dispose()
+        seconds = time.perf_counter() - started
+        _, python_peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        return {"case": case, "seconds": seconds, "python_peak_bytes": python_peak}
+
     import pandas as pd
     import pyarrow as pa
     from sqlalchemy import (
@@ -39,7 +54,7 @@ def worker(case: str, rows: int) -> dict[str, Any]:
         text,
     )
 
-    from duckdb_sqlalchemy import insert_from_arrow
+    import duckdb_sqlalchemy
     from duckdb_sqlalchemy._bulk_insert import build_bulk_insert_dataframe
 
     start_value = 2**53 + 1
@@ -87,7 +102,7 @@ def worker(case: str, rows: int) -> dict[str, Any]:
                 table.insert(), [{"id": row[0], "value": row[1]} for row in parameters]
             )
         elif case == "arrow_insert":
-            insert_from_arrow(connection, table, arrow_table)
+            duckdb_sqlalchemy.insert_from_arrow(connection, table, arrow_table)
         elif case == "pandas_insert":
             frame = build_bulk_insert_dataframe(parameters, ["id", "value"])
             assert isinstance(frame, pd.DataFrame)
@@ -128,7 +143,8 @@ def worker(case: str, rows: int) -> dict[str, Any]:
             reflected = dict(connection.dialect.has_multi_table(connection, names))
             assert all(reflected[(None, name)] for name in names[:-1])
             assert not reflected[(None, "absent")]
-            assert query_count <= 2, query_count
+            if not baseline:
+                assert query_count <= 2, query_count
         seconds = time.perf_counter() - started
         _, python_peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
@@ -167,14 +183,16 @@ def main() -> None:
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--worker", choices=CASES)
+    parser.add_argument("--cases", nargs="+", choices=CASES, default=CASES)
+    parser.add_argument("--baseline", action="store_true")
     args = parser.parse_args()
     if args.rows <= 0 or args.repeats <= 0:
         parser.error("rows and repeats must be positive")
     if args.worker:
-        print(json.dumps(worker(args.worker, args.rows)))
+        print(json.dumps(worker(args.worker, args.rows, args.baseline)))
         return
     results = []
-    for case in CASES:
+    for case in args.cases:
         samples = []
         for _ in range(args.repeats):
             completed = subprocess.run(
@@ -185,6 +203,7 @@ def main() -> None:
                     case,
                     "--rows",
                     str(args.rows),
+                    *(["--baseline"] if args.baseline else []),
                 ],
                 check=True,
                 capture_output=True,
@@ -215,6 +234,7 @@ def main() -> None:
                     "pandas",
                 ]
             },
+            "baseline": args.baseline,
             "rows": args.rows,
             "repeats": args.repeats,
         },

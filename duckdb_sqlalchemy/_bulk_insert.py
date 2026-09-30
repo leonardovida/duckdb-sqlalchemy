@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import math
-from numbers import Integral, Real
 from functools import lru_cache
+from numbers import Integral, Real
 from typing import Any, Optional, Sequence, cast
 
 from ._row_shape import infer_mapping_column_keys, rows_use_mapping_shape
@@ -33,7 +33,9 @@ def _has_unsafe_numeric_coercion(
         has_large_integer = False
         for row in rows:
             value = row.get(name) if mapping_rows else row[index]
-            has_float = has_float or (isinstance(value, Real) and not isinstance(value, Integral))
+            has_float = has_float or (
+                isinstance(value, Real) and not isinstance(value, Integral)
+            )
             has_large_integer = has_large_integer or (
                 _is_integer(value) and abs(value) > 2**53
             )
@@ -78,7 +80,8 @@ def build_bulk_insert_dataframe(
                 return None
             kinds = {type(value) for value in values if value is not None}
             if len(kinds) > 1 and not all(
-                value is None or (isinstance(value, Real) and not isinstance(value, bool))
+                value is None
+                or (isinstance(value, Real) and not isinstance(value, bool))
                 for value in values
             ):
                 return None

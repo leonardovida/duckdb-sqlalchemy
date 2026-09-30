@@ -40,3 +40,9 @@ In progress.
 - GitHub Actions Python 3.11: 14 failed, 484 passed, 2 skipped with the unmodified runtime. All nine findings reproduced, including integer corruption in the stored database value.
 - Prepared fixes preserve fetch errors, exact numeric fallback, SQL literal identity, numeric return scale, COPY CSV options, and commented/CTE DML row counts.
 - Added batch reflection scope/kind handling and batched existence checks; added owned bounded Arrow readers.
+
+### Expanded validation
+- All nine original regressions now pass; remaining regular-suite failures identify CSV sniffing with custom dialects. Typed Arrow, decimals, bytes, JSON, timezone, nullable integers and NaN differential tests pass.
+- Six isolated wheel/sdist checks pass with neither optional library, Arrow only and pandas only. Initial benchmark smoke checks pass, including exact aggregate checksums and two-query batch existence.
+- Windows exposed case-insensitive environment alias assumptions in tests; fixed the fixtures with explicit mappings.
+- Upstream suite setup required a profile path and its standard pytest markers. Enable and resolve actual compatibility tests next.
