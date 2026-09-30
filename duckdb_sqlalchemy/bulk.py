@@ -243,6 +243,31 @@ def _csv_value(value: Any, null_marker: str) -> Any:
     return value
 
 
+def _csv_writer_options(options: Mapping[str, Any]) -> Dict[str, Any]:
+    normalized = {str(key).lower(): value for key, value in options.items()}
+    aliases = {
+        "delimiter": ("delim", "delimiter", "sep"),
+        "quotechar": ("quote",),
+        "escapechar": ("escape",),
+    }
+    writer_options: Dict[str, Any] = {}
+    for target, names in aliases.items():
+        supplied = [normalized[name] for name in names if name in normalized]
+        if len(supplied) > 1:
+            raise ValueError(f"Conflicting CSV options for {target}")
+        if supplied:
+            value = supplied[0]
+            if not isinstance(value, str) or len(value) != 1:
+                raise ValueError(f"copy_from_rows {names[0]} must be one character")
+            writer_options[target] = value
+    quote = writer_options.get("quotechar", '"')
+    escape = writer_options.pop("escapechar", quote)
+    writer_options["doublequote"] = escape == quote
+    if escape != quote:
+        writer_options["escapechar"] = escape
+    return writer_options
+
+
 def _copy_rows_as_csv_chunks(
     connection: Any,
     table: TableLike,
@@ -258,7 +283,13 @@ def _copy_rows_as_csv_chunks(
         tmp = tempfile.NamedTemporaryFile(
             "w", newline="", suffix=".csv", delete=False, encoding="utf-8"
         )
-        writer = csv.writer(tmp)
+        writer = csv.writer(
+            tmp,
+            lineterminator={"\\n": "\n", "\\r\\n": "\r\n", "\\r": "\r"}[
+                copy_options.get("new_line", "\\n")
+            ],
+            **_csv_writer_options(copy_options),
+        )
         if include_header and columns:
             writer.writerow(columns)
         return tmp, writer, 0
@@ -374,6 +405,37 @@ def copy_from_rows(
     include_header: bool = False,
     **copy_options: Any,
 ) -> Any:
+    normalized_options: Dict[str, Any] = {}
+    for key, value in copy_options.items():
+        normalized = str(key).lower()
+        if normalized in normalized_options:
+            raise ValueError(f"Duplicate COPY option: {normalized}")
+        normalized_options[normalized] = value
+    copy_options = normalized_options
+    writer_options = _csv_writer_options(copy_options)
+    for alias in ("delim", "delimiter", "sep"):
+        copy_options.pop(alias, None)
+    copy_options["delim"] = writer_options.get("delimiter", ",")
+    copy_options.setdefault("quote", writer_options.get("quotechar", '"'))
+    copy_options.setdefault(
+        "escape", writer_options.get("escapechar", copy_options["quote"])
+    )
+    # The serializer knows the dialect; sniffing a tiny chunk can choose
+    # incompatible quotes, newlines or a column count.
+    copy_options.setdefault("auto_detect", False)
+    newline = copy_options.setdefault("new_line", "\\n")
+    if newline in ("\n", "\r\n", "\r"):
+        copy_options["new_line"] = newline.encode("unicode_escape").decode("ascii")
+    elif newline not in ("\\n", "\\r\\n", "\\r"):
+        raise ValueError("copy_from_rows new_line must be LF, CRLF or CR")
+    if str(copy_options.get("encoding", "utf-8")).lower().replace("-", "") != "utf8":
+        raise ValueError("copy_from_rows writes UTF-8; encoding must be UTF-8")
+    if (
+        isinstance(chunk_size, bool)
+        or not isinstance(chunk_size, int)
+        or chunk_size < 0
+    ):
+        raise ValueError("chunk_size must be a non-negative integer")
     iterator = iter(rows)
     first = next(iterator, None)
     if first is None:
@@ -399,3 +461,54 @@ def copy_from_rows(
         null_marker=null_marker,
     )
     return None
+
+
+def insert_from_arrow(
+    connection: Any,
+    table: TableLike,
+    data: Any,
+    *,
+    columns: Optional[Sequence[str]] = None,
+) -> Any:
+    """Insert an Arrow Table, RecordBatch or RecordBatchReader without row conversion.
+
+    Target columns correspond positionally to the Arrow schema. The connection
+    owns the transaction; Arrow input must already represent the intended SQL
+    values because SQLAlchemy bind processors are not applied.
+    """
+    import pyarrow as pa
+
+    if getattr(getattr(connection, "dialect", None), "name", None) != "duckdb":
+        raise ValueError("insert_from_arrow requires a DuckDB SQLAlchemy connection")
+    if not isinstance(data, (pa.Table, pa.RecordBatch, pa.RecordBatchReader)):
+        raise TypeError("data must be an Arrow Table, RecordBatch or RecordBatchReader")
+    source_columns = data.schema.names
+    target_columns = list(source_columns if columns is None else columns)
+    if not source_columns or len(target_columns) != len(source_columns):
+        raise ValueError("Target columns must match the non-empty Arrow schema")
+    for names in (source_columns, target_columns):
+        if any(not isinstance(name, str) or not name for name in names):
+            raise ValueError("Arrow and target column names must be non-empty strings")
+        if len(names) != len(set(names)):
+            raise ValueError("Arrow and target column names must be unique")
+    if isinstance(data, pa.RecordBatch):
+        data = pa.Table.from_batches([data])
+    preparer = connection.dialect.identifier_preparer
+    target = _format_table(connection, table)
+    targets = ", ".join(preparer.quote_identifier(name) for name in target_columns)
+    sources = ", ".join(preparer.quote_identifier(name) for name in source_columns)
+    view_name = f"__duckdb_sa_arrow_{uuid.uuid4().hex}"
+    dbapi_connection = connection.connection.dbapi_connection
+    dbapi_connection.register(view_name, data)
+    try:
+        result = connection.exec_driver_sql(
+            f"INSERT INTO {target} ({targets}) SELECT {sources} FROM {view_name}"
+        )
+    except BaseException:
+        try:
+            dbapi_connection.unregister(view_name)
+        except Exception:
+            pass
+        raise
+    dbapi_connection.unregister(view_name)
+    return result

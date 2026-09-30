@@ -71,6 +71,15 @@ duckdb = "duckdb_sqlalchemy:Dialect"
 [tool.pytest.ini_options]
 addopts = "--hypothesis-show-statistics --strict --strict-markers"
 xfail_strict = true
+markers = [
+    "memory_intensive: SQLAlchemy memory/CPU intensive tests",
+    "mypy: SQLAlchemy typing integration tests",
+    "timing_intensive: SQLAlchemy timing-sensitive tests",
+    "backend: SQLAlchemy dialect suite tests",
+    "sparse_backend: one backend per database family",
+    "sparse_driver_backend: one driver per database family",
+    "gc_intensive: SQLAlchemy garbage-collection tests",
+]
 
 [tool.ruff]
 target-version = "py310"
@@ -91,6 +100,9 @@ include = [
     "/CHANGELOG.md",
     "/noxfile.py",
     "/test.cfg",
+    "/conftest.py",
+    "/benchmarks",
+    "/scripts/verify_distribution.py",
 ]
 
 [build-system]

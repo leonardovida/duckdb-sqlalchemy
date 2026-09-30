@@ -62,7 +62,7 @@ with engine.connect().execution_options(
     conn.execute(stmt)
 ```
 
-- `duckdb_arrow`: return Arrow tables for SELECTs (`result.arrow` or `result.all()`); requires `pyarrow`.
+- `duckdb_arrow`: return Arrow tables for SELECTs (`result.arrow` or `result.all()`) or bounded batch readers (`result.batches()`); requires `pyarrow`.
 - `duckdb_copy_threshold`: for large INSERT executemany, register a pandas/Arrow object and run `INSERT INTO ... SELECT ...`.
 - `insertmanyvalues_page_size`: canonical SQLAlchemy batch size for 2.x multi-row VALUES inserts.
 - `duckdb_insertmanyvalues_page_size`: deprecated alias for `insertmanyvalues_page_size`; still supported for backward compatibility.
@@ -76,9 +76,13 @@ Arrow results consume the cursor; fetch rows or Arrow, not both. Reading
 All cursors of a SQLAlchemy connection share one DuckDB connection. If you run
 another statement while an earlier result is still unread (for example an ORM
 lazy load inside a loop), the dialect first buffers the rest of the earlier
-result in memory so it is not truncated. Arrow and DataFrame fetches are not
+result in memory so it is not truncated. Fetch errors propagate and preserve the pending cursor. Arrow and DataFrame fetches are not
 available on a buffered result. Read large results fully, or use a separate
 connection, to avoid the memory cost.
+
+Arrow batch readers own their result until consumed or closed; another statement
+on that connection raises `InvalidRequestError` while the reader remains active.
+See [performance guidance](performance) for streaming and direct Arrow ingestion.
 
 ## Row counts and regular expressions
 
@@ -111,8 +115,12 @@ databases.
 - `get_temp_table_names()` and `get_temp_view_names()` list temporary
   relations, and `has_schema()` accepts `schema` or `db.schema`, matching the
   names `get_schema_names()` returns.
-- `get_multi_columns()` honors `kind`: `kind=ObjectKind.TABLE` (the default)
-  returns tables only and `kind=ObjectKind.VIEW` views only.
+- Bulk reflection honors `kind` and `scope`: default objects and tables are
+  selected by default; `ObjectKind.VIEW` returns views and
+  `ObjectScope.TEMPORARY` returns temporary objects. Filtering precedes
+  name resolution, so temporary shadows do not hide requested regular objects.
+- Foreign keys from an unqualified lookup preserve the resolved target schema
+  when it differs from the current schema.
 
 ```python
 from sqlalchemy import inspect
@@ -170,6 +178,9 @@ DuckDB has a single transaction isolation level. The dialect accepts
 
 `Numeric`/`DECIMAL` values are bound and returned as `decimal.Decimal` without
 passing through float. Use `Numeric(asdecimal=False)` or `Float` for floats.
+Generic `Float()` and `Float(precision > 24)` compile to `DOUBLE` (64 bits);
+`REAL` and `Float(24)` use 32 bits. Existing FLOAT columns retain their original
+precision until explicitly migrated.
 
 ## Auto-increment columns
 
@@ -204,3 +215,5 @@ DuckDB's Python bindings are not fork-safe. Creating a new connection in a
 (for example, `RuntimeError: thread::join failed: No such process`), especially
 with MotherDuck or file-backed connections. Prefer `spawn` or `forkserver`, and
 initialize engines/connections in the child process.
+
+DuckDB canonicalizes `CHAR(n)` and `VARCHAR(n)` to unbounded `VARCHAR`; reflected string lengths are therefore `None`. It generates constraint names and supports table/column comments, but does not support constraint comments or identity columns. Use sequences for generated integer keys. A plain `Identity()` falls back to a sequence because SQLAlchemy ignores unsupported identity syntax; identity options raise `CompileError` so their requested behavior cannot silently change.

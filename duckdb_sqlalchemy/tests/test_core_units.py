@@ -1,4 +1,5 @@
 import importlib.metadata
+import os
 import threading
 import time
 import warnings
@@ -585,6 +586,9 @@ def test_looks_like_motherduck_detection() -> None:
 
 
 def test_apply_motherduck_defaults_env_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Windows environment keys are case-insensitive. Use an explicit mapping
+    # to exercise precedence between the two supported spellings.
+    monkeypatch.setattr(os, "environ", dict(os.environ))
     config = {}
     monkeypatch.setenv("MOTHERDUCK_TOKEN", "token123")
     monkeypatch.delenv("motherduck_token", raising=False)
@@ -597,6 +601,9 @@ def test_apply_motherduck_defaults_env_token(monkeypatch: pytest.MonkeyPatch) ->
 def test_apply_motherduck_defaults_prefers_standard_env_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Windows environment keys are case-insensitive. Use an explicit mapping
+    # to exercise precedence between the two supported spellings.
+    monkeypatch.setattr(os, "environ", dict(os.environ))
     config = {}
     monkeypatch.setenv("MOTHERDUCK_TOKEN", "standard-token")
     monkeypatch.setenv("motherduck_token", "legacy-token")
@@ -2656,19 +2663,13 @@ def test_cursor_buffer_fetch_error_contracts(
             raise error
 
     cursor = _cursor(FailedFetch())
-    if not capture_count and issubclass(error_type, duckdb.Error):
-        cursor._buffer_result()
-        assert cursor.description == FailedFetch.description
-        assert cursor.rowcount == 17
-        assert cursor.fetchall() == []
-    else:
-        with pytest.raises(error_type) as caught:
-            if capture_count:
-                cursor._capture_dml_rowcount("delete from items")
-            else:
-                cursor._buffer_result()
-        assert caught.value is error
-        assert cursor.rowcount == 17
+    with pytest.raises(error_type) as caught:
+        if capture_count:
+            cursor._capture_dml_rowcount("delete from items")
+        else:
+            cursor._buffer_result()
+    assert caught.value is error
+    assert cursor.rowcount == 17
 
 
 @pytest.mark.parametrize("dml", [False, True])

@@ -1,3 +1,4 @@
+import os
 import socket
 import warnings
 from urllib.parse import parse_qs
@@ -130,6 +131,9 @@ def test_quack_query_helper_executes_against_local_server() -> None:
 
 
 def test_motherduck_config_env_and_ttl(monkeypatch) -> None:
+    # Windows environment keys are case-insensitive. Use an explicit mapping
+    # to exercise precedence between the two supported spellings.
+    monkeypatch.setattr(os, "environ", dict(os.environ))
     get_core_config()
 
     captured = {}
