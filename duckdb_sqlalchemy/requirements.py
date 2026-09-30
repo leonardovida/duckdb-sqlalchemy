@@ -66,3 +66,7 @@ class Requirements(SuiteRequirements):
     @property
     def self_referential_foreign_keys(self) -> Any:
         return exclusions.closed("DuckDB rejects inserts referencing the same table")
+
+    @property
+    def implicitly_named_constraints(self) -> Any:
+        return exclusions.closed("Constraint order is independent of generated names")

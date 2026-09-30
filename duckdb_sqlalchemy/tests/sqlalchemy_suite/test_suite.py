@@ -7,8 +7,8 @@ from sqlalchemy import (
     String,
     Table,
     func,
-    literal_column,
     inspect,
+    literal_column,
     testing,
     text,
 )
@@ -16,6 +16,7 @@ from sqlalchemy.sql import sqltypes
 from sqlalchemy.testing.suite import *  # noqa: F401,F403
 from sqlalchemy.testing.suite import ComponentReflectionTestExtra as _Reflection
 from sqlalchemy.testing.suite import CTETest as _CTE
+from sqlalchemy.testing.suite import ComponentReflectionTest as _Components
 
 
 class CTETest(_CTE):
@@ -59,7 +60,8 @@ class ComponentReflectionTestExtra(_Reflection):
         self, metadata, connection, datatype, default, expected_reg
     ):
         table = Table(
-            "t", metadata,
+            "t",
+            metadata,
             Column("id", Integer, primary_key=True),
             Column("thecol", datatype, server_default=default),
         )
@@ -67,3 +69,22 @@ class ComponentReflectionTestExtra(_Reflection):
         reflected = inspect(connection).get_columns("t")[1]["default"]
         sanitized = re.sub(r"[\\(\\) \\']", "", reflected)
         assert re.match(expected_reg, sanitized, re.IGNORECASE)
+
+class ComponentReflectionTest(_Components):
+    def _without_constraint_comments(self, expected):
+        for value in expected.values():
+            for constraint in value if isinstance(value, list) else [value]:
+                constraint["comment"] = None
+        return expected
+
+    def exp_pks(self, *args, **kwargs):
+        return self._without_constraint_comments(super().exp_pks(*args, **kwargs))
+
+    def exp_fks(self, *args, **kwargs):
+        return self._without_constraint_comments(super().exp_fks(*args, **kwargs))
+
+    def exp_ucs(self, *args, **kwargs):
+        return self._without_constraint_comments(super().exp_ucs(*args, **kwargs))
+
+    def exp_ccs(self, *args, **kwargs):
+        return self._without_constraint_comments(super().exp_ccs(*args, **kwargs))

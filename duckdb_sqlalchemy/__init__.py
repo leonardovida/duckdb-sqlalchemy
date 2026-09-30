@@ -953,8 +953,13 @@ class DuckDBExecutionContext(_PGExecutionContext):
         ):
             # Native RETURNING rowcount is -1. Materialize its write result
             # so ORM version checks can verify affected rows on SQLAlchemy 2.0.
-            cursor._buffer_result()
-            cursor._dml_rowcount = len(cursor._buffered_rows)
+            returning_rows = getattr(self, "_insertmanyvalues_rows", None)
+            if returning_rows is not None:
+                self._rowcount = len(returning_rows)
+            else:
+                cursor._buffer_result()
+                self._rowcount = len(cursor._buffered_rows)
+            cursor._dml_rowcount = self._rowcount
             cursor._result_consumed()
         result = super()._setup_result_proxy()
         if self.execution_options.get("duckdb_arrow") and getattr(
@@ -2206,7 +2211,9 @@ class Dialect(PGDialect_psycopg2):
                     ),
                     "nullable": bool(row["is_nullable"]),
                     "default": row["column_default"],
-                    "autoincrement": False,
+                    "autoincrement": bool(
+                        re.match(r"^nextval\\s*\\(", row["column_default"] or "", re.IGNORECASE)
+                    ),
                     "comment": row["comment"],
                 }
             )
