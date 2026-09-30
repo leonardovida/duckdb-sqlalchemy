@@ -39,6 +39,7 @@ from sqlalchemy.dialects.postgresql.base import (
     PGDDLCompiler,
     PGDialect,
     PGIdentifierPreparer,
+    PGTypeCompiler,
     PGInspector,
 )
 from sqlalchemy.dialects.postgresql.psycopg2 import PGDialect_psycopg2
@@ -77,8 +78,8 @@ from ._statements import (
     _is_aborted_transaction_error,
     _is_idempotent_statement,
     _is_transient_error,
-    _top_level_sql_words,
     _strip_leading_sql_comments,
+    _top_level_sql_words,
 )
 from ._supports import has_comment_support
 from ._validation import validate_extension_name
@@ -562,6 +563,7 @@ class CursorWrapper:
         # Rows changed by the last INSERT/UPDATE/DELETE/MERGE, which DuckDB
         # reports as a "Count" result while its own rowcount stays -1.
         self._dml_rowcount: Optional[int] = None
+        self._is_dml_count = False
         # True once rows of the current result were read as Python tuples;
         # DuckDB then cannot return the rest of that result as Arrow.
         self._rows_fetched = False
@@ -580,6 +582,7 @@ class CursorWrapper:
         self._buffered_rows = None
         self._buffered_description = None
         self._dml_rowcount = None
+        self._is_dml_count = False
         self._rows_fetched = False
 
     def _capture_dml_rowcount(self, statement: str) -> bool:
@@ -588,11 +591,13 @@ class CursorWrapper:
         The count row stays readable, buffered like any other result. A
         RETURNING clause yields its own columns instead, so it is left alone.
         """
-        description = self.description
+        description = getattr(self, "description", None)
         if not description or len(description) != 1 or description[0][0] != "Count":
             return False
         normalized = _strip_leading_sql_comments(statement)
-        match = re.match(r"\s*(insert|update|delete|merge)\b", normalized, re.IGNORECASE)
+        match = re.match(
+            r"\s*(insert|update|delete|merge)\b", normalized, re.IGNORECASE
+        )
         # Common generated DML has neither RETURNING nor separators. Avoid
         # scanning every placeholder in a large multi-values INSERT.
         if (
@@ -609,7 +614,11 @@ class CursorWrapper:
             operation = words[0]
             if operation == "with":
                 operation = next(
-                    (word for word in words[1:] if word in (*_DML_ROWCOUNT_PREFIXES, "select")),
+                    (
+                        word
+                        for word in words[1:]
+                        if word in (*_DML_ROWCOUNT_PREFIXES, "select")
+                    ),
                     "",
                 )
             if "returning" in words:
@@ -620,6 +629,7 @@ class CursorWrapper:
         if len(rows) == 1 and isinstance(rows[0][0], int):
             self._dml_rowcount = rows[0][0]
         self._store_buffered_result(rows, description, -1)
+        self._is_dml_count = True
         return True
 
     def _after_execute(self) -> None:
@@ -665,7 +675,11 @@ class CursorWrapper:
         self._before_execute()
         self.__connection_wrapper._count_statement()
         self.__c.executemany(statement, params)
-        self._after_execute()
+        if self._capture_dml_rowcount(statement):
+            # DuckDB exposes only the final count for executemany, not a total.
+            self._dml_rowcount = None
+        else:
+            self._after_execute()
 
     def execute(
         self,
@@ -921,6 +935,12 @@ class DuckDBExecutionContext(_PGExecutionContext):
         cursor = getattr(self, "cursor", None)
         if arraysize is not None and hasattr(cursor, "arraysize"):
             cursor.arraysize = arraysize
+        if cursor is not None and getattr(cursor, "_is_dml_count", False):
+            # Count is DuckDB's DML acknowledgement, not a RETURNING result.
+            # Preserve rowcount while following SQLAlchemy's non-row contract.
+            cursor._buffered_description = None
+            cursor._buffered_rows.clear()
+            cursor._result_consumed()
         result = super()._setup_result_proxy()
         if self.execution_options.get("duckdb_arrow") and getattr(
             result, "returns_rows", False
@@ -1105,6 +1125,12 @@ class DuckDBDDLCompiler(PGDDLCompiler):
         return colspec
 
 
+class DuckDBTypeCompiler(PGTypeCompiler):
+    def visit_FLOAT(self, type_: Any, **kw: Any) -> str:
+        # Generic Float(None) must preserve Python's 64-bit float precision.
+        return "FLOAT" if type_.precision is not None and type_.precision <= 24 else "DOUBLE"
+
+
 class DuckDBCompiler(PGCompiler):
     # DuckDB's ``~`` operator is a full-string match (regexp_full_match) and it
     # has no ``~*``; regexp_matches() searches like PostgreSQL's ``~`` and takes
@@ -1184,6 +1210,8 @@ class DuckDBNullType(sqltypes.NullType):
 class Dialect(PGDialect_psycopg2):
     name = "duckdb"
     driver = "duckdb_sqlalchemy"
+    type_compiler_cls = DuckDBTypeCompiler
+    supports_identity_columns = False
     _has_events = False
     supports_statement_cache = True
     # COMMENT ON exists in every supported DuckDB; initialize() re-checks, and

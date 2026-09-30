@@ -178,6 +178,9 @@ DuckDB has a single transaction isolation level. The dialect accepts
 
 `Numeric`/`DECIMAL` values are bound and returned as `decimal.Decimal` without
 passing through float. Use `Numeric(asdecimal=False)` or `Float` for floats.
+Generic `Float()` and `Float(precision > 24)` compile to `DOUBLE` (64 bits);
+`REAL` and `Float(24)` use 32 bits. Existing FLOAT columns retain their original
+precision until explicitly migrated.
 
 ## Auto-increment columns
 

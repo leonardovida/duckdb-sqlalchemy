@@ -689,7 +689,8 @@ def test_rollback_does_not_buffer_partly_read_result(engine: Engine) -> None:
         cursor = result.cursor
         conn.rollback()
 
-    assert getattr(cursor, "_buffered_rows", None) is None
+    assert list(getattr(cursor, "_buffered_rows", [])) == []
+    assert cursor.fetchone() is None
 
 
 def test_search_path_into_other_database_is_reflected(engine: Engine) -> None:

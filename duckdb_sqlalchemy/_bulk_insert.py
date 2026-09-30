@@ -40,7 +40,7 @@ def _has_unsafe_numeric_coercion(
             elif isinstance(value, float):
                 has_float = True
             elif isinstance(value, Integral):
-                has_large_integer = has_large_integer or abs(value) > 2**53
+                has_large_integer = has_large_integer or abs(int(value)) > 2**53
             elif isinstance(value, Real):
                 has_float = True
             if has_float and has_large_integer:
@@ -80,7 +80,12 @@ def build_bulk_insert_dataframe(
             values = [row.get(name) if mapping_rows else row[index] for row in rows]
             # DuckDB's pandas scan treats NaN as NULL. Ordinary bindings
             # preserve NaN, so this batch must keep the ordinary insert path.
-            if any(isinstance(value, Real) and not isinstance(value, Integral) and math.isnan(value) for value in values):
+            if any(
+                isinstance(value, Real)
+                and not isinstance(value, Integral)
+                and math.isnan(value)
+                for value in values
+            ):
                 return None
             kinds = {type(value) for value in values if value is not None}
             if len(kinds) > 1 and not all(

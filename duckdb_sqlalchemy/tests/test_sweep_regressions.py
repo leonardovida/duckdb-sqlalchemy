@@ -448,3 +448,38 @@ def test_closing_connection_closes_arrow_batches_before_pool_reuse() -> None:
     with engine.connect() as reused:
         assert reused.execute(text("SELECT 9")).scalar_one() == 9
     engine.dispose()
+
+
+@pytest.mark.parametrize("many", [False, True])
+def test_non_returning_dml_does_not_expose_duckdb_count_rows(many: bool) -> None:
+    from sqlalchemy import text
+
+    engine = create_engine("duckdb:///:memory:")
+    table = Table("dml_contract", MetaData(), Column("id", Integer))
+    try:
+        with engine.begin() as connection:
+            table.create(connection)
+            rows = [{"id": 1}, {"id": 2}] if many else {"id": 1}
+            inserted = connection.execute(table.insert(), rows)
+            assert inserted.is_insert and not inserted.returns_rows
+            assert inserted.rowcount == (2 if many else 1)
+            updated = connection.execute(text("/* tag */ UPDATE dml_contract SET id = id + 10"))
+            assert not updated.returns_rows
+            assert updated.rowcount == (2 if many else 1)
+            assert connection.execute(select(table)).scalars().all() == ([11, 12] if many else [11])
+    finally:
+        engine.dispose()
+
+
+def test_generic_float_preserves_double_precision() -> None:
+    from sqlalchemy import Float
+
+    engine = create_engine("duckdb:///:memory:")
+    table = Table("float_precision", MetaData(), Column("value", Float(None, asdecimal=True, decimal_return_scale=7)))
+    try:
+        with engine.begin() as connection:
+            table.create(connection)
+            connection.execute(table.insert(), {"value": Decimal("15.7563827")})
+            assert connection.execute(select(table.c.value)).scalar_one() == Decimal("15.7563827")
+    finally:
+        engine.dispose()

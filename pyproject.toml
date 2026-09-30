@@ -100,6 +100,9 @@ include = [
     "/CHANGELOG.md",
     "/noxfile.py",
     "/test.cfg",
+    "/conftest.py",
+    "/benchmarks",
+    "/scripts/verify_distribution.py",
 ]
 
 [build-system]

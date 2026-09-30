@@ -285,7 +285,9 @@ def _copy_rows_as_csv_chunks(
         )
         writer = csv.writer(
             tmp,
-            lineterminator={"\\n": "\n", "\\r\\n": "\r\n", "\\r": "\r"}[copy_options.get("new_line", "\\n")],
+            lineterminator={"\\n": "\n", "\\r\\n": "\r\n", "\\r": "\r"}[
+                copy_options.get("new_line", "\\n")
+            ],
             **_csv_writer_options(copy_options),
         )
         if include_header and columns:
