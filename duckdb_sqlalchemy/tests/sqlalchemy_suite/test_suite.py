@@ -71,6 +71,12 @@ class ComponentReflectionTestExtra(_Reflection):
         assert re.match(expected_reg, sanitized, re.IGNORECASE)
 
 class ComponentReflectionTest(_Components):
+    def _adjust_sort(self, result, expected, key):
+        # DuckDB generates names but returns constraints in declaration order.
+        for objects in (result, expected):
+            for constraints in objects.values():
+                constraints.sort(key=key)
+
     def _without_constraint_comments(self, expected):
         for value in expected.values():
             for constraint in value if isinstance(value, list) else [value]:

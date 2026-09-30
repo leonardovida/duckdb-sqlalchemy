@@ -2212,7 +2212,7 @@ class Dialect(PGDialect_psycopg2):
                     "nullable": bool(row["is_nullable"]),
                     "default": row["column_default"],
                     "autoincrement": bool(
-                        re.match(r"^nextval\\s*\\(", row["column_default"] or "", re.IGNORECASE)
+                        re.match(r"^nextval\s*\(", row["column_default"] or "", re.IGNORECASE)
                     ),
                     "comment": row["comment"],
                 }
