@@ -75,7 +75,9 @@ def test_bulk_and_regular_insert_preserve_mixed_numeric_values(
             connection.execution_options(duckdb_copy_threshold=1).execute(
                 table.insert(), [{"value": 2**53 + 1}, {"value": 1.0}]
             )
-            assert connection.execute(select(table.c.value).order_by(table.c.value)).all() == [
+            assert connection.execute(
+                select(table.c.value).order_by(table.c.value)
+            ).all() == [
                 (1,),
                 (2**53 + 1,),
             ]
@@ -135,12 +137,15 @@ def test_multi_reflection_honors_temporary_scope(engine: Any) -> None:
 
 
 @pytest.mark.parametrize(
-    "method", ["get_multi_pk_constraint", "get_multi_indexes", "get_multi_table_options"]
+    "method",
+    ["get_multi_pk_constraint", "get_multi_indexes", "get_multi_table_options"],
 )
 def test_multi_reflection_honors_view_kind(engine: Any, method: str) -> None:
     with engine.begin() as connection:
         connection.exec_driver_sql("CREATE TABLE regular_item (id INTEGER PRIMARY KEY)")
-        connection.exec_driver_sql("CREATE VIEW view_item AS SELECT id FROM regular_item")
+        connection.exec_driver_sql(
+            "CREATE VIEW view_item AS SELECT id FROM regular_item"
+        )
         result = getattr(inspect(connection), method)(kind=ObjectKind.VIEW)
         assert set(result) == {(None, "view_item")}
 
@@ -152,7 +157,11 @@ def test_copy_from_rows_uses_requested_csv_delimiter(engine: Any) -> None:
     with engine.begin() as connection:
         table.create(connection)
         copy_from_rows(
-            connection, table, [(1, 'comma,pipe|quote"')], columns=["id", "value"], delim="|"
+            connection,
+            table,
+            [(1, 'comma,pipe|quote"')],
+            columns=["id", "value"],
+            delim="|",
         )
         assert connection.execute(select(table)).all() == [(1, 'comma,pipe|quote"')]
 
@@ -189,7 +198,12 @@ def test_arrow_batches_own_the_connection_until_closed() -> None:
             result.fetchone()
         assert [batch.column(0).to_pylist() for batch in reader] == [[2, 3], [4]]
         assert reader.closed
-        assert connection.execution_options(duckdb_arrow=False).execute(text("SELECT 99")).scalar() == 99
+        assert (
+            connection.execution_options(duckdb_arrow=False)
+            .execute(text("SELECT 99"))
+            .scalar()
+            == 99
+        )
     engine.dispose()
 
 
@@ -206,7 +220,12 @@ def test_arrow_batches_early_close_releases_the_connection() -> None:
         reader.close()
         assert reader.closed
         assert result.closed
-        assert connection.execution_options(duckdb_arrow=False).execute(text("SELECT 7")).scalar() == 7
+        assert (
+            connection.execution_options(duckdb_arrow=False)
+            .execute(text("SELECT 7"))
+            .scalar()
+            == 7
+        )
     engine.dispose()
 
 
@@ -221,7 +240,12 @@ def test_result_close_closes_its_arrow_reader() -> None:
         reader = result.batches(2)
         result.close()
         assert reader.closed
-        assert connection.execution_options(duckdb_arrow=False).execute(text("SELECT 8")).scalar() == 8
+        assert (
+            connection.execution_options(duckdb_arrow=False)
+            .execute(text("SELECT 8"))
+            .scalar()
+            == 8
+        )
     engine.dispose()
 
 
@@ -248,3 +272,37 @@ def test_exhausted_cursor_cannot_read_another_cursors_rows() -> None:
     assert first.fetchall() == []
     assert second.fetchall() == [(2,)]
     wrapper.close()
+
+
+@pytest.mark.parametrize("kind", ["table", "batch", "reader"])
+def test_direct_arrow_insert_preserves_typed_values_and_rollback(kind: str) -> None:
+    import pyarrow as pa
+    from sqlalchemy import text
+
+    from .. import insert_from_arrow
+
+    arrow_table = pa.table({
+        "source id": pa.array([2**53 + 1, None], type=pa.int64()),
+        "source amount": pa.array([decimal.Decimal("1.2345"), None], type=pa.decimal128(18, 4)),
+        "source bytes": pa.array([b"\x00\xff", b""], type=pa.binary()),
+    })
+    data = (
+        arrow_table if kind == "table" else arrow_table.to_batches()[0]
+        if kind == "batch" else arrow_table.to_reader()
+    )
+    engine = create_engine("duckdb:///:memory:")
+    with engine.begin() as connection:
+        connection.exec_driver_sql('CREATE TABLE "arrow target" ("target id" BIGINT, amount DECIMAL(18, 4), bytes BLOB)')
+    with engine.connect() as connection:
+        target = Table("arrow target", MetaData())
+        insert_from_arrow(connection, target, data, columns=["target id", "amount", "bytes"])
+        assert connection.execute(text('SELECT * FROM "arrow target"')).all() == [
+            (2**53 + 1, decimal.Decimal("1.2345"), b"\x00\xff"),
+            (None, None, b""),
+        ]
+        assert connection.exec_driver_sql(
+            "SELECT count(*) FROM duckdb_views() WHERE view_name LIKE '__duckdb_sa_arrow_%'"
+        ).scalar() == 0
+        connection.rollback()
+        assert connection.exec_driver_sql('SELECT count(*) FROM "arrow target"').scalar() == 0
+    engine.dispose()

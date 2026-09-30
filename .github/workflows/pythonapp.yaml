@@ -158,10 +158,92 @@ jobs:
       - name: Run DuckDB prerelease tests
         run: pytest -q
 
+  platforms:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e ".[dev]"
+      - run: pytest -q -m "not remote_data"
+
+  upstream_suite:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sqlalchemy: ["SQLAlchemy>=2.0,<2.1", "SQLAlchemy>=2.1,<2.2"]
+    env:
+      DUCKDB_SQLA_SUITE: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pip install "${{ matrix.sqlalchemy }}"
+      - run: pytest -q duckdb_sqlalchemy/tests/sqlalchemy_suite --dburi duckdb:///:memory: -rs
+
+  distributions:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        artifact: [wheel, sdist]
+        optional: [none, arrow, pandas]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - name: Install distribution with selected optional dependency
+        env:
+          ARTIFACT: ${{ matrix.artifact }}
+          OPTIONAL: ${{ matrix.optional }}
+        run: |
+          if [ "$ARTIFACT" = wheel ]; then
+            python -m pip install dist/*.whl
+          else
+            python -m pip install dist/*.tar.gz
+          fi
+          if [ "$OPTIONAL" = arrow ]; then python -m pip install pyarrow; fi
+          if [ "$OPTIONAL" = pandas ]; then python -m pip install pandas; fi
+      - run: python -I scripts/verify_distribution.py
+
+  benchmarks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e ".[dev]"
+      - run: python benchmarks/run.py --rows 10000 --repeats 2 --output benchmark.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-results
+          path: benchmark.json
+
   tests_passed:
     # Single status check to require in branch rules.
     if: always()
-    needs: [build_backend, minimum_versions, sqlalchemy_2_0]
+    needs: [build_backend, minimum_versions, sqlalchemy_2_0, platforms, upstream_suite, distributions, benchmarks]
     runs-on: ubuntu-latest
     steps:
       - name: Check job results

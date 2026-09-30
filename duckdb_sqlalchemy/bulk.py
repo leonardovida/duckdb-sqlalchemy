@@ -407,7 +407,11 @@ def copy_from_rows(
         normalized_options[normalized] = value
     copy_options = normalized_options
     _csv_writer_options(copy_options)
-    if isinstance(chunk_size, bool) or not isinstance(chunk_size, int) or chunk_size < 0:
+    if (
+        isinstance(chunk_size, bool)
+        or not isinstance(chunk_size, int)
+        or chunk_size < 0
+    ):
         raise ValueError("chunk_size must be a non-negative integer")
     iterator = iter(rows)
     first = next(iterator, None)
@@ -434,3 +438,54 @@ def copy_from_rows(
         null_marker=null_marker,
     )
     return None
+
+
+def insert_from_arrow(
+    connection: Any,
+    table: TableLike,
+    data: Any,
+    *,
+    columns: Optional[Sequence[str]] = None,
+) -> Any:
+    """Insert an Arrow Table, RecordBatch or RecordBatchReader without row conversion.
+
+    Target columns correspond positionally to the Arrow schema. The connection
+    owns the transaction; Arrow input must already represent the intended SQL
+    values because SQLAlchemy bind processors are not applied.
+    """
+    import pyarrow as pa
+
+    if getattr(getattr(connection, "dialect", None), "name", None) != "duckdb":
+        raise ValueError("insert_from_arrow requires a DuckDB SQLAlchemy connection")
+    if not isinstance(data, (pa.Table, pa.RecordBatch, pa.RecordBatchReader)):
+        raise TypeError("data must be an Arrow Table, RecordBatch or RecordBatchReader")
+    source_columns = data.schema.names
+    target_columns = list(source_columns if columns is None else columns)
+    if not source_columns or len(target_columns) != len(source_columns):
+        raise ValueError("Target columns must match the non-empty Arrow schema")
+    for names in (source_columns, target_columns):
+        if any(not isinstance(name, str) or not name for name in names):
+            raise ValueError("Arrow and target column names must be non-empty strings")
+        if len(names) != len(set(names)):
+            raise ValueError("Arrow and target column names must be unique")
+    if isinstance(data, pa.RecordBatch):
+        data = pa.Table.from_batches([data])
+    preparer = connection.dialect.identifier_preparer
+    target = _format_table(connection, table)
+    targets = ", ".join(preparer.quote_identifier(name) for name in target_columns)
+    sources = ", ".join(preparer.quote_identifier(name) for name in source_columns)
+    view_name = f"__duckdb_sa_arrow_{uuid.uuid4().hex}"
+    dbapi_connection = connection.connection.dbapi_connection
+    dbapi_connection.register(view_name, data)
+    try:
+        result = connection.exec_driver_sql(
+            f"INSERT INTO {target} ({targets}) SELECT {sources} FROM {view_name}"
+        )
+    except BaseException:
+        try:
+            dbapi_connection.unregister(view_name)
+        except Exception:
+            pass
+        raise
+    dbapi_connection.unregister(view_name)
+    return result

@@ -45,7 +45,12 @@ from sqlalchemy.dialects.postgresql.psycopg2 import PGDialect_psycopg2
 from sqlalchemy.engine import processors
 from sqlalchemy.engine.default import DefaultDialect, DefaultExecutionContext
 from sqlalchemy.engine.interfaces import ExecuteStyle
-from sqlalchemy.engine.reflection import ObjectKind, ObjectScope, ReflectionDefaults, cache
+from sqlalchemy.engine.reflection import (
+    ObjectKind,
+    ObjectScope,
+    ReflectionDefaults,
+    cache,
+)
 from sqlalchemy.engine.url import URL as SAURL
 from sqlalchemy.exc import InvalidRequestError, NoSuchTableError
 from sqlalchemy.ext.compiler import compiles
@@ -76,7 +81,13 @@ from ._statements import (
 )
 from ._supports import has_comment_support
 from ._validation import validate_extension_name
-from .bulk import copy_from_csv, copy_from_parquet, copy_from_rows, copy_to_parquet
+from .bulk import (
+    copy_from_csv,
+    copy_from_parquet,
+    copy_from_rows,
+    copy_to_parquet,
+    insert_from_arrow,
+)
 from .capabilities import get_capabilities
 from .config import apply_config, get_core_config
 from .datatypes import ISCHEMA_NAMES, Map, Struct, register_extension_types
@@ -262,6 +273,7 @@ __all__ = [
     "copy_from_parquet",
     "copy_from_csv",
     "copy_from_rows",
+    "insert_from_arrow",
     "copy_to_parquet",
     "checkpoint",
 ]
@@ -348,6 +360,7 @@ _NATIVE_RESULT_FETCH_METHODS = frozenset(
         "pl",
         "tf",
         "to_arrow_table",
+        "to_arrow_reader",
         "torch",
     }
 )
@@ -569,7 +582,11 @@ class CursorWrapper:
         operation = words[0]
         if operation == "with":
             operation = next(
-                (word for word in words[1:] if word in (*_DML_ROWCOUNT_PREFIXES, "select")),
+                (
+                    word
+                    for word in words[1:]
+                    if word in (*_DML_ROWCOUNT_PREFIXES, "select")
+                ),
                 "",
             )
         if operation not in _DML_ROWCOUNT_PREFIXES or "returning" in words:
@@ -713,9 +730,13 @@ class CursorWrapper:
 
         def fetch_native(*args: Any, **kwargs: Any) -> Any:
             if self._buffered_rows is not None:
-                raise NotImplementedError("Native results are unavailable after buffering")
+                raise NotImplementedError(
+                    "Native results are unavailable after buffering"
+                )
             if self._native_reader_active:
-                raise InvalidRequestError("An Arrow batch reader already owns this result")
+                raise InvalidRequestError(
+                    "An Arrow batch reader already owns this result"
+                )
             value = method(*args, **kwargs)
             self._rows_fetched = True
             if hasattr(value, "read_next_batch"):
@@ -1670,7 +1691,7 @@ class Dialect(PGDialect_psycopg2):
             filter_names=[] if filter_names == [] else filter_names,
             include_internal_filter=True,
         )
-        sql = str(stmt)
+        sql = stmt.text
         if schema is None and filter_names is None and ObjectScope.TEMPORARY in scope:
             sql = sql.replace(
                 "AND database_name = current_database()\nAND schema_name = current_schema()",
@@ -1682,7 +1703,11 @@ class Dialect(PGDialect_psycopg2):
             if database_name is None:
                 start = sql.index("AND database_name = (")
                 stop = sql.index(")\n", start) + 2
-                sql = sql[:start] + "AND (temporary OR database_name = current_database())\n" + sql[stop:]
+                sql = (
+                    sql[:start]
+                    + "AND (temporary OR database_name = current_database())\n"
+                    + sql[stop:]
+                )
         if ObjectScope.DEFAULT not in scope:
             sql += "\nAND temporary"
         elif ObjectScope.TEMPORARY not in scope:
@@ -1696,7 +1721,9 @@ class Dialect(PGDialect_psycopg2):
         stmt = text(sql)
         if params.get("filter_names"):
             stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
-        return self._execute_visible_duckdb_relation_rows(connection, stmt, params, schema)
+        return self._execute_visible_duckdb_relation_rows(
+            connection, stmt, params, schema
+        )
 
     def _duckdb_relations(
         self,
@@ -1708,7 +1735,9 @@ class Dialect(PGDialect_psycopg2):
     ) -> Dict[str, Tuple[str, str]]:
         return {
             row["table_name"]: (row["database_name"], row["schema_name"])
-            for row in self._duckdb_relation_rows(connection, schema, filter_names, scope, kind)
+            for row in self._duckdb_relation_rows(
+                connection, schema, filter_names, scope, kind
+            )
         }
 
     def _duckdb_view_relations(
@@ -2083,7 +2112,12 @@ class Dialect(PGDialect_psycopg2):
         self, connection: "Connection", rows: Sequence[Dict[str, Any]]
     ) -> Dict[str, List[Dict[str, Any]]]:
         enum_rows = self._duckdb_enum_rows(
-            connection, [row["data_type_id"] for row in rows if row["data_type"].upper().startswith("ENUM")]
+            connection,
+            [
+                row["data_type_id"]
+                for row in rows
+                if row["data_type"].upper().startswith("ENUM")
+            ],
         )
         columns: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for row in rows:
@@ -2168,9 +2202,13 @@ class Dialect(PGDialect_psycopg2):
         schema: Optional[str] = None,
         **kw: Any,
     ) -> Iterable[Tuple[Tuple[Optional[str], str], bool]]:
-        relations = self._duckdb_relations(
-            connection, schema, table_names, ObjectScope.ANY, ObjectKind.ANY
-        ) if table_names else {}
+        relations = (
+            self._duckdb_relations(
+                connection, schema, table_names, ObjectScope.ANY, ObjectKind.ANY
+            )
+            if table_names
+            else {}
+        )
         return [
             ((schema, table_name), table_name in relations)
             for table_name in table_names
@@ -2267,8 +2305,11 @@ class Dialect(PGDialect_psycopg2):
             quote = self.identifier_preparer.quote
             for table_name, (database_name, schema_name) in tables.items():
                 referred_schemas[table_name] = (
-                    None if (database_name, schema_name) == (current_database, current_schema)
-                    else schema_name if database_name == current_database
+                    None
+                    if (database_name, schema_name)
+                    == (current_database, current_schema)
+                    else schema_name
+                    if database_name == current_database
                     else f"{quote(database_name)}.{quote(schema_name)}"
                 )
         foreign_keys = {
@@ -2276,7 +2317,9 @@ class Dialect(PGDialect_psycopg2):
                 {
                     "name": row["constraint_name"],
                     "constrained_columns": list(row["constraint_column_names"]),
-                    "referred_schema": schema if schema is not None else referred_schemas.get(table_name),
+                    "referred_schema": schema
+                    if schema is not None
+                    else referred_schemas.get(table_name),
                     "referred_table": row["referenced_table"],
                     "referred_columns": list(row["referenced_column_names"]),
                     "options": {},
@@ -2450,7 +2493,10 @@ class Dialect(PGDialect_psycopg2):
     ) -> Iterable[Tuple[Any, Any]]:
         rows = self._duckdb_relation_rows(connection, schema, filter_names, scope, kind)
         return [
-            ((self._reflection_schema_key(schema), row["table_name"]), {"text": row["comment"]})
+            (
+                (self._reflection_schema_key(schema), row["table_name"]),
+                {"text": row["comment"]},
+            )
             for row in rows
         ]
 
@@ -2533,7 +2579,9 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        table_names = self._duckdb_relations(connection, schema, filter_names, scope, kind)
+        table_names = self._duckdb_relations(
+            connection, schema, filter_names, scope, kind
+        )
         return self._iter_reflection_results(schema, table_names, {}, dict)
 
     def create_connect_args(self, url: SAURL) -> Tuple[tuple, dict]:
@@ -2824,7 +2872,9 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Any:
-        relations = self._duckdb_relations(connection, schema, filter_names, scope, kind)
+        relations = self._duckdb_relations(
+            connection, schema, filter_names, scope, kind
+        )
         if not relations:
             return iter(())
         stmt, params = self._duckdb_reflection_stmt(
@@ -2837,8 +2887,10 @@ class Dialect(PGDialect_psycopg2):
             suffix="ORDER BY table_name, column_index",
         )
         rows = [
-            dict(row) for row in connection.execute(stmt, params).mappings()
-            if relations.get(row["table_name"]) == (row["database_name"], row["schema_name"])
+            dict(row)
+            for row in connection.execute(stmt, params).mappings()
+            if relations.get(row["table_name"])
+            == (row["database_name"], row["schema_name"])
         ]
         columns = self._duckdb_columns_from_rows(connection, rows)
         schema_key = self._reflection_schema_key(schema)

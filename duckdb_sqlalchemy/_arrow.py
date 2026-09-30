@@ -51,7 +51,9 @@ class DuckDBArrowBatchReader:
         finally:
             self._cursor._native_reader_active = False
             self._cursor._native_reader = None
-            self._cursor._store_buffered_result([], self._cursor.description, self._cursor.rowcount)
+            self._cursor._store_buffered_result(
+                [], self._cursor.description, self._cursor.rowcount
+            )
             self._cursor._result_consumed()
             if self._result is not None:
                 self._result.close()
@@ -101,16 +103,26 @@ class DuckDBArrowResult:
         statement on the same connection requires this reader to be consumed
         or closed first.
         """
-        if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
+        if (
+            isinstance(batch_size, bool)
+            or not isinstance(batch_size, int)
+            or batch_size <= 0
+        ):
             raise ValueError("batch_size must be a positive integer")
         if self._arrow is not None:
-            raise InvalidRequestError("The result has already been read as an Arrow table")
+            raise InvalidRequestError(
+                "The result has already been read as an Arrow table"
+            )
         cursor = self._available_cursor()
-        fetch_reader = getattr(cursor, "fetch_arrow_reader", None)
+        fetch_reader = getattr(cursor, "to_arrow_reader", None)
+        if fetch_reader is None:
+            fetch_reader = getattr(cursor, "fetch_arrow_reader", None)
         if fetch_reader is None:
             fetch_reader = getattr(cursor, "fetch_record_batch", None)
         if fetch_reader is None:
-            raise NotImplementedError("Arrow batch reads are not available on this cursor")
+            raise NotImplementedError(
+                "Arrow batch reads are not available on this cursor"
+            )
         reader = DuckDBArrowBatchReader(fetch_reader(batch_size), cursor)
         cursor._native_reader_active = True
         cursor._native_reader = reader
@@ -127,8 +139,22 @@ class DuckDBArrowResult:
     def fetchall(self) -> Any:
         return self._fetch_arrow()
 
+    def _assert_row_fetch_available(self) -> None:
+        cursor = getattr(self._result, "cursor", None)
+        if cursor is not None and getattr(cursor, "_native_reader_active", False):
+            raise InvalidRequestError("An Arrow batch reader already owns this result")
+
+    def fetchone(self) -> Any:
+        self._assert_row_fetch_available()
+        return self._result.fetchone()
+
+    def fetchmany(self, size: Optional[int] = None) -> Any:
+        self._assert_row_fetch_available()
+        return self._result.fetchmany(size)
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self._result, name)
 
     def __iter__(self) -> Any:
+        self._assert_row_fetch_available()
         return iter(self._result)

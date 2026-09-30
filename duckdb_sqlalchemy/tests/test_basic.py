@@ -1,5 +1,6 @@
 import logging
 import os
+import platform
 import re
 import zlib
 from datetime import datetime, timedelta
@@ -286,7 +287,7 @@ def test_get_views(conn: Connection, dialect: Dialect) -> None:
     assert dialect.has_table(conn, table_name="schema_test", schema="scheme")
 
 
-@mark.skipif(os.uname().machine == "aarch64", reason="not supported on aarch64")
+@mark.skipif(platform.machine() == "aarch64", reason="not supported on aarch64")
 @mark.remote_data
 def test_preload_extension() -> None:
     duckdb.connect().execute("INSTALL httpfs")

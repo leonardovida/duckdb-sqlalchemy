@@ -21,10 +21,14 @@ FuncT = TypeVar("FuncT", bound=Callable[..., Any])
 
 
 @fixture
-def engine() -> Engine:
+def engine() -> Generator[Engine, None, None]:
     registry.register("duckdb", "duckdb_sqlalchemy", "Dialect")
 
-    return create_engine("duckdb:///:memory:")
+    engine = create_engine("duckdb:///:memory:")
+    try:
+        yield engine
+    finally:
+        engine.dispose()
 
 
 @fixture
@@ -39,8 +43,9 @@ def dialect(engine: Engine) -> Dialect:
 
 
 @fixture
-def session(engine: Engine) -> Session:
-    return sessionmaker(bind=engine)()
+def session(engine: Engine) -> Generator[Session, None, None]:
+    with sessionmaker(bind=engine)() as session:
+        yield session
 
 
 def raises_msg(msg: str) -> Callable[[Callable[P, None]], Callable[P, None]]:

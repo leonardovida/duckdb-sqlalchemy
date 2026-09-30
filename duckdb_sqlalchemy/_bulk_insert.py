@@ -95,7 +95,9 @@ def build_bulk_insert_arrow_table(
             return table
         # Build each column separately instead of retaining a transposed copy
         # of every cell alongside the Arrow arrays.
-        arrays = [pa.array([row[index] for row in rows]) for index in range(len(column_names))]
+        arrays = [
+            pa.array([row[index] for row in rows]) for index in range(len(column_names))
+        ]
         return pa.Table.from_arrays(arrays, names=column_names)
     except Exception:
         return None

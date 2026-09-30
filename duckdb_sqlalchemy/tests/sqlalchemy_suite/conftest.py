@@ -8,4 +8,3 @@ if not os.getenv("DUCKDB_SQLA_SUITE"):
         allow_module_level=True,
     )
 
-pytest_plugins = "sqlalchemy.testing.plugin.pytestplugin"
