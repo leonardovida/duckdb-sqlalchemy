@@ -66,8 +66,8 @@ class DuckDBImpl(DefaultImpl):
         metadata_type = metadata_column.type
         if _is_nested(inspector_type) and _is_nested(metadata_type):
             compiler = self.dialect.type_compiler_instance
-            return re.sub(r"\s+", "", compiler.process(inspector_type)) != re.sub(
-                r"\s+", "", compiler.process(metadata_type)
+            return _normalize_sql_expression(compiler.process(inspector_type)) != (
+                _normalize_sql_expression(compiler.process(metadata_type))
             )
         return super().compare_type(inspector_column, metadata_column)
 
@@ -129,22 +129,31 @@ _STRING_RE = re.compile(r"('(?:[^']|'')*')")
 _BOOLEAN_DEFAULTS = {"t": "true", "true": "true", "f": "false", "false": "false"}
 
 
+def _normalize_sql_expression(value: str) -> str:
+    """Normalize SQL tokens while retaining quoted identifier/literal contents."""
+    parts = re.split(r"""('(?:[^']|'')*'|"(?:[^"]|"")*")""", value)
+    return "".join(
+        part if part.startswith(("'", '"')) else re.sub(r"\s+", "", part.lower())
+        for part in parts
+    )
+
+
 def _normalize_default(value: str, boolean: bool) -> str:
     value = _strip_enclosing_parentheses(str(value))
     match = _CAST_RE.fullmatch(value) or _SHORT_CAST_RE.fullmatch(value)
     if match:
         value = _strip_enclosing_parentheses(match.group(1))
-    if _STRING_RE.fullmatch(value):
-        value = value[1:-1].replace("''", "'")
-    elif not boolean:
-        # SQL outside string literals (now(), 1 + 1) ignores case and spacing
-        value = "".join(
-            part if part.startswith("'") else re.sub(r"\s+", "", part.lower())
-            for part in _STRING_RE.split(value)
-        )
     if boolean:
-        value = _BOOLEAN_DEFAULTS.get(value.lower(), value)
-    return value
+        if _STRING_RE.fullmatch(value):
+            value = value[1:-1].replace("''", "'")
+        return _BOOLEAN_DEFAULTS.get(value.lower(), value)
+    # Numeric quoted literals are DuckDB's canonical spelling of numeric
+    # defaults. Other strings must stay quoted: '1+1' is not the expression 1+1.
+    if _STRING_RE.fullmatch(value) and re.fullmatch(
+        r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", value[1:-1]
+    ):
+        return value[1:-1]
+    return _normalize_sql_expression(value)
 
 
 def _is_nested(type_obj: Any) -> bool:

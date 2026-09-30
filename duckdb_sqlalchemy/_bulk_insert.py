@@ -22,6 +22,24 @@ def _is_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _has_unsafe_numeric_coercion(
+    rows: Sequence[Any], column_names: Sequence[str]
+) -> bool:
+    mapping_rows = rows_use_mapping_shape(rows)
+    for index, name in enumerate(column_names):
+        has_float = False
+        has_large_integer = False
+        for row in rows:
+            value = row.get(name) if mapping_rows else row[index]
+            has_float = has_float or isinstance(value, float)
+            has_large_integer = has_large_integer or (
+                _is_integer(value) and abs(value) > 2**53
+            )
+            if has_float and has_large_integer:
+                return True
+    return False
+
+
 def _restore_nullable_integers(
     pd: Any, frame: Any, rows: Sequence[Any], column_names: Sequence[str]
 ) -> None:
@@ -47,6 +65,8 @@ def build_bulk_insert_dataframe(
         return None
 
     try:
+        if _has_unsafe_numeric_coercion(rows, column_names):
+            return None
         if rows_use_mapping_shape(rows):
             frame = pd.DataFrame.from_records(rows, columns=column_names)
         else:
@@ -66,13 +86,17 @@ def build_bulk_insert_arrow_table(
         return None
 
     try:
+        if _has_unsafe_numeric_coercion(rows, column_names):
+            return None
         if rows_use_mapping_shape(rows):
             table = pa.Table.from_pylist(rows)
             if column_names:
                 return table.select(column_names)
             return table
-        columns = list(zip(*rows)) if rows else [[] for _ in column_names]
-        return pa.Table.from_arrays(columns, names=column_names)
+        # Build each column separately instead of retaining a transposed copy
+        # of every cell alongside the Arrow arrays.
+        arrays = [pa.array([row[index] for row in rows]) for index in range(len(column_names))]
+        return pa.Table.from_arrays(arrays, names=column_names)
     except Exception:
         return None
 

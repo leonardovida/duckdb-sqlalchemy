@@ -243,6 +243,31 @@ def _csv_value(value: Any, null_marker: str) -> Any:
     return value
 
 
+def _csv_writer_options(options: Mapping[str, Any]) -> Dict[str, Any]:
+    normalized = {str(key).lower(): value for key, value in options.items()}
+    aliases = {
+        "delimiter": ("delim", "delimiter", "sep"),
+        "quotechar": ("quote",),
+        "escapechar": ("escape",),
+    }
+    writer_options: Dict[str, Any] = {}
+    for target, names in aliases.items():
+        supplied = [normalized[name] for name in names if name in normalized]
+        if len(supplied) > 1:
+            raise ValueError(f"Conflicting CSV options for {target}")
+        if supplied:
+            value = supplied[0]
+            if not isinstance(value, str) or len(value) != 1:
+                raise ValueError(f"copy_from_rows {names[0]} must be one character")
+            writer_options[target] = value
+    quote = writer_options.get("quotechar", '"')
+    escape = writer_options.pop("escapechar", quote)
+    writer_options["doublequote"] = escape == quote
+    if escape != quote:
+        writer_options["escapechar"] = escape
+    return writer_options
+
+
 def _copy_rows_as_csv_chunks(
     connection: Any,
     table: TableLike,
@@ -258,7 +283,7 @@ def _copy_rows_as_csv_chunks(
         tmp = tempfile.NamedTemporaryFile(
             "w", newline="", suffix=".csv", delete=False, encoding="utf-8"
         )
-        writer = csv.writer(tmp)
+        writer = csv.writer(tmp, **_csv_writer_options(copy_options))
         if include_header and columns:
             writer.writerow(columns)
         return tmp, writer, 0
@@ -374,6 +399,16 @@ def copy_from_rows(
     include_header: bool = False,
     **copy_options: Any,
 ) -> Any:
+    normalized_options: Dict[str, Any] = {}
+    for key, value in copy_options.items():
+        normalized = str(key).lower()
+        if normalized in normalized_options:
+            raise ValueError(f"Duplicate COPY option: {normalized}")
+        normalized_options[normalized] = value
+    copy_options = normalized_options
+    _csv_writer_options(copy_options)
+    if isinstance(chunk_size, bool) or not isinstance(chunk_size, int) or chunk_size < 0:
+        raise ValueError("chunk_size must be a non-negative integer")
     iterator = iter(rows)
     first = next(iterator, None)
     if first is None:

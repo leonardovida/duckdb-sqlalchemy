@@ -2656,19 +2656,13 @@ def test_cursor_buffer_fetch_error_contracts(
             raise error
 
     cursor = _cursor(FailedFetch())
-    if not capture_count and issubclass(error_type, duckdb.Error):
-        cursor._buffer_result()
-        assert cursor.description == FailedFetch.description
-        assert cursor.rowcount == 17
-        assert cursor.fetchall() == []
-    else:
-        with pytest.raises(error_type) as caught:
-            if capture_count:
-                cursor._capture_dml_rowcount("delete from items")
-            else:
-                cursor._buffer_result()
-        assert caught.value is error
-        assert cursor.rowcount == 17
+    with pytest.raises(error_type) as caught:
+        if capture_count:
+            cursor._capture_dml_rowcount("delete from items")
+        else:
+            cursor._buffer_result()
+    assert caught.value is error
+    assert cursor.rowcount == 17
 
 
 @pytest.mark.parametrize("dml", [False, True])

@@ -8,7 +8,6 @@ from sqlalchemy import (
     Column,
     Integer,
     MetaData,
-    Numeric,
     String,
     Table,
     create_engine,
@@ -171,3 +170,81 @@ def test_dml_rowcount_with_comments_and_ctes(engine: Any, statement: str) -> Non
         connection.exec_driver_sql("CREATE TABLE counts (id INTEGER, value INTEGER)")
         connection.exec_driver_sql("INSERT INTO counts VALUES (1, 0)")
         assert connection.exec_driver_sql(statement).rowcount == 1
+
+
+def test_arrow_batches_own_the_connection_until_closed() -> None:
+    from sqlalchemy import text
+    from sqlalchemy.exc import InvalidRequestError
+
+    engine = create_engine("duckdb:///:memory:")
+    with engine.connect() as connection:
+        result = connection.execution_options(duckdb_arrow=True).execute(
+            text("SELECT i FROM range(5) AS t(i)")
+        )
+        reader = result.batches(2)
+        assert reader.read_next_batch().column(0).to_pylist() == [0, 1]
+        with pytest.raises(InvalidRequestError, match="Consume or close"):
+            connection.execute(text("SELECT 99"))
+        with pytest.raises(InvalidRequestError, match="owns"):
+            result.fetchone()
+        assert [batch.column(0).to_pylist() for batch in reader] == [[2, 3], [4]]
+        assert reader.closed
+        assert connection.execution_options(duckdb_arrow=False).execute(text("SELECT 99")).scalar() == 99
+    engine.dispose()
+
+
+def test_arrow_batches_early_close_releases_the_connection() -> None:
+    from sqlalchemy import text
+
+    engine = create_engine("duckdb:///:memory:")
+    with engine.connect() as connection:
+        result = connection.execution_options(duckdb_arrow=True).execute(
+            text("SELECT i FROM range(100) AS t(i)")
+        )
+        with result.batches(2) as reader:
+            assert reader.read_next_batch().num_rows == 2
+        reader.close()
+        assert reader.closed
+        assert result.closed
+        assert connection.execution_options(duckdb_arrow=False).execute(text("SELECT 7")).scalar() == 7
+    engine.dispose()
+
+
+def test_result_close_closes_its_arrow_reader() -> None:
+    from sqlalchemy import text
+
+    engine = create_engine("duckdb:///:memory:")
+    with engine.connect() as connection:
+        result = connection.execution_options(duckdb_arrow=True).execute(
+            text("SELECT i FROM range(100) AS t(i)")
+        )
+        reader = result.batches(2)
+        result.close()
+        assert reader.closed
+        assert connection.execution_options(duckdb_arrow=False).execute(text("SELECT 8")).scalar() == 8
+    engine.dispose()
+
+
+def test_temp_scope_does_not_hide_regular_relations() -> None:
+    engine = create_engine("duckdb:///:memory:")
+    with engine.begin() as connection:
+        connection.exec_driver_sql("CREATE TABLE shadowed (regular_value INTEGER)")
+        connection.exec_driver_sql("CREATE TEMP TABLE shadowed (temp_value VARCHAR)")
+        inspector = inspect(connection)
+        regular = inspector.get_multi_columns(scope=ObjectScope.DEFAULT)
+        temporary = inspector.get_multi_columns(scope=ObjectScope.TEMPORARY)
+        assert regular[(None, "shadowed")][0]["name"] == "regular_value"
+        assert temporary[(None, "shadowed")][0]["name"] == "temp_value"
+    engine.dispose()
+
+
+def test_exhausted_cursor_cannot_read_another_cursors_rows() -> None:
+    wrapper = ConnectionWrapper(duckdb.connect())
+    first = wrapper.cursor()
+    first.execute("SELECT 1")
+    assert first.fetchall() == [(1,)]
+    second = wrapper.cursor()
+    second.execute("SELECT 2")
+    assert first.fetchall() == []
+    assert second.fetchall() == [(2,)]
+    wrapper.close()

@@ -142,3 +142,73 @@ def _is_transient_error(error: BaseException) -> bool:
 
 def _is_aborted_transaction_error(error: BaseException) -> bool:
     return "current transaction is aborted" in str(error).lower()
+
+
+def _top_level_sql_words(statement: str) -> list[str]:
+    """Read operation keywords without entering literals, comments or CTE bodies."""
+    words: list[str] = []
+    depth = 0
+    index = 0
+    while index < len(statement):
+        if statement.startswith("--", index):
+            end = statement.find("\n", index + 2)
+            if end < 0:
+                break
+            index = end + 1
+        elif statement.startswith("/*", index):
+            nesting = 1
+            index += 2
+            while index < len(statement) and nesting:
+                if statement.startswith("/*", index):
+                    nesting += 1
+                    index += 2
+                elif statement.startswith("*/", index):
+                    nesting -= 1
+                    index += 2
+                else:
+                    index += 1
+            if nesting:
+                return []
+        elif statement[index] in "'\"":
+            quote = statement[index]
+            index += 1
+            while index < len(statement):
+                if statement[index] == quote:
+                    if statement[index : index + 2] == quote * 2:
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
+        elif statement[index] == "$":
+            match = re.match(r"\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$", statement[index:])
+            if match:
+                delimiter = match.group()
+                end = statement.find(delimiter, index + len(delimiter))
+                if end < 0:
+                    return []
+                index = end + len(delimiter)
+            else:
+                index += 1
+        elif statement[index] == "(":
+            depth += 1
+            index += 1
+        elif statement[index] == ")":
+            depth -= 1
+            index += 1
+        elif statement[index] == ";" and depth == 0:
+            if _strip_leading_sql_comments(statement[index + 1 :]).strip("; \t\r\n"):
+                return []
+            break
+        elif statement[index].isalpha() or statement[index] == "_":
+            end = index + 1
+            while end < len(statement) and (
+                statement[end].isalnum() or statement[end] in "_$"
+            ):
+                end += 1
+            if depth == 0:
+                words.append(statement[index:end].lower())
+            index = end
+        else:
+            index += 1
+    return words if depth == 0 else []
