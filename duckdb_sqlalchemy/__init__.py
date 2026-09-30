@@ -564,9 +564,7 @@ class CursorWrapper:
         rows = self.__c.fetchall()
         if len(rows) == 1 and isinstance(rows[0][0], int):
             self._dml_rowcount = rows[0][0]
-        self._buffered_rows = deque(rows)
-        self._buffered_description = description
-        self._buffered_rowcount = -1
+        self._store_buffered_result(rows, description, -1)
         return True
 
     def _after_execute(self) -> None:
@@ -581,6 +579,12 @@ class CursorWrapper:
             rows = self.__c.fetchall()
         except duckdb.Error:
             rows = []
+        self._store_buffered_result(rows, description, rowcount)
+
+    def _store_buffered_result(
+        self, rows: Iterable[Tuple[Any, ...]], description: Any, rowcount: int
+    ) -> None:
+        """Keep buffered rows together with their original result metadata."""
         self._buffered_rows = deque(rows)
         self._buffered_description = description
         self._buffered_rowcount = rowcount

@@ -2639,3 +2639,69 @@ def test_create_engine_from_paths_driver_mismatch() -> None:
     url2 = SAURL.create("sqlite", database=":memory:")
     with pytest.raises(ValueError):
         create_engine_from_paths([url1, url2])
+
+
+@pytest.mark.parametrize("capture_count", [False, True])
+@pytest.mark.parametrize("error_type", [duckdb.InvalidInputException, ValueError])
+def test_cursor_buffer_fetch_error_contracts(
+    capture_count: bool, error_type: type[Exception]
+) -> None:
+    error = error_type("fetch failed")
+
+    class FailedFetch:
+        description = [("Count", "NUMBER")]
+        rowcount = 17
+
+        def fetchall(self) -> Any:
+            raise error
+
+    cursor = _cursor(FailedFetch())
+    if not capture_count and issubclass(error_type, duckdb.Error):
+        cursor._buffer_result()
+        assert cursor.description == FailedFetch.description
+        assert cursor.rowcount == 17
+        assert cursor.fetchall() == []
+    else:
+        with pytest.raises(error_type) as caught:
+            if capture_count:
+                cursor._capture_dml_rowcount("delete from items")
+            else:
+                cursor._buffer_result()
+        assert caught.value is error
+        assert cursor.rowcount == 17
+
+
+@pytest.mark.parametrize("dml", [False, True])
+def test_cursor_buffer_preserves_metadata_and_remaining_rows(dml: bool) -> None:
+    with duckdb.connect() as native:
+        connection = ConnectionWrapper(native)
+        cursor = connection.cursor()
+        if dml:
+            cursor.execute("CREATE TABLE items AS SELECT range AS i FROM range(3)")
+            cursor.execute("DELETE FROM items")
+            expected = [(3,)]
+            assert cursor.rowcount == 3
+        else:
+            cursor.execute("SELECT range AS i, 'label' AS label FROM range(4)")
+            assert cursor.fetchone() == (0, "label")
+            expected = [(1, "label"), (2, "label"), (3, "label")]
+            assert cursor.rowcount == -1
+        description = cursor.description
+        rowcount = cursor.rowcount
+
+        other = connection.cursor()
+        other.execute("SELECT 42 AS replacement")
+        assert other.fetchall() == [(42,)]
+        assert cursor.description == description
+        assert cursor.rowcount == rowcount
+        cursor.arraysize = 2
+        assert cursor.fetchmany() == expected[:2]
+        assert cursor.fetchall() == expected[2:]
+        assert cursor.fetchone() is None
+        assert cursor.description == description
+        assert cursor.rowcount == rowcount
+
+        cursor.execute("SELECT 7 AS fresh")
+        assert cursor.description[0][0] == "fresh"
+        assert cursor.rowcount == -1
+        assert cursor.fetchall() == [(7,)]
