@@ -46,3 +46,11 @@ In progress.
 - Six isolated wheel/sdist checks pass with neither optional library, Arrow only and pandas only. Initial benchmark smoke checks pass, including exact aggregate checksums and two-query batch existence.
 - Windows exposed case-insensitive environment alias assumptions in tests; fixed the fixtures with explicit mappings.
 - Upstream suite setup required a profile path and its standard pytest markers. Enable and resolve actual compatibility tests next.
+
+### Conformance and performance follow-through
+- Ordinary inserts and bulk inserts have no material regression in the same-runner smoke benchmark after replacing the common-path SQL lexer with a guarded fast path.
+- Batch existence reflection: 201 baseline queries versus 2; one CI sample improved from 0.217 s to 0.016 s.
+- Generic Float now compiles to DOUBLE unless single precision is explicitly requested. Non-returning structured DML hides DuckDB's Count acknowledgment; raw SQL preserves its established Count-row contract.
+- Fixed upstream harness provisioning for schemas and temporary tables. File-backed tests use independent connections. Requirements expose supported capabilities and explicitly close unsupported identity, cascades and named constraint behavior.
+- Preserve actual native string normalization and Boolean default expressions in targeted suite assertions. CTE fixtures use an integer hierarchy without DuckDB's unsupported self-referencing insert constraint.
+- Added 25 randomized nullable signed-64-bit integer/text round trips for each Arrow, pandas and ordinary path.

@@ -14,5 +14,5 @@ Last updated: 2026-09-30
 - [ ] Evaluate native appender APIs against benchmark and bind-semantics requirements
 
 ### Observability
-- [ ] Example: DuckDB logging/profiling
-- [ ] Lightweight query tagging guidance
+- [x] Example: DuckDB profiling and SQLAlchemy logging
+- [x] Lightweight query tagging guidance

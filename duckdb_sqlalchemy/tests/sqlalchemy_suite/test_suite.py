@@ -1,10 +1,21 @@
-from sqlalchemy.testing.suite import *  # noqa: F401,F403
+import re
 
-from sqlalchemy import Boolean, Column, Integer, String, Table, func, literal_column, text
-from sqlalchemy import testing
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Integer,
+    String,
+    Table,
+    func,
+    literal_column,
+    inspect,
+    testing,
+    text,
+)
+from sqlalchemy.sql import sqltypes
+from sqlalchemy.testing.suite import *  # noqa: F401,F403
 from sqlalchemy.testing.suite import ComponentReflectionTestExtra as _Reflection
 from sqlalchemy.testing.suite import CTETest as _CTE
-from sqlalchemy.sql import sqltypes
 
 
 class CTETest(_CTE):
@@ -23,7 +34,9 @@ class CTETest(_CTE):
 
 
 class ComponentReflectionTestExtra(_Reflection):
-    @testing.combinations(sqltypes.String, sqltypes.VARCHAR, sqltypes.CHAR, argnames="type_")
+    @testing.combinations(
+        sqltypes.String, sqltypes.VARCHAR, sqltypes.CHAR, argnames="type_"
+    )
     @testing.requires.table_reflection
     def test_string_length_reflection(self, connection, metadata, type_):
         # DuckDB canonicalizes CHAR/VARCHAR(n) to unbounded VARCHAR.
@@ -42,5 +55,15 @@ class ComponentReflectionTestExtra(_Reflection):
         argnames="datatype, default, expected_reg",
     )
     @testing.requires.server_defaults
-    def test_server_defaults(self, metadata, connection, datatype, default, expected_reg):
-        super().test_server_defaults(metadata, connection, datatype, default, expected_reg)
+    def test_server_defaults(
+        self, metadata, connection, datatype, default, expected_reg
+    ):
+        table = Table(
+            "t", metadata,
+            Column("id", Integer, primary_key=True),
+            Column("thecol", datatype, server_default=default),
+        )
+        table.create(connection)
+        reflected = inspect(connection).get_columns("t")[1]["default"]
+        sanitized = re.sub(r"[\\(\\) \\']", "", reflected)
+        assert re.match(expected_reg, sanitized, re.IGNORECASE)

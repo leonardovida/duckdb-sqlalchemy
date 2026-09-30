@@ -54,6 +54,10 @@ values and DuckDB's target-column casts; SQLAlchemy bind processors and
 client-side defaults do not run. Use ordinary SQLAlchemy inserts when those
 processors or defaults are part of your data contract.
 
+Structured write statements with RETURNING buffer their returned rows to provide
+an exact affected-row count for ORM version checks. Use ordinary tuple results
+for these writes; the bounded Arrow interface is intended for SELECT results.
+
 ## Bounded Arrow reads
 
 `duckdb_arrow=True` exposes both a full Arrow table and batch reads:
@@ -119,3 +123,36 @@ For large loads, COPY from Parquet can avoid Python value conversion entirely;
 see [analytical queries and COPY helpers](olap). CSV serialization honors
 single-character delimiter (`delim`, `delimiter` or `sep`), quote and escape
 options. Prefer typed Arrow/Parquet for binary, nested and exact decimal data.
+
+## Profiling and query tags
+
+SQLAlchemy's `echo=True` logs statements and parameters; use `hide_parameters=True`
+when values should stay out of logs. For a DuckDB query profile, run these
+commands on the same connection as the query and consume its result fully:
+
+```python
+with engine.connect() as conn:
+    conn.exec_driver_sql("PRAGMA enable_profiling='json'")
+    conn.exec_driver_sql("PRAGMA profiling_output='query-profile.json'")
+    try:
+        conn.exec_driver_sql("SELECT sum(i) FROM range(1000000) AS t(i)").all()
+    finally:
+        conn.exec_driver_sql("PRAGMA disable_profiling")
+```
+
+The JSON file records operators, timings and cardinalities. Compare identical
+queries, data and DuckDB settings. Profiles contain SQL text, and the output
+file is written outside transaction rollback.
+
+A fixed SQL comment can identify a workload without changing parameter values:
+
+```python
+from sqlalchemy import event
+
+@event.listens_for(engine, "before_cursor_execute", retval=True)
+def tag_query(conn, cursor, statement, parameters, context, executemany):
+    return "/* workload: nightly-rollup */ " + statement, parameters
+```
+
+Use a constant tag or validate dynamic labels before including them in SQL.
+Commented writes retain the dialect's DML row counts.

@@ -945,6 +945,17 @@ class DuckDBExecutionContext(_PGExecutionContext):
             cursor._buffered_description = None
             cursor._buffered_rows.clear()
             cursor._result_consumed()
+        if (
+            cursor is not None
+            and not getattr(cursor, "_is_dml_count", False)
+            and (self.isinsert or self.isupdate or self.isdelete)
+            and getattr(self.compiled, "returning", None)
+        ):
+            # Native RETURNING rowcount is -1. Materialize its write result
+            # so ORM version checks can verify affected rows on SQLAlchemy 2.0.
+            cursor._buffer_result()
+            cursor._dml_rowcount = len(cursor._buffered_rows)
+            cursor._result_consumed()
         result = super()._setup_result_proxy()
         if self.execution_options.get("duckdb_arrow") and getattr(
             result, "returns_rows", False
@@ -1225,10 +1236,11 @@ class Dialect(PGDialect_psycopg2):
     # COMMENT ON exists in every supported DuckDB; initialize() re-checks, and
     # the class default covers DDL compiled without connecting (--sql mode)
     supports_comments = True
+    supports_constraint_comments = False
     # single-statement DML rowcount comes from DuckDB's "Count" result
     supports_sane_rowcount = True
     supports_sane_multi_rowcount = False
-    supports_sane_rowcount_returning = False
+    supports_sane_rowcount_returning = True
     supports_server_side_cursors = False
     # duckdb binds and returns decimal.Decimal without going through float
     supports_native_decimal = True

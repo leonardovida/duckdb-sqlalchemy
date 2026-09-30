@@ -3,6 +3,8 @@ from typing import Any
 
 import duckdb
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from sqlalchemy import (
     BigInteger,
     Column,
@@ -487,5 +489,72 @@ def test_generic_float_preserves_double_precision() -> None:
             assert connection.execute(select(table.c.value)).scalar_one() == Decimal(
                 "15.7563827"
             )
+    finally:
+        engine.dispose()
+
+@pytest.mark.parametrize("backend", ["arrow", "pandas", "ordinary"])
+@settings(max_examples=25, deadline=None)
+@given(
+    values=st.lists(
+        st.tuples(
+            st.one_of(st.none(), st.integers(min_value=-(2**63), max_value=2**63 - 1)),
+            st.one_of(st.none(), st.text(alphabet=st.characters(blacklist_categories=("Cs",)), max_size=20)),
+        ),
+        min_size=2,
+        max_size=20,
+    )
+)
+def test_randomized_bulk_values_remain_exact(backend: str, values: Any) -> None:
+    from unittest.mock import patch
+
+    from .. import _bulk_insert
+
+    engine = create_engine("duckdb:///:memory:")
+    table = Table(
+        "random_values",
+        MetaData(),
+        Column("position", Integer),
+        Column("number", BigInteger),
+        Column("label", String),
+    )
+    patches = []
+    if backend != "arrow":
+        patches.append(patch.object(_bulk_insert, "build_bulk_insert_arrow_table", return_value=None))
+    if backend == "ordinary":
+        patches.append(patch.object(_bulk_insert, "build_bulk_insert_dataframe", return_value=None))
+    for replacement in patches:
+        replacement.start()
+    try:
+        with engine.begin() as connection:
+            table.create(connection)
+            connection.execution_options(duckdb_copy_threshold=1).execute(
+                table.insert(),
+                [
+                    {"position": position, "number": number, "label": label}
+                    for position, (number, label) in enumerate(values)
+                ],
+            )
+            assert connection.execute(select(table).order_by(table.c.position)).all() == [
+                (position, number, label)
+                for position, (number, label) in enumerate(values)
+            ]
+    finally:
+        for replacement in reversed(patches):
+            replacement.stop()
+        engine.dispose()
+
+@pytest.mark.parametrize("matches", [0, 1, 2])
+def test_returning_preserves_rows_and_affected_count(matches: int) -> None:
+    engine = create_engine("duckdb:///:memory:")
+    table = Table("returning_counts", MetaData(), Column("id", Integer))
+    try:
+        with engine.begin() as connection:
+            table.create(connection)
+            connection.execute(table.insert(), [{"id": 1}, {"id": 2}])
+            result = connection.execute(
+                table.update().where(table.c.id <= matches).values(id=table.c.id + 10).returning(table.c.id)
+            )
+            assert result.rowcount == matches
+            assert sorted(result.scalars().all()) == list(range(11, 11 + matches))
     finally:
         engine.dispose()
