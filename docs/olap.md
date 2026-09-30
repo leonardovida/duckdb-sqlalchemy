@@ -530,6 +530,38 @@ rows = conn.execute(select(snapshot.c.id, snapshot.c.region)).all()
 Use DuckDB type names in `hive_types`. See
 [Hive partition types](https://duckdb.org/docs/current/data/partitioning/hive_partitioning.html#hive-types).
 
+### Join a snapshot to a live table
+
+A Parquet scan is a SQLAlchemy `FROM` element, so a saved event snapshot can
+still be filtered and joined to a current local table. Include the join key in
+the exported query:
+
+```python
+from sqlalchemy import bindparam, or_, select
+
+snapshot = read_parquet(
+    "snapshots/events/**/*.parquet",
+    columns=["id", "account_id", "region"],
+    hive_partitioning=True,
+    hive_types={"region": "VARCHAR"},
+)
+report = (
+    select(snapshot.c.id, snapshot.c.region, accounts.c.tier)
+    .join(accounts, snapshot.c.account_id == accounts.c.id)
+    .where(snapshot.c.id >= bindparam("minimum_id"))
+    .where(or_(snapshot.c.region == bindparam("region"), snapshot.c.region.is_(None)))
+)
+rows = conn.execute(report, {"minimum_id": 1, "region": "123"}).all()
+```
+
+Here `accounts` is a SQLAlchemy table in the same DuckDB connection. The
+partition key `"123"` stays a string because of `hive_types`. A NULL region
+reads back as `None`; DuckDB 1.3 writes its directory as `region=NULL`, while
+newer versions use `region=__HIVE_DEFAULT_PARTITION__`. The account columns
+reflect the live table at query time. See the
+[runnable snapshot join example](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/examples/snapshot_live_join.py),
+which also updates an account after export and verifies the joined result.
+
 ## ATTACH for multi-database analytics
 
 DuckDB can query across multiple databases in a single session:
