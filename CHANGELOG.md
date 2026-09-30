@@ -8,42 +8,50 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
-### Compatibility
+## [1.5.5.13](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.12...v1.5.5.13) (2026-09-30)
 
-- Generic `Float()` and precision above 24 now compile as `DOUBLE` to preserve Python float precision; use `REAL` or `Float(24)` for 32-bit values. Existing FLOAT columns need an explicit type migration to gain precision.
-- Non-returning SQLAlchemy DML expressions follow its non-row result contract; DuckDB's Count acknowledgement remains available as `rowcount`. Structured RETURNING writes provide exact row counts for ORM version checks and preserve returned rows (materialized for writes).
-- Reflected sequence defaults retain `autoincrement=True`; unsupported identity columns and constraint comments are no longer advertised.
+### Highlights
 
-- `STRUCT`, `MAP`, and `UNION` columns reflect as `Struct`, `Map`, and `Union` with their member types instead of `NullType`, so reflected tables recreate the same columns and Alembic autogenerate sees them. A nested type with an ENUM member still reflects as `NullType` ([#180](https://github.com/leonardovida/duckdb-sqlalchemy/pull/180))
-- an Alembic implementation class for `duckdb` defined in `env.py` keeps precedence over the built-in `DuckDBImpl`. Remove it to get the DuckDB-specific autogenerate behavior below ([#180](https://github.com/leonardovida/duckdb-sqlalchemy/pull/180))
+- Preserve float precision, large integers, NaN versus NULL, and Decimal return scales.
+- Add typed Arrow ingestion with `insert_from_arrow()` and bounded Arrow reads with `result.batches()`.
+- Batch multi-table existence checks: the measured reflection workload drops from 201 catalog queries to 2.
+- Reflect native STRUCT, MAP, UNION and ENUM types and provide built-in Alembic integration.
 
-### Features
+### Upgrading from 1.5.5.12
 
-- Add `insert_from_arrow()` for typed Arrow Table/RecordBatch/RecordBatchReader ingestion and `duckdb_arrow` result `.batches()` with bounded reads and explicit connection ownership.
-- Reuse successful bulk conversion, reduce positional Arrow copies and batch SQLAlchemy 2.1 multi-table existence checks.
+Upgrade with `pip install -U duckdb-sqlalchemy`, then run your application tests. Python 3.10+, DuckDB 1.3.0+ and SQLAlchemy 2.0+ remain required.
 
-- Alembic works without an implementation class in `env.py`: `duckdb_sqlalchemy.alembic_impl.DuckDBImpl` registers when Alembic is loaded. It renders `Struct`, `Map`, and `Union` columns as valid migration code, reports changed nested types, matches named unique constraints to the names DuckDB generates, compares server defaults in DuckDB's spelling, and supports `op.alter_column(..., comment=...)` ([#180](https://github.com/leonardovida/duckdb-sqlalchemy/pull/180))
+- **Float precision:** generic `Float()` and precision above 24 now compile as `DOUBLE`. Use `REAL` or `Float(24)` for 32-bit values. Existing FLOAT columns require an explicit type migration to gain precision.
+- **DML results:** non-returning SQLAlchemy DML expressions no longer expose DuckDB's Count acknowledgement as result rows; use `rowcount`. Textual SQL keeps its Count row contract. Structured RETURNING writes materialize returned rows to provide exact counts for ORM version checks.
+- **Identity:** plain `Identity()` uses the sequence fallback; unsupported Identity modifiers raise a compilation error. Use an explicit `Sequence` for custom starts and increments.
+- **Reflection and Alembic:** sequence defaults retain `autoincrement=True`, nested types reflect as native types, and unsupported identity columns and constraint comments are no longer advertised. A custom DuckDB Alembic implementation defined in `env.py` keeps precedence; remove it to use the built-in implementation. Nested ENUM members still reflect as `NullType`.
 
-### Bug Fixes
+### Features and performance
 
-- Propagate unread-result fetch failures; exhausted cursors retain their own metadata and cannot consume another cursor's rows.
+- `insert_from_arrow(conn, table, data, columns=None)` accepts Arrow Table, RecordBatch and RecordBatchReader inputs, honors schema translation, and cleans up registration. Inputs must already be typed; this helper does not apply SQLAlchemy bind processors or client defaults.
+- Arrow results expose `.batches(batch_size=65536)` with bounded reads and explicit connection ownership.
+- Bulk inserts reuse successful conversion and avoid unnecessary positional Arrow copies.
+- SQLAlchemy 2.1 multi-table existence checks use batched catalog queries. Two CI benchmark samples measured about 17 times faster reflection for the documented workload; timings depend on the environment.
+- Alembic registers its DuckDB implementation automatically, renders and compares nested types, compares defaults and generated constraint names, and supports column comment changes.
+
+### Bug fixes
+
+- Prevent exhausted cursors from consuming another cursor's rows and propagate unread-result fetch failures.
 - Preserve large integers in mixed numeric batches and NaN versus NULL in pandas fallback; honor `Numeric.decimal_return_scale`.
-- Honor object kind/scope throughout bulk reflection and preserve foreign-key target schemas resolved through the search path.
-- Compile native JSON indexing, nested paths and scalar casts; honor inspector caches and sequence schemas; preserve SQL literal/comment backslashes. Temporary autoincrement sequences close with their connection.
-- Preserve quoted field names, literal defaults and type-changing casts in Alembic comparisons; count DML with leading comments or CTEs.
-- Serialize COPY row streams using the requested delimiter, quote, escape and newline dialect instead of relying on CSV sniffing.
+- Respect reflection object kind, scope, inspector caches, sequence schemas and foreign-key targets resolved through the search path.
+- Compile DuckDB-native JSON indexing, nested paths and scalar casts; preserve SQL literal and comment backslashes.
+- Preserve quoted field names, literal defaults and type-changing casts in Alembic comparisons.
+- Count DML with leading comments or CTEs and support exact RETURNING row counts.
+- Serialize COPY row streams using the requested delimiter, quote, escape and newline options.
+- Fix temporary autoincrement sequence cleanup, reflected ENUM labels, and offline Alembic/mock-engine DDL.
 
-- `get_multi_columns(kind=ObjectKind.TABLE)` no longer returns views, and `kind=ObjectKind.VIEW` returns only views ([#180](https://github.com/leonardovida/duckdb-sqlalchemy/pull/180))
-- `inspector.get_enums()` returns the ENUM types created with `CREATE TYPE`, with their labels and schema, instead of a single label-less `enum` entry for DuckDB's built-in type ([#180](https://github.com/leonardovida/duckdb-sqlalchemy/pull/180))
-- `alembic upgrade --sql` and `create_mock_engine` no longer fail with "'MockConnection' object has no attribute 'get_execution_options'" for tables with an autoincrement primary key, and their DDL includes table and column comments ([#180](https://github.com/leonardovida/duckdb-sqlalchemy/pull/180))
+### Verification
 
-### Maintenance
+The implementation passed 547 regular tests and 2,864 SQLAlchemy upstream cases, plus required Python 3.10–3.14, dependency-floor, Windows/macOS, isolated wheel/sdist, lint and type checks. Release validation checks the exact merged commit before publication. Live MotherDuck integration remains unverified without credentials.
 
-- Require upstream SQLAlchemy 2.0/2.1 suite checks, Windows/macOS tests, isolated wheel/sdist smoke tests with optional dependencies independently installed, and correctness-checked benchmark artifacts. Add opt-in real MotherDuck connection checks and exact-value differential tests.
-- Expand performance, migration and adoption guidance with reproducible validation commands.
+**Changes:** [#180](https://github.com/leonardovida/duckdb-sqlalchemy/pull/180), [#183](https://github.com/leonardovida/duckdb-sqlalchemy/pull/183).
 
-- add Alembic to the `dev` extra for the Alembic tests ([#180](https://github.com/leonardovida/duckdb-sqlalchemy/pull/180))
-- document reflection scoping (temp tables, `db.schema` names, `has_schema`), nested-type reflection, and statements DuckDB does not support; test and document Alembic autogenerate, the batch-mode workaround for adding constraints, and its known limitations; document the `read_csv` `columns` type mapping, the remaining Dive and Flight helpers, and the MotherDuck database string helpers; refresh the architecture module map
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.12...v1.5.5.13
 
 ## [1.5.5.12](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.11...v1.5.5.12) (2026-09-28)
 

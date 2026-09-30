@@ -490,7 +490,7 @@ wheels = [
 
 [[package]]
 name = "duckdb-sqlalchemy"
-version = "1.5.5.12"
+version = "1.5.5.13"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
