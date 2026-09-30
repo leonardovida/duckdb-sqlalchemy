@@ -74,8 +74,12 @@ def test_to_sql(
     try:
         sample_df.to_sql(name="foo", con=eng, index=index)
         kwargs = dict(
-            name="foo", con=eng, if_exists=if_exists, chunksize=chunksize,
-            index=index, method=method,
+            name="foo",
+            con=eng,
+            if_exists=if_exists,
+            chunksize=chunksize,
+            index=index,
+            method=method,
         )
         if if_exists == "fail":
             with raises(ValueError, match="already exists"):
@@ -83,7 +87,11 @@ def test_to_sql(
         else:
             sample_df.to_sql(**kwargs)
         actual = pd.read_sql("SELECT * FROM foo", eng)
-        expected = pd.concat([sample_df, sample_df], ignore_index=True) if if_exists == "append" else sample_df
+        expected = (
+            pd.concat([sample_df, sample_df], ignore_index=True)
+            if if_exists == "append"
+            else sample_df
+        )
         assert_frame_equal(actual, expected, check_dtype=False)
     finally:
         eng.dispose()

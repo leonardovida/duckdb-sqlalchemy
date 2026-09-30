@@ -1698,16 +1698,13 @@ class Dialect(PGDialect_psycopg2):
                 "AND (temporary OR (database_name = current_database() "
                 "AND schema_name = current_schema()))",
             )
-        if schema is not None and ObjectScope.TEMPORARY in scope:
+        if schema is not None and ObjectScope.DEFAULT not in scope:
             database_name, schema_name = self.identifier_preparer._separate(schema)
             if database_name is None:
-                start = sql.index("AND database_name = (")
-                stop = sql.index(")\n", start) + 2
-                sql = (
-                    sql[:start]
-                    + "AND (temporary OR database_name = current_database())\n"
-                    + sql[stop:]
-                )
+                sql = sql.replace(
+                    "AND database_name = (\n",
+                    "AND (temporary OR database_name = (\n",
+                ).replace("    LIMIT 1\n)\n", "    LIMIT 1\n))\n")
         if ObjectScope.DEFAULT not in scope:
             sql += "\nAND temporary"
         elif ObjectScope.TEMPORARY not in scope:

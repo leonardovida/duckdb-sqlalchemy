@@ -1,3 +1,4 @@
+import os
 import importlib.metadata
 import threading
 import time
@@ -585,6 +586,9 @@ def test_looks_like_motherduck_detection() -> None:
 
 
 def test_apply_motherduck_defaults_env_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Windows environment keys are case-insensitive. Use an explicit mapping
+    # to exercise precedence between the two supported spellings.
+    monkeypatch.setattr(os, "environ", dict(os.environ))
     config = {}
     monkeypatch.setenv("MOTHERDUCK_TOKEN", "token123")
     monkeypatch.delenv("motherduck_token", raising=False)
@@ -597,6 +601,9 @@ def test_apply_motherduck_defaults_env_token(monkeypatch: pytest.MonkeyPatch) ->
 def test_apply_motherduck_defaults_prefers_standard_env_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Windows environment keys are case-insensitive. Use an explicit mapping
+    # to exercise precedence between the two supported spellings.
+    monkeypatch.setattr(os, "environ", dict(os.environ))
     config = {}
     monkeypatch.setenv("MOTHERDUCK_TOKEN", "standard-token")
     monkeypatch.setenv("motherduck_token", "legacy-token")

@@ -1,4 +1,5 @@
 import os
+
 import pandas as pd
 from pytest import mark
 from sqlalchemy import __version__, text
@@ -22,7 +23,6 @@ def test_plain_register(conn: Connection) -> None:
     conn.execute(text("select * from test_df"))
 
 
-
 @mark.remote_data
 @mark.skipif(
     not (os.getenv("MOTHERDUCK_TOKEN") or os.getenv("motherduck_token")),
@@ -34,16 +34,21 @@ def test_motherduck() -> None:
 
     database = os.getenv("MOTHERDUCK_TEST_DATABASE", "")
     engine = create_engine(
-        f"duckdb:///md:{database}", poolclass=QueuePool, pool_size=2, max_overflow=0,
+        f"duckdb:///md:{database}",
+        poolclass=QueuePool,
+        pool_size=2,
+        max_overflow=0,
     )
     try:
         with engine.connect() as connection:
             assert connection.execute(text("SELECT 42")).scalar_one() == 42
             assert connection.execute(text("SELECT current_database()")).scalar_one()
             assert isinstance(inspect(connection).get_table_names(), list)
-            with connection.execution_options(duckdb_arrow=True).execute(
-                text("SELECT i FROM range(5) AS t(i)")
-            ).batches(2) as reader:
+            with (
+                connection.execution_options(duckdb_arrow=True)
+                .execute(text("SELECT i FROM range(5) AS t(i)"))
+                .batches(2) as reader
+            ):
                 assert sum(batch.num_rows for batch in reader) == 5
         with engine.connect() as connection:
             assert connection.execute(text("SELECT 43")).scalar_one() == 43

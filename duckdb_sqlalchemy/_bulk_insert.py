@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import math
+from numbers import Integral, Real
 from functools import lru_cache
 from typing import Any, Optional, Sequence, cast
 
@@ -19,7 +21,7 @@ def has_bulk_insert_data_library() -> bool:
 
 
 def _is_integer(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(value, Integral) and not isinstance(value, bool)
 
 
 def _has_unsafe_numeric_coercion(
@@ -31,7 +33,7 @@ def _has_unsafe_numeric_coercion(
         has_large_integer = False
         for row in rows:
             value = row.get(name) if mapping_rows else row[index]
-            has_float = has_float or isinstance(value, float)
+            has_float = has_float or (isinstance(value, Real) and not isinstance(value, Integral))
             has_large_integer = has_large_integer or (
                 _is_integer(value) and abs(value) > 2**53
             )
@@ -67,7 +69,20 @@ def build_bulk_insert_dataframe(
     try:
         if _has_unsafe_numeric_coercion(rows, column_names):
             return None
-        if rows_use_mapping_shape(rows):
+        mapping_rows = rows_use_mapping_shape(rows)
+        for index, name in enumerate(column_names):
+            values = [row.get(name) if mapping_rows else row[index] for row in rows]
+            # DuckDB's pandas scan treats NaN as NULL. Ordinary bindings
+            # preserve NaN, so this batch must keep the ordinary insert path.
+            if any(isinstance(value, Real) and math.isnan(value) for value in values):
+                return None
+            kinds = {type(value) for value in values if value is not None}
+            if len(kinds) > 1 and not all(
+                value is None or (isinstance(value, Real) and not isinstance(value, bool))
+                for value in values
+            ):
+                return None
+        if mapping_rows:
             frame = pd.DataFrame.from_records(rows, columns=column_names)
         else:
             frame = pd.DataFrame(rows, columns=cast(Any, column_names))

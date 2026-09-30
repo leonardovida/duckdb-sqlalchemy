@@ -281,28 +281,110 @@ def test_direct_arrow_insert_preserves_typed_values_and_rollback(kind: str) -> N
 
     from .. import insert_from_arrow
 
-    arrow_table = pa.table({
-        "source id": pa.array([2**53 + 1, None], type=pa.int64()),
-        "source amount": pa.array([decimal.Decimal("1.2345"), None], type=pa.decimal128(18, 4)),
-        "source bytes": pa.array([b"\x00\xff", b""], type=pa.binary()),
-    })
+    arrow_table = pa.table(
+        {
+            "source id": pa.array([2**53 + 1, None], type=pa.int64()),
+            "source amount": pa.array(
+                [Decimal("1.2345"), None], type=pa.decimal128(18, 4)
+            ),
+            "source bytes": pa.array([b"\x00\xff", b""], type=pa.binary()),
+        }
+    )
     data = (
-        arrow_table if kind == "table" else arrow_table.to_batches()[0]
-        if kind == "batch" else arrow_table.to_reader()
+        arrow_table
+        if kind == "table"
+        else arrow_table.to_batches()[0]
+        if kind == "batch"
+        else arrow_table.to_reader()
     )
     engine = create_engine("duckdb:///:memory:")
     with engine.begin() as connection:
-        connection.exec_driver_sql('CREATE TABLE "arrow target" ("target id" BIGINT, amount DECIMAL(18, 4), bytes BLOB)')
+        connection.exec_driver_sql(
+            'CREATE TABLE "arrow target" ("target id" BIGINT, amount DECIMAL(18, 4), bytes BLOB)'
+        )
     with engine.connect() as connection:
         target = Table("arrow target", MetaData())
-        insert_from_arrow(connection, target, data, columns=["target id", "amount", "bytes"])
+        insert_from_arrow(
+            connection, target, data, columns=["target id", "amount", "bytes"]
+        )
         assert connection.execute(text('SELECT * FROM "arrow target"')).all() == [
-            (2**53 + 1, decimal.Decimal("1.2345"), b"\x00\xff"),
+            (2**53 + 1, Decimal("1.2345"), b"\x00\xff"),
             (None, None, b""),
         ]
-        assert connection.exec_driver_sql(
-            "SELECT count(*) FROM duckdb_views() WHERE view_name LIKE '__duckdb_sa_arrow_%'"
-        ).scalar() == 0
+        assert (
+            connection.exec_driver_sql(
+                "SELECT count(*) FROM duckdb_views() WHERE view_name LIKE '__duckdb_sa_arrow_%'"
+            ).scalar()
+            == 0
+        )
         connection.rollback()
-        assert connection.exec_driver_sql('SELECT count(*) FROM "arrow target"').scalar() == 0
+        assert (
+            connection.exec_driver_sql('SELECT count(*) FROM "arrow target"').scalar()
+            == 0
+        )
     engine.dispose()
+
+
+@pytest.mark.parametrize("backend", ["arrow", "pandas", "ordinary"])
+@pytest.mark.parametrize("case", ["decimal", "binary", "timezone", "json", "null_nan", "integer"])
+def test_bulk_insert_matches_ordinary_bindings(
+    backend: str, case: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import math
+    from datetime import datetime, timezone
+
+    from sqlalchemy import JSON, DateTime, Float, LargeBinary, Numeric
+
+    from .. import _bulk_insert
+
+    if backend != "arrow":
+        monkeypatch.setattr(_bulk_insert, "build_bulk_insert_arrow_table", lambda *args: None)
+    if backend == "ordinary":
+        monkeypatch.setattr(_bulk_insert, "build_bulk_insert_dataframe", lambda *args: None)
+    scenarios = {
+        "decimal": (Numeric(38, 12), [Decimal("12345678901234567890.123456789012"), None]),
+        "binary": (LargeBinary(), [b"\x00\xff", b"", None]),
+        "timezone": (DateTime(timezone=True), [datetime(2026, 9, 30, 12, 34, 56, 123456, timezone.utc), None]),
+        "json": (JSON(), [{"nested": [1, None, "x"]}, None]),
+        "null_nan": (Float(), [None, float("nan"), 1.5]),
+        "integer": (BigInteger(), [2**53 + 1, None, 1]),
+    }
+    column_type, values = scenarios[case]
+    engine = create_engine("duckdb:///:memory:")
+    metadata = MetaData()
+    baseline = Table("ordinary_values", metadata, Column("position", Integer), Column("value", column_type))
+    candidate = Table("bulk_values", metadata, Column("position", Integer), Column("value", column_type))
+    try:
+        with engine.begin() as connection:
+            metadata.create_all(connection)
+            rows = [{"position": position, "value": value} for position, value in enumerate(values)]
+            connection.execution_options(duckdb_copy_threshold=0).execute(baseline.insert(), rows)
+            connection.execution_options(duckdb_copy_threshold=1).execute(candidate.insert(), rows)
+            expected = connection.execute(select(baseline).order_by(baseline.c.position)).all()
+            actual = connection.execute(select(candidate).order_by(candidate.c.position)).all()
+            assert len(actual) == len(expected)
+            for left, right in zip(actual, expected):
+                assert left[0] == right[0]
+                if isinstance(right[1], float) and math.isnan(right[1]):
+                    assert isinstance(left[1], float) and math.isnan(left[1])
+                else:
+                    assert left[1] == right[1]
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("options", [
+    {"delimiter": "|", "quote": "'", "escape": "\\"},
+    {"sep": "\t", "quote": "'"},
+])
+def test_copy_csv_options_round_trip(options: dict[str, str]) -> None:
+    engine = create_engine("duckdb:///:memory:")
+    table = Table("csv_options", MetaData(), Column("value", String))
+    values = ["pipe|tab\tcomma,quote'backslash\\newline\n", "", None]
+    try:
+        with engine.begin() as connection:
+            table.create(connection)
+            copy_from_rows(connection, table, [(value,) for value in values], columns=["value"], **options)
+            assert connection.execute(select(table)).scalars().all() == values
+    finally:
+        engine.dispose()
