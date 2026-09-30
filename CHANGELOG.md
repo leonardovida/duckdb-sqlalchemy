@@ -11,7 +11,7 @@ preserved from the upstream project for historical context.
 ### Compatibility
 
 - Generic `Float()` and precision above 24 now compile as `DOUBLE` to preserve Python float precision; use `REAL` or `Float(24)` for 32-bit values. Existing FLOAT columns need an explicit type migration to gain precision.
-- Non-returning DML follows SQLAlchemy's non-row result contract; DuckDB's Count acknowledgement remains available as `rowcount`.
+- Non-returning SQLAlchemy DML expressions follow its non-row result contract; DuckDB's Count acknowledgement remains available as `rowcount`.
 
 - `STRUCT`, `MAP`, and `UNION` columns reflect as `Struct`, `Map`, and `Union` with their member types instead of `NullType`, so reflected tables recreate the same columns and Alembic autogenerate sees them. A nested type with an ENUM member still reflects as `NullType` ([#180](https://github.com/leonardovida/duckdb-sqlalchemy/pull/180))
 - an Alembic implementation class for `duckdb` defined in `env.py` keeps precedence over the built-in `DuckDBImpl`. Remove it to get the DuckDB-specific autogenerate behavior below ([#180](https://github.com/leonardovida/duckdb-sqlalchemy/pull/180))

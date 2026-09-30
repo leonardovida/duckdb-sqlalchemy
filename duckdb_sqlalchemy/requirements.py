@@ -62,3 +62,7 @@ class Requirements(SuiteRequirements):
     @property
     def foreign_key_constraint_name_reflection(self) -> Any:
         return exclusions.closed("DuckDB replaces user constraint names")
+
+    @property
+    def self_referential_foreign_keys(self) -> Any:
+        return exclusions.closed("DuckDB rejects inserts referencing the same table")

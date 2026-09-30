@@ -39,8 +39,8 @@ from sqlalchemy.dialects.postgresql.base import (
     PGDDLCompiler,
     PGDialect,
     PGIdentifierPreparer,
-    PGTypeCompiler,
     PGInspector,
+    PGTypeCompiler,
 )
 from sqlalchemy.dialects.postgresql.psycopg2 import PGDialect_psycopg2
 from sqlalchemy.engine import processors
@@ -935,7 +935,11 @@ class DuckDBExecutionContext(_PGExecutionContext):
         cursor = getattr(self, "cursor", None)
         if arraysize is not None and hasattr(cursor, "arraysize"):
             cursor.arraysize = arraysize
-        if cursor is not None and getattr(cursor, "_is_dml_count", False):
+        if (
+            cursor is not None
+            and getattr(cursor, "_is_dml_count", False)
+            and (self.isinsert or self.isupdate or self.isdelete)
+        ):
             # Count is DuckDB's DML acknowledgement, not a RETURNING result.
             # Preserve rowcount while following SQLAlchemy's non-row contract.
             cursor._buffered_description = None
@@ -1128,7 +1132,11 @@ class DuckDBDDLCompiler(PGDDLCompiler):
 class DuckDBTypeCompiler(PGTypeCompiler):
     def visit_FLOAT(self, type_: Any, **kw: Any) -> str:
         # Generic Float(None) must preserve Python's 64-bit float precision.
-        return "FLOAT" if type_.precision is not None and type_.precision <= 24 else "DOUBLE"
+        return (
+            "FLOAT"
+            if type_.precision is not None and type_.precision <= 24
+            else "DOUBLE"
+        )
 
 
 class DuckDBCompiler(PGCompiler):
@@ -1219,6 +1227,8 @@ class Dialect(PGDialect_psycopg2):
     supports_comments = True
     # single-statement DML rowcount comes from DuckDB's "Count" result
     supports_sane_rowcount = True
+    supports_sane_multi_rowcount = False
+    supports_sane_rowcount_returning = False
     supports_server_side_cursors = False
     # duckdb binds and returns decimal.Decimal without going through float
     supports_native_decimal = True
@@ -1254,6 +1264,11 @@ class Dialect(PGDialect_psycopg2):
         kwargs["use_native_hstore"] = False
         super().__init__(*args, **kwargs)
         self._capabilities = get_capabilities(duckdb.__version__)
+
+    @classmethod
+    def load_provisioning(cls) -> None:
+        # The dialect lives in a package __init__, unlike built-in dialects.
+        from . import provision  # noqa: F401
 
     def initialize(self, connection: "Connection") -> None:
         _register_alembic_support()
