@@ -957,7 +957,16 @@ class DuckDBExecutionContext(_PGExecutionContext):
             if returning_rows is not None:
                 self._rowcount = len(returning_rows)
             else:
-                cursor._buffer_result()
+                if self.execution_options.get("duckdb_arrow"):
+                    arrow_table = cursor.fetch_arrow_table()
+                    self._duckdb_returning_arrow = arrow_table
+                    cursor._store_buffered_result(
+                        zip(*(column.to_pylist() for column in arrow_table.columns)),
+                        cursor.description,
+                        arrow_table.num_rows,
+                    )
+                else:
+                    cursor._buffer_result()
                 self._rowcount = len(cursor._buffered_rows)
             cursor._dml_rowcount = self._rowcount
             cursor._result_consumed()
@@ -965,7 +974,12 @@ class DuckDBExecutionContext(_PGExecutionContext):
         if self.execution_options.get("duckdb_arrow") and getattr(
             result, "returns_rows", False
         ):
-            return DuckDBArrowResult(result)
+            arrow_result = DuckDBArrowResult(result)
+            returning_arrow = getattr(self, "_duckdb_returning_arrow", None)
+            if returning_arrow is not None:
+                arrow_result._arrow = returning_arrow
+                result.close()
+            return arrow_result
         return result
 
 
@@ -1066,8 +1080,6 @@ def _column_needs_implicit_sequence(column: Any) -> bool:
         return False
     if not column.primary_key or column is not table._autoincrement_column:
         return False
-    if getattr(column, "identity", None) is not None:
-        return False
     if column.default is not None and not (
         isinstance(column.default, sa_schema.Sequence) and column.default.optional
     ):
@@ -1155,7 +1167,45 @@ class DuckDBTypeCompiler(PGTypeCompiler):
         )
 
 
+
+def _json_pointer(value: Any) -> str:
+    parts = value if isinstance(value, (tuple, list)) else (value,)
+    return "/" + "/".join(str(part).replace("~", "~0").replace("/", "~1") for part in parts)
+
+
+class DuckDBJSONIndex(sqltypes.JSON.JSONIndexType):
+    def bind_processor(self, dialect: Any) -> Any:
+        return _json_pointer
+
+    def literal_processor(self, dialect: Any) -> Any:
+        render = sqltypes.String().literal_processor(dialect)
+        return lambda value: render(_json_pointer(value))
+
+
+class DuckDBJSONPath(sqltypes.JSON.JSONPathType):
+    def bind_processor(self, dialect: Any) -> Any:
+        return _json_pointer
+
+    def literal_processor(self, dialect: Any) -> Any:
+        render = sqltypes.String().literal_processor(dialect)
+        return lambda value: render(_json_pointer(value))
+
 class DuckDBCompiler(PGCompiler):
+    def _json_extract(self, binary: Any, **kw: Any) -> str:
+        as_json = isinstance(binary.type, sqltypes.JSON)
+        function = "json_extract" if as_json else "json_extract_string"
+        expression = f"{function}({self.process(binary.left, **kw)}, {self.process(binary.right, **kw)})"
+        if as_json:
+            return expression
+        target_type = self.dialect.type_compiler_instance.process(binary.type)
+        return f"CAST({expression} AS {target_type})"
+
+    def visit_json_getitem_op_binary(self, binary: Any, operator: Any, **kw: Any) -> str:
+        return self._json_extract(binary, **kw)
+
+    def visit_json_path_getitem_op_binary(self, binary: Any, operator: Any, **kw: Any) -> str:
+        return self._json_extract(binary, **kw)
+
     # DuckDB's ``~`` operator is a full-string match (regexp_full_match) and it
     # has no ``~*``; regexp_matches() searches like PostgreSQL's ``~`` and takes
     # the flags as options.
@@ -1265,6 +1315,10 @@ class Dialect(PGDialect_psycopg2):
             sqltypes.Numeric: DuckDBNumeric,
             sqltypes.Float: DuckDBFloat,
             sqltypes.JSON: sqltypes.JSON,
+            sqltypes.JSON.JSONIndexType: DuckDBJSONIndex,
+            sqltypes.JSON.JSONIntIndexType: DuckDBJSONIndex,
+            sqltypes.JSON.JSONStrIndexType: DuckDBJSONIndex,
+            sqltypes.JSON.JSONPathType: DuckDBJSONPath,
             UUID: UUID,
         },
     )
@@ -1443,6 +1497,17 @@ class Dialect(PGDialect_psycopg2):
 
         quote = self.identifier_preparer.quote
         return [".".join(quote(identifier) for identifier in nspname) for nspname in rs]
+
+    @cache  # type: ignore[call-arg]
+    def has_sequence(self, connection: "Connection", sequence_name: str, schema: Optional[str] = None, **kw: Any) -> bool:
+        where, params = self._build_query_where(schema_name=schema, default_to_current_schema=True)
+        params["sequence_name"] = sequence_name
+        return connection.execute(text("SELECT 1 FROM duckdb_sequences() WHERE sequence_name = :sequence_name " + where + " LIMIT 1"), params).first() is not None
+
+    @cache  # type: ignore[call-arg]
+    def get_sequence_names(self, connection: "Connection", schema: Optional[str] = None, **kw: Any) -> List[str]:
+        where, params = self._build_query_where(schema_name=schema, default_to_current_schema=True)
+        return list(connection.execute(text("SELECT sequence_name FROM duckdb_sequences() WHERE 1 = 1 " + where + " ORDER BY sequence_name"), params).scalars())
 
     def _build_query_where(
         self,
@@ -2212,7 +2277,9 @@ class Dialect(PGDialect_psycopg2):
                     "nullable": bool(row["is_nullable"]),
                     "default": row["column_default"],
                     "autoincrement": bool(
-                        re.match(r"^nextval\s*\(", row["column_default"] or "", re.IGNORECASE)
+                        re.match(
+                            r"^nextval\s*\(", row["column_default"] or "", re.IGNORECASE
+                        )
                     ),
                     "comment": row["comment"],
                 }
@@ -2264,6 +2331,7 @@ class Dialect(PGDialect_psycopg2):
             return default_factory()
         raise NoSuchTableError(table_name)
 
+    @cache  # type: ignore[call-arg]
     def has_table(
         self,
         connection: "Connection",
@@ -2504,6 +2572,7 @@ class Dialect(PGDialect_psycopg2):
             schema, tables, check_constraints, ReflectionDefaults.check_constraints
         )
 
+    @cache  # type: ignore[call-arg]
     def get_indexes(
         self,
         connection: "Connection",
@@ -2641,6 +2710,7 @@ class Dialect(PGDialect_psycopg2):
             for row in connection.execute(text(sql), params).mappings()
         ]
 
+    @cache  # type: ignore[call-arg]
     def has_schema(self, connection: "Connection", schema: str, **kw: Any) -> bool:
         """Whether ``schema`` (``schema`` or ``database.schema``) exists."""
         database_name, schema_name = self.identifier_preparer._separate(schema)

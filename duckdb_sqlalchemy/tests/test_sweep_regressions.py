@@ -577,12 +577,10 @@ def test_returning_preserves_rows_and_affected_count(matches: int) -> None:
     finally:
         engine.dispose()
 
-def test_reflected_sequence_default_remains_autoincrement(engine: Any) -> None:
-    from sqlalchemy import Sequence
 
+def test_reflected_sequence_default_remains_autoincrement(engine: Any) -> None:
     table = Table(
-        "sequence_reflection", MetaData(),
-        Column("id", Integer, Sequence("sequence_reflection_id_seq"), primary_key=True),
+        "sequence_reflection", MetaData(), Column("id", Integer, primary_key=True)
     )
     with engine.begin() as connection:
         table.create(connection)
@@ -590,3 +588,40 @@ def test_reflected_sequence_default_remains_autoincrement(engine: Any) -> None:
         assert reflected.c.id.autoincrement is True
         result = connection.execute(reflected.insert().returning(reflected.c.id))
         assert result.scalar_one() == 1
+
+def test_arrow_returning_keeps_native_types_and_count(engine: Any) -> None:
+    import pyarrow as pa
+    from sqlalchemy import Numeric
+
+    table = Table("arrow_returning", MetaData(), Column("value", Numeric(18, 4)))
+    with engine.begin() as connection:
+        table.create(connection)
+        result = connection.execution_options(duckdb_arrow=True).execute(
+            table.insert().values(value=Decimal("1.2345")).returning(table.c.value)
+        )
+        assert result.rowcount == 1
+        assert result.arrow.schema.field("value").type == pa.decimal128(18, 4)
+        assert result.arrow.to_pylist() == [{"value": Decimal("1.2345")}]
+
+@pytest.mark.parametrize("literal", [False, True])
+def test_json_paths_and_scalar_casts_use_duckdb_semantics(engine: Any, literal: bool) -> None:
+    from sqlalchemy import JSON
+
+    table = Table("json_paths", MetaData(), Column("value", JSON))
+    with engine.begin() as connection:
+        table.create(connection)
+        connection.execute(table.insert(), {"value": {"a/b~c": [{"value": 42, "flag": True, "label": "héllo", "none": None}]}})
+        expressions = [
+            table.c.value[("a/b~c", 0, "value")].as_integer(),
+            table.c.value[("a/b~c", 0, "flag")].as_boolean(),
+            table.c.value[("a/b~c", 0, "label")].as_string(),
+            table.c.value[("a/b~c", 0, "none")],
+        ]
+        statement = select(*expressions)
+        if literal:
+            result = connection.exec_driver_sql(str(statement.compile(dialect=connection.dialect, compile_kwargs={"literal_binds": True})))
+        else:
+            result = connection.execute(statement)
+        row = result.one()
+        assert tuple(row[:3]) == (42, True, "héllo")
+        assert row[3] is None or row[3] == "null"

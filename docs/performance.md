@@ -55,8 +55,8 @@ client-side defaults do not run. Use ordinary SQLAlchemy inserts when those
 processors or defaults are part of your data contract.
 
 Structured write statements with RETURNING buffer their returned rows to provide
-an exact affected-row count for ORM version checks. Use ordinary tuple results
-for these writes; the bounded Arrow interface is intended for SELECT results.
+an exact affected-row count for ORM version checks. Arrow RETURNING uses a materialized Arrow table; the bounded batch interface
+is intended for SELECT results.
 
 ## Bounded Arrow reads
 

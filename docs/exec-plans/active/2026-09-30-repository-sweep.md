@@ -16,11 +16,13 @@ The nine findings from the repository review; batched reflection, reduced ingest
 ## Progress
 - Reviewed main at 6b41e798d7525a94176ada4e6a7ac1cb3d648df3.
 - Created a dedicated working branch.
-- Preparing regressions and CI-based validation.
+- Reproduced all nine review findings on the unchanged runtime and implemented regression-backed fixes.
+- Added Arrow ingestion/batch APIs, batched reflection and conversion reuse.
+- Expanded packaging, platform, upstream and minimum-version CI; resolving final conformance differences.
 
 ## Surprises & Discoveries
 - The managed executor cannot start. GitHub Actions is the executable validation environment.
-- Existing buffering tests require suppressed fetch errors.
+- Existing buffering tests required suppressed fetch errors; updated them to enforce error propagation.
 - The upstream SQLAlchemy suite is skipped and the MotherDuck test targets an unsupported DuckDB version.
 - The pandas method matrix does not forward its method argument.
 
@@ -53,4 +55,6 @@ In progress.
 - Generic Float now compiles to DOUBLE unless single precision is explicitly requested. Non-returning structured DML hides DuckDB's Count acknowledgment; raw SQL preserves its established Count-row contract.
 - Fixed upstream harness provisioning for schemas and temporary tables. File-backed tests use independent connections. Requirements expose supported capabilities and explicitly close unsupported identity, cascades and named constraint behavior.
 - Preserve actual native string normalization and Boolean default expressions in targeted suite assertions. CTE fixtures use an integer hierarchy without DuckDB's unsupported self-referencing insert constraint.
+- Upstream checks additionally found sequence defaults incorrectly reflected as non-autoincrement and inherited unsupported constraint-comment capability; fixed both.
+- Exact RETURNING row counts preserve stale-version detection on the SQLAlchemy 2.0.0 floor.
 - Added 25 randomized nullable signed-64-bit integer/text round trips for each Arrow, pandas and ordinary path.
