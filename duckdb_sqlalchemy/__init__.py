@@ -78,6 +78,7 @@ from ._statements import (
     _is_idempotent_statement,
     _is_transient_error,
     _top_level_sql_words,
+    _strip_leading_sql_comments,
 )
 from ._supports import has_comment_support
 from ._validation import validate_extension_name
@@ -465,9 +466,14 @@ class ConnectionWrapper:
         # Rolling back ends the unit of work, and it runs on every pool
         # checkin; buffering here would download the rest of any partly read
         # result. Forget the pending cursor instead.
-        self._pending_cursor = None
-        self._transaction_statements = None
-        self.__c.rollback()
+        pending = self._pending_cursor() if self._pending_cursor is not None else None
+        try:
+            if pending is not None:
+                pending.close()
+        finally:
+            self._pending_cursor = None
+            self._transaction_statements = None
+            self.__c.rollback()
 
     def _count_statement(self) -> None:
         if self._transaction_statements is not None:
@@ -479,8 +485,14 @@ class ConnectionWrapper:
         return getattr(self.__c, name)
 
     def close(self) -> None:
-        self.__c.close()
-        self.closed = True
+        pending = self._pending_cursor() if self._pending_cursor is not None else None
+        try:
+            if pending is not None:
+                pending.close()
+        finally:
+            self._pending_cursor = None
+            self.__c.close()
+            self.closed = True
 
 
 _REGISTER_NAME_KEYS = ("name", "view_name", "table")
@@ -576,23 +588,33 @@ class CursorWrapper:
         The count row stays readable, buffered like any other result. A
         RETURNING clause yields its own columns instead, so it is left alone.
         """
-        words = _top_level_sql_words(statement)
-        if not words:
-            return False
-        operation = words[0]
-        if operation == "with":
-            operation = next(
-                (
-                    word
-                    for word in words[1:]
-                    if word in (*_DML_ROWCOUNT_PREFIXES, "select")
-                ),
-                "",
-            )
-        if operation not in _DML_ROWCOUNT_PREFIXES or "returning" in words:
-            return False
         description = self.description
         if not description or len(description) != 1 or description[0][0] != "Count":
+            return False
+        normalized = _strip_leading_sql_comments(statement)
+        match = re.match(r"\s*(insert|update|delete|merge)\b", normalized, re.IGNORECASE)
+        # Common generated DML has neither RETURNING nor separators. Avoid
+        # scanning every placeholder in a large multi-values INSERT.
+        if (
+            match is not None
+            and ";" not in normalized
+            and "returning" not in normalized.lower()
+            and statement.count("/*") <= 1
+        ):
+            operation = match.group(1).lower()
+        else:
+            words = _top_level_sql_words(statement)
+            if not words:
+                return False
+            operation = words[0]
+            if operation == "with":
+                operation = next(
+                    (word for word in words[1:] if word in (*_DML_ROWCOUNT_PREFIXES, "select")),
+                    "",
+                )
+            if "returning" in words:
+                return False
+        if operation not in _DML_ROWCOUNT_PREFIXES:
             return False
         rows = self.__c.fetchall()
         if len(rows) == 1 and isinstance(rows[0][0], int):

@@ -73,7 +73,7 @@ with engine.connect() as conn:
 `.batches()` returns a reader with `schema`, `read_next_batch()`,
 `read_all()`, iteration and `close()`. Iteration holds one batch at a time.
 `read_all()` materializes the remaining stream. Exhaustion, explicit close,
-the reader context manager or result close releases ownership. A partially
+the reader context manager, result close or connection rollback/close releases ownership. A partially
 consumed reader must be consumed or closed before another statement runs on
 the same connection. Attempts to fetch rows from that active result raise
 `InvalidRequestError`. A separate connection can run independent work.

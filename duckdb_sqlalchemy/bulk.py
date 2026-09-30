@@ -283,7 +283,11 @@ def _copy_rows_as_csv_chunks(
         tmp = tempfile.NamedTemporaryFile(
             "w", newline="", suffix=".csv", delete=False, encoding="utf-8"
         )
-        writer = csv.writer(tmp, lineterminator=copy_options.get("new_line", "\n"), **_csv_writer_options(copy_options))
+        writer = csv.writer(
+            tmp,
+            lineterminator={"\\n": "\n", "\\r\\n": "\r\n", "\\r": "\r"}[copy_options.get("new_line", "\\n")],
+            **_csv_writer_options(copy_options),
+        )
         if include_header and columns:
             writer.writerow(columns)
         return tmp, writer, 0
@@ -411,12 +415,16 @@ def copy_from_rows(
         copy_options.pop(alias, None)
     copy_options["delim"] = writer_options.get("delimiter", ",")
     copy_options.setdefault("quote", writer_options.get("quotechar", '"'))
-    copy_options.setdefault("escape", writer_options.get("escapechar", copy_options["quote"]))
+    copy_options.setdefault(
+        "escape", writer_options.get("escapechar", copy_options["quote"])
+    )
     # The serializer knows the dialect; sniffing a tiny chunk can choose
     # incompatible quotes, newlines or a column count.
     copy_options.setdefault("auto_detect", False)
-    newline = copy_options.setdefault("new_line", "\n")
-    if newline not in ("\n", "\r\n", "\r"):
+    newline = copy_options.setdefault("new_line", "\\n")
+    if newline in ("\n", "\r\n", "\r"):
+        copy_options["new_line"] = newline.encode("unicode_escape").decode("ascii")
+    elif newline not in ("\\n", "\\r\\n", "\\r"):
         raise ValueError("copy_from_rows new_line must be LF, CRLF or CR")
     if str(copy_options.get("encoding", "utf-8")).lower().replace("-", "") != "utf8":
         raise ValueError("copy_from_rows writes UTF-8; encoding must be UTF-8")

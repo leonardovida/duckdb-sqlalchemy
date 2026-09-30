@@ -430,3 +430,21 @@ def test_copy_csv_options_round_trip(options: dict[str, str]) -> None:
             assert connection.execute(select(table)).scalars().all() == values
     finally:
         engine.dispose()
+
+
+def test_closing_connection_closes_arrow_batches_before_pool_reuse() -> None:
+    from sqlalchemy import text
+
+    engine = create_engine("duckdb:///:memory:")
+    connection = engine.connect()
+    result = connection.execution_options(duckdb_arrow=True).execute(
+        text("SELECT i FROM range(100) AS t(i)")
+    )
+    reader = result.batches(2)
+    assert reader.read_next_batch().num_rows == 2
+    connection.close()
+    assert reader.closed
+    assert result.closed
+    with engine.connect() as reused:
+        assert reused.execute(text("SELECT 9")).scalar_one() == 9
+    engine.dispose()

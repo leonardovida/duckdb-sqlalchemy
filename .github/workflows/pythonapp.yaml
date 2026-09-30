@@ -192,7 +192,7 @@ jobs:
       - run: python -m pip install -e ".[dev]"
       - run: python -m pip install "${{ matrix.sqlalchemy }}"
       - run: |
-          pytest -q duckdb_sqlalchemy/tests/sqlalchemy_suite --dburi duckdb:///:memory: -rs
+          pytest -q duckdb_sqlalchemy/tests/sqlalchemy_suite --dburi duckdb:///:memory: -rs -o strict_parametrization_ids=false
 
   distributions:
     runs-on: ubuntu-latest

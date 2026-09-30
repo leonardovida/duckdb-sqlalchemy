@@ -31,7 +31,9 @@ def worker(case: str, rows: int, baseline: bool = False) -> dict[str, Any]:
         tracemalloc.start()
         started = time.perf_counter()
         from sqlalchemy import create_engine, text
+
         import duckdb_sqlalchemy
+
         engine = create_engine("duckdb:///:memory:")
         with engine.connect() as connection:
             assert connection.execute(text("SELECT 1")).scalar_one() == 1
