@@ -673,25 +673,46 @@ def test_literals_and_comments_preserve_backslashes(engine: Any) -> None:
         )
         assert connection.exec_driver_sql(str(statement)).scalar_one() == value
 
-def test_default_identity_uses_sequence_and_rejects_unsupported_options(engine: Any) -> None:
+
+@pytest.mark.parametrize("options", [{"start": 100}, {"start": 0}, {"increment": 0}])
+def test_default_identity_uses_sequence_and_rejects_unsupported_options(
+    engine: Any, options: Any,
+) -> None:
     from sqlalchemy import Identity
     from sqlalchemy.exc import CompileError
 
-    table = Table("identity_fallback", MetaData(), Column("id", Integer, Identity(), primary_key=True))
+    table = Table(
+        "identity_fallback",
+        MetaData(),
+        Column("id", Integer, Identity(), primary_key=True),
+    )
     with engine.begin() as connection:
         table.create(connection)
-        assert connection.execute(table.insert().returning(table.c.id)).scalar_one() == 1
-        unsupported = Table("identity_options", MetaData(), Column("id", Integer, Identity(start=100), primary_key=True))
+        assert (
+            connection.execute(table.insert().returning(table.c.id)).scalar_one() == 1
+        )
+        unsupported = Table(
+            "identity_options",
+            MetaData(),
+            Column("id", Integer, Identity(**options), primary_key=True),
+        )
         with pytest.raises(CompileError, match="explicit Sequence"):
             unsupported.create(connection)
 
 
 def test_temporary_autoincrement_sequence_closes_with_connection(tmp_path: Any) -> None:
     engine = create_engine(f"duckdb:///{tmp_path / 'temp_sequence.duckdb'}")
-    table = Table("temporary_counter", MetaData(), Column("id", Integer, primary_key=True), prefixes=["TEMPORARY"])
+    table = Table(
+        "temporary_counter",
+        MetaData(),
+        Column("id", Integer, primary_key=True),
+        prefixes=["TEMPORARY"],
+    )
     with engine.begin() as connection:
         table.create(connection)
-        assert connection.execute(table.insert().returning(table.c.id)).scalar_one() == 1
+        assert (
+            connection.execute(table.insert().returning(table.c.id)).scalar_one() == 1
+        )
     engine.dispose()
     try:
         with engine.connect() as connection:

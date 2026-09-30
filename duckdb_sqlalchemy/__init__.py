@@ -1085,14 +1085,24 @@ def _column_needs_implicit_sequence(column: Any) -> bool:
         isinstance(column.default, sa_schema.Sequence) and column.default.optional
     ):
         return False
-    if column.server_default is not None and not isinstance(column.server_default, sa_schema.Identity):
+    if column.server_default is not None and not isinstance(
+        column.server_default, sa_schema.Identity
+    ):
         return False
     identity = getattr(column, "identity", None)
-    if identity is not None and any(
-        getattr(identity, option, None)
-        for option in ("always", "start", "increment", "minvalue", "maxvalue", "nominvalue", "nomaxvalue", "cycle", "cache", "order", "on_null")
+    if identity is not None and (
+        any(
+            getattr(identity, option, None) is not None
+            for option in ("start", "increment", "minvalue", "maxvalue", "cache")
+        )
+        or any(
+            getattr(identity, option, None)
+            for option in ("always", "nominvalue", "nomaxvalue", "cycle", "order", "on_null")
+        )
     ):
-        raise CompileError("DuckDB cannot honor Identity options; use an explicit Sequence")
+        raise CompileError(
+            "DuckDB cannot honor Identity options; use an explicit Sequence"
+        )
     return True
 
 
@@ -1136,8 +1146,14 @@ def _execute_implicit_sequence_ddl(
 
 
 def _create_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
-    temporary = any(str(prefix).upper() in {"TEMP", "TEMPORARY"} for prefix in target._prefixes)
-    statement = "CREATE TEMPORARY SEQUENCE IF NOT EXISTS" if temporary else "CREATE SEQUENCE IF NOT EXISTS"
+    temporary = any(
+        str(prefix).upper() in {"TEMP", "TEMPORARY"} for prefix in target._prefixes
+    )
+    statement = (
+        "CREATE TEMPORARY SEQUENCE IF NOT EXISTS"
+        if temporary
+        else "CREATE SEQUENCE IF NOT EXISTS"
+    )
     _execute_implicit_sequence_ddl(target, connection, statement)
 
 
@@ -2778,8 +2794,16 @@ class Dialect(PGDialect_psycopg2):
         return connection.execute(text(sql + " LIMIT 1"), params).first() is not None
 
     @cache  # type: ignore[call-arg]
-    def get_table_options(self, connection: "Connection", table_name: str, schema: Optional[str] = None, **kw: Any) -> Dict[str, Any]:
-        return self._get_single_reflection_result(connection, table_name, schema, self.get_multi_table_options, dict, **kw)
+    def get_table_options(
+        self,
+        connection: "Connection",
+        table_name: str,
+        schema: Optional[str] = None,
+        **kw: Any,
+    ) -> Dict[str, Any]:
+        return self._get_single_reflection_result(
+            connection, table_name, schema, self.get_multi_table_options, dict, **kw
+        )
 
     def get_multi_table_options(
         self,

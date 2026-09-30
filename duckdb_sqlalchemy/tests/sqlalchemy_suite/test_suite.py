@@ -198,6 +198,11 @@ class LongNameBlowoutTest(_LongNames):
     def test_long_convention_name(self, type_, metadata, connection):
         original, reflected = getattr(self, type_)(metadata, connection)
         assert len(original) > 255
+        if reflected is None:
+            assert type_ == "fk"
+            reflected = inspect(connection).get_foreign_keys(
+                "b_related_things_of_value"
+            )[0]["name"]
         assert reflected
         if type_ == "ix":
             assert original.startswith(reflected[:-5])

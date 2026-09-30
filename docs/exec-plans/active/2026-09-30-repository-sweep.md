@@ -58,3 +58,10 @@ In progress.
 - Upstream checks additionally found sequence defaults incorrectly reflected as non-autoincrement and inherited unsupported constraint-comment capability; fixed both.
 - Exact RETURNING row counts preserve stale-version detection on the SQLAlchemy 2.0.0 floor.
 - Added 25 randomized nullable signed-64-bit integer/text round trips for each Arrow, pandas and ordinary path.
+
+### Full upstream validation
+- SQLAlchemy 2.0 upstream suite: 1332 passing cases; 2.1: 1530 passing cases. One remaining assertion in the constraint-name adaptation is prepared for correction.
+- Full regular suite passes on Python 3.10–3.14, SQLAlchemy 2.0/2.1, DuckDB 1.3.0 dependency floor, macOS and Windows.
+- Upstream regressions drove native JSON-path/cast compilation, inspector caching, scoped sequence listing, preserved literal/comment backslashes, SQLAlchemy 2.0 single-table options and temporary implicit-sequence lifecycle fixes.
+- Identity() with no modifiers uses the existing sequence fallback. Unsupported identity modifiers fail before sequence creation, including falsey numeric values.
+- FK join fixtures recreate real constrained tables per case because DuckDB cannot delete children and referenced parents in one transaction.
