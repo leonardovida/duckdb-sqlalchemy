@@ -8,7 +8,7 @@ no implementation class.
 """
 
 import re
-from typing import Any, Collection, Dict, List, Tuple
+from typing import Any, Collection, Dict, List, Optional, Tuple
 
 from alembic.autogenerate.render import _repr_type
 from alembic.ddl import impl as _alembic_impl
@@ -55,9 +55,10 @@ class DuckDBImpl(DefaultImpl):
         # instead of querying, which would abort the migration transaction
         # on an error.
         boolean = isinstance(inspector_column.type, sqltypes.Boolean)
+        column_type = self.dialect.type_compiler_instance.process(inspector_column.type)
         return _normalize_default(
-            rendered_inspector_default, boolean
-        ) != _normalize_default(rendered_metadata_default, boolean)
+            rendered_inspector_default, boolean, column_type
+        ) != _normalize_default(rendered_metadata_default, boolean, column_type)
 
     def compare_type(self, inspector_column: Any, metadata_column: Any) -> bool:
         # Alembic compares type classes, so a STRUCT that gained a field
@@ -122,9 +123,9 @@ class DuckDBImpl(DefaultImpl):
         return False
 
 
-_CAST_RE = re.compile(r"CAST\((.*) AS [\w\s(),]+\)", re.IGNORECASE | re.DOTALL)
+_CAST_RE = re.compile(r"CAST\((.*) AS ([\w\s(),]+)\)", re.IGNORECASE | re.DOTALL)
 # DuckDB stores x::VARCHAR as CAST(x AS VARCHAR)
-_SHORT_CAST_RE = re.compile(r"(.*?)\s*::\s*[\w\s(),]+", re.DOTALL)
+_SHORT_CAST_RE = re.compile(r"(.*?)\s*::\s*([\w\s(),]+)", re.DOTALL)
 _STRING_RE = re.compile(r"('(?:[^']|'')*')")
 _BOOLEAN_DEFAULTS = {"t": "true", "true": "true", "f": "false", "false": "false"}
 
@@ -138,10 +139,18 @@ def _normalize_sql_expression(value: str) -> str:
     )
 
 
-def _normalize_default(value: str, boolean: bool) -> str:
+def _normalize_default(
+    value: str, boolean: bool, column_type: Optional[str] = None
+) -> str:
     value = _strip_enclosing_parentheses(str(value))
     match = _CAST_RE.fullmatch(value) or _SHORT_CAST_RE.fullmatch(value)
-    if match:
+    if match and (
+        column_type is None
+        or _normalize_sql_expression(match.group(2)).replace("decimal", "numeric")
+        == _normalize_sql_expression(column_type).replace("decimal", "numeric")
+    ):
+        # Casting to the column type is redundant at insertion. A cast to a
+        # different type can round or truncate first and must remain visible.
         value = _strip_enclosing_parentheses(match.group(1))
     if boolean:
         if _STRING_RE.fullmatch(value):

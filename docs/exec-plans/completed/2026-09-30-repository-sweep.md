@@ -35,3 +35,5 @@ At implementation commit `4a8e2c00426322c4e6e688aa816c3a6d04e2acd4`:
 
 ## Outcomes and retrospective
 All review findings are fixed with observed failure evidence. The suite now checks supported upstream dialect behavior instead of skipping it, catching several additional correctness problems before merge. The final PR requires green tests, pre-commit and type checks. No finite repository sweep can certify the absence of all future bugs.
+
+Final diff review found a related default-comparison edge case: stripping a cast to another type hides rounding before assignment. Added database-backed regressions and retain such casts while normalizing redundant casts to the column type.

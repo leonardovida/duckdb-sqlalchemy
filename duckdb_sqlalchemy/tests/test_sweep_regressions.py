@@ -720,3 +720,24 @@ def test_temporary_autoincrement_sequence_closes_with_connection(tmp_path: Any) 
             assert inspect(connection).get_sequence_names() == []
     finally:
         engine.dispose()
+
+@pytest.mark.parametrize("default", ["CAST(1.9 AS INTEGER)", "1.9::INTEGER"])
+def test_alembic_preserves_type_changing_default_casts(engine: Any, default: str) -> None:
+    from alembic.migration import MigrationContext
+    from sqlalchemy import Numeric, text
+
+    table = Table(
+        "cast_defaults", MetaData(),
+        Column("value", Numeric(10, 2), server_default=text(default)),
+    )
+    with engine.begin() as connection:
+        table.create(connection)
+        connection.execute(table.insert())
+        assert connection.execute(select(table.c.value)).scalar_one() == Decimal("2.00")
+        reflected = Table(table.name, MetaData(), autoload_with=connection)
+        desired = Column("value", Numeric(10, 2), server_default=text("1.9"))
+        implementation = MigrationContext.configure(connection).impl
+        assert implementation.compare_server_default(
+            reflected.c.value, desired,
+            str(reflected.c.value.server_default.arg), "1.9",
+        )

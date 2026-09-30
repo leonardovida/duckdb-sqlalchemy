@@ -30,7 +30,7 @@ preserved from the upstream project for historical context.
 - Preserve large integers in mixed numeric batches and NaN versus NULL in pandas fallback; honor `Numeric.decimal_return_scale`.
 - Honor object kind/scope throughout bulk reflection and preserve foreign-key target schemas resolved through the search path.
 - Compile native JSON indexing, nested paths and scalar casts; honor inspector caches and sequence schemas; preserve SQL literal/comment backslashes. Temporary autoincrement sequences close with their connection.
-- Preserve quoted field names and literal defaults in Alembic comparisons; count DML with leading comments or CTEs.
+- Preserve quoted field names, literal defaults and type-changing casts in Alembic comparisons; count DML with leading comments or CTEs.
 - Serialize COPY row streams using the requested delimiter, quote, escape and newline dialect instead of relying on CSV sniffing.
 
 - `get_multi_columns(kind=ObjectKind.TABLE)` no longer returns views, and `kind=ObjectKind.VIEW` returns only views ([#180](https://github.com/leonardovida/duckdb-sqlalchemy/pull/180))
