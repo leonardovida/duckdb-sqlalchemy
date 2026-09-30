@@ -1,4 +1,5 @@
 import decimal
+import json
 import os
 import re
 import sys
@@ -53,7 +54,7 @@ from sqlalchemy.engine.reflection import (
     cache,
 )
 from sqlalchemy.engine.url import URL as SAURL
-from sqlalchemy.exc import InvalidRequestError, NoSuchTableError
+from sqlalchemy.exc import CompileError, InvalidRequestError, NoSuchTableError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import bindparam
 from sqlalchemy.sql.compiler import IdentifierPreparer
@@ -1084,8 +1085,14 @@ def _column_needs_implicit_sequence(column: Any) -> bool:
         isinstance(column.default, sa_schema.Sequence) and column.default.optional
     ):
         return False
-    if column.server_default is not None:
+    if column.server_default is not None and not isinstance(column.server_default, sa_schema.Identity):
         return False
+    identity = getattr(column, "identity", None)
+    if identity is not None and any(
+        getattr(identity, option, None)
+        for option in ("always", "start", "increment", "minvalue", "maxvalue", "nominvalue", "nomaxvalue", "cycle", "cache", "order", "on_null")
+    ):
+        raise CompileError("DuckDB cannot honor Identity options; use an explicit Sequence")
     return True
 
 
@@ -1129,7 +1136,9 @@ def _execute_implicit_sequence_ddl(
 
 
 def _create_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
-    _execute_implicit_sequence_ddl(target, connection, "CREATE SEQUENCE IF NOT EXISTS")
+    temporary = any(str(prefix).upper() in {"TEMP", "TEMPORARY"} for prefix in target._prefixes)
+    statement = "CREATE TEMPORARY SEQUENCE IF NOT EXISTS" if temporary else "CREATE SEQUENCE IF NOT EXISTS"
+    _execute_implicit_sequence_ddl(target, connection, statement)
 
 
 def _drop_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
@@ -1169,6 +1178,15 @@ class DuckDBTypeCompiler(PGTypeCompiler):
 
 def _json_pointer(value: Any) -> str:
     parts = value if isinstance(value, (tuple, list)) else (value,)
+    if not parts:
+        return "$"
+    if any(isinstance(part, int) and part < 0 for part in parts):
+        return "$" + "".join(
+            (f"[#{part}]" if part < 0 else f"[{part}]")
+            if isinstance(part, int)
+            else "." + json.dumps(str(part), ensure_ascii=False)
+            for part in parts
+        )
     return "/" + "/".join(
         str(part).replace("~", "~0").replace("/", "~1") for part in parts
     )
@@ -1208,7 +1226,7 @@ class DuckDBCompiler(PGCompiler):
         return self._json_extract(binary, **kw)
 
     def visit_json_path_getitem_op_binary(
-        self, binary: Any, operator: Any, **kw: Any
+        self, binary: Any, operator: Any, _cast_applied: bool = False, **kw: Any
     ) -> str:
         return self._json_extract(binary, **kw)
 
@@ -2758,6 +2776,10 @@ class Dialect(PGDialect_psycopg2):
             sql += " AND database_name = :database_name"
             params["database_name"] = database_name
         return connection.execute(text(sql + " LIMIT 1"), params).first() is not None
+
+    @cache  # type: ignore[call-arg]
+    def get_table_options(self, connection: "Connection", table_name: str, schema: Optional[str] = None, **kw: Any) -> Dict[str, Any]:
+        return self._get_single_reflection_result(connection, table_name, schema, self.get_multi_table_options, dict, **kw)
 
     def get_multi_table_options(
         self,

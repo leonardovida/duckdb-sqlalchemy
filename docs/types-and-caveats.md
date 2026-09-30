@@ -216,4 +216,4 @@ DuckDB's Python bindings are not fork-safe. Creating a new connection in a
 with MotherDuck or file-backed connections. Prefer `spawn` or `forkserver`, and
 initialize engines/connections in the child process.
 
-DuckDB canonicalizes `CHAR(n)` and `VARCHAR(n)` to unbounded `VARCHAR`; reflected string lengths are therefore `None`. It generates constraint names and supports table/column comments, but does not support constraint comments or identity columns. Use sequences for generated integer keys.
+DuckDB canonicalizes `CHAR(n)` and `VARCHAR(n)` to unbounded `VARCHAR`; reflected string lengths are therefore `None`. It generates constraint names and supports table/column comments, but does not support constraint comments or identity columns. Use sequences for generated integer keys. A plain `Identity()` falls back to a sequence because SQLAlchemy ignores unsupported identity syntax; identity options raise `CompileError` so their requested behavior cannot silently change.

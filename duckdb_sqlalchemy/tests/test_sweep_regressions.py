@@ -631,6 +631,8 @@ def test_json_paths_and_scalar_casts_use_duckdb_semantics(
             table.c.value[("a/b~c", 0, "flag")].as_boolean(),
             table.c.value[("a/b~c", 0, "label")].as_string(),
             table.c.value[("a/b~c", 0, "none")],
+            table.c.value[("a/b~c", -1, "value")].as_integer(),
+            table.c.value[()],
         ]
         statement = select(*expressions)
         if literal:
@@ -647,13 +649,18 @@ def test_json_paths_and_scalar_casts_use_duckdb_semantics(
         row = result.one()
         assert tuple(row[:3]) == (42, True, "héllo")
         assert row[3] is None or row[3] == "null"
+        assert row[4] == 42
+        assert row[5] is not None
+
 
 def test_literals_and_comments_preserve_backslashes(engine: Any) -> None:
     from sqlalchemy import literal
 
     value = "slash\\quote'next"
     table = Table(
-        "comment_escaping", MetaData(), Column("id", Integer, comment=value),
+        "comment_escaping",
+        MetaData(),
+        Column("id", Integer, comment=value),
         comment=value,
     )
     with engine.begin() as connection:
@@ -661,5 +668,33 @@ def test_literals_and_comments_preserve_backslashes(engine: Any) -> None:
         inspector = inspect(connection)
         assert inspector.get_table_comment(table.name)["text"] == value
         assert inspector.get_columns(table.name)[0]["comment"] == value
-        statement = select(literal(value)).compile(dialect=connection.dialect, compile_kwargs={"literal_binds": True})
+        statement = select(literal(value)).compile(
+            dialect=connection.dialect, compile_kwargs={"literal_binds": True}
+        )
         assert connection.exec_driver_sql(str(statement)).scalar_one() == value
+
+def test_default_identity_uses_sequence_and_rejects_unsupported_options(engine: Any) -> None:
+    from sqlalchemy import Identity
+    from sqlalchemy.exc import CompileError
+
+    table = Table("identity_fallback", MetaData(), Column("id", Integer, Identity(), primary_key=True))
+    with engine.begin() as connection:
+        table.create(connection)
+        assert connection.execute(table.insert().returning(table.c.id)).scalar_one() == 1
+        unsupported = Table("identity_options", MetaData(), Column("id", Integer, Identity(start=100), primary_key=True))
+        with pytest.raises(CompileError, match="explicit Sequence"):
+            unsupported.create(connection)
+
+
+def test_temporary_autoincrement_sequence_closes_with_connection(tmp_path: Any) -> None:
+    engine = create_engine(f"duckdb:///{tmp_path / 'temp_sequence.duckdb'}")
+    table = Table("temporary_counter", MetaData(), Column("id", Integer, primary_key=True), prefixes=["TEMPORARY"])
+    with engine.begin() as connection:
+        table.create(connection)
+        assert connection.execute(table.insert().returning(table.c.id)).scalar_one() == 1
+    engine.dispose()
+    try:
+        with engine.connect() as connection:
+            assert inspect(connection).get_sequence_names() == []
+    finally:
+        engine.dispose()

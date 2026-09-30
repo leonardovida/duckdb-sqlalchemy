@@ -20,6 +20,8 @@ from sqlalchemy.testing.suite import *  # noqa: F401,F403
 from sqlalchemy.testing.suite import ComponentReflectionTest as _Components
 from sqlalchemy.testing.suite import ComponentReflectionTestExtra as _Reflection
 from sqlalchemy.testing.suite import CTETest as _CTE
+from sqlalchemy.testing.suite import JoinTest as _Join
+from sqlalchemy.testing.suite import LongNameBlowoutTest as _LongNames
 
 
 class CTETest(_CTE):
@@ -165,3 +167,40 @@ class ComponentReflectionTest(_Components):
         constraint = inspect(connection).get_unique_constraints(table.name)[0]
         assert constraint["column_names"] == ["email"]
         assert constraint["name"] == "test_table_email_key"
+
+    @testing.requires.schema_reflection
+    @testing.requires.schema_create_delete
+    def test_schema_cache(self, connection):
+        inspector = inspect(connection)
+        database = connection.exec_driver_sql("SELECT current_database()").scalar_one()
+        name = f"{database}.foo_bar"
+        assert name not in inspector.get_schema_names()
+        assert not inspector.has_schema("foo_bar")
+        connection.exec_driver_sql("CREATE SCHEMA foo_bar")
+        try:
+            assert name not in inspector.get_schema_names()
+            assert not inspector.has_schema("foo_bar")
+            inspector.clear_cache()
+            assert name in inspector.get_schema_names()
+            assert inspector.has_schema("foo_bar")
+        finally:
+            connection.exec_driver_sql("DROP SCHEMA foo_bar")
+
+
+class JoinTest(_Join):
+    # Native FK checks cannot delete children and parents in one transaction.
+    # Recreate the tables so every join still exercises real FK inference.
+    run_create_tables = "each"
+
+
+class LongNameBlowoutTest(_LongNames):
+    @testing.combinations("fk", "pk", "ix", "ck", "uq", argnames="type_")
+    def test_long_convention_name(self, type_, metadata, connection):
+        original, reflected = getattr(self, type_)(metadata, connection)
+        assert len(original) > 255
+        assert reflected
+        if type_ == "ix":
+            assert original.startswith(reflected[:-5])
+        else:
+            # DuckDB regenerates constraint names instead of storing DDL names.
+            assert reflected != original
