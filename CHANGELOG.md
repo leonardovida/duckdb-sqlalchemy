@@ -25,6 +25,7 @@ preserved from the upstream project for historical context.
 
 ### Maintenance
 
+- add a runnable example and integration coverage for joining a typed, partitioned Parquet snapshot to live local data, including NULL partition keys and bound report filters
 - add Alembic to the `dev` extra for the Alembic tests ([#180](https://github.com/leonardovida/duckdb-sqlalchemy/pull/180))
 - document reflection scoping (temp tables, `db.schema` names, `has_schema`), nested-type reflection, and statements DuckDB does not support; test and document Alembic autogenerate, the batch-mode workaround for adding constraints, and its known limitations; document the `read_csv` `columns` type mapping, the remaining Dive and Flight helpers, and the MotherDuck database string helpers; refresh the architecture module map
 
