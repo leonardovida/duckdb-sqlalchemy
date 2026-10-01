@@ -17,9 +17,16 @@
 Changes to `pyproject.toml` that keep the same package version do not publish.
 Publishing a GitHub release manually remains supported: its tag must match
 the package version and its commit must have successful required checks.
-The workflow uses read-only checkout credentials; only the PyPI job requests
-an OIDC token, and only the final GitHub release job can write repository
-contents.
+Write release titles and notes without semicolons.
+
+To correct the current published release notes, edit its version section in
+`CHANGELOG.md` and merge the change through a checked pull request. When the
+package version stays unchanged, the workflow updates the existing GitHub
+release description from that section.
+
+The workflow uses read-only checkout credentials. Only the PyPI job requests
+an OIDC token. Only jobs that create or edit GitHub releases can write
+repository contents.
 
 If a job fails, fix the cause and rerun failed jobs. PyPI versions cannot be
 overwritten. If publication succeeded but verification or GitHub release

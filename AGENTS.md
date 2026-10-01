@@ -36,3 +36,4 @@
 
 - Use `pre-commit` to run checks before committing.
 - Always create a new branch for each feature or bug fix. After you completed the work, create a pull request with a concise title and description of the changes. Then wait for tests to pass and finally merge the changes into the main branch.
+- Do not use semicolons in release titles or release notes.
