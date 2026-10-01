@@ -4,7 +4,7 @@ on:
     types: [published]
   push:
     branches: [main]
-    paths: [pyproject.toml]
+    paths: [pyproject.toml, CHANGELOG.md]
   pull_request:
     paths:
       - .github/workflows/publish.yaml
@@ -72,6 +72,15 @@ jobs:
                   ["git", "show", "HEAD^:pyproject.toml"], text=True
               ))["project"]["version"]
               publish = version != previous
+          if publish:
+              with open("CHANGELOG.md") as changelog_file:
+                  changelog = changelog_file.read()
+              sections = changelog.split(f"## [{version}](", 1)
+              if len(sections) != 2:
+                  raise SystemExit("Release notes are missing from CHANGELOG.md")
+              notes = sections[1].split("\n", 1)[1].split("\n## ", 1)[0].strip()
+              if not notes or ";" in notes:
+                  raise SystemExit("Release notes must be nonempty and contain no semicolons")
           sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               output.write(f"publish={str(publish).lower()}\nversion={version}\nsha={sha}\n")
@@ -259,3 +268,42 @@ jobs:
           RELEASE_SHA: ${{ needs.build.outputs.sha }}
         run: |
           gh release create "v$RELEASE_VERSION" dist/* --target "$RELEASE_SHA" --title "duckdb-sqlalchemy $RELEASE_VERSION" --notes-file /tmp/release-notes.md --latest
+
+  github-release-notes:
+    name: Update GitHub release notes
+    if: github.event_name == 'push' && needs.build.outputs.publish == 'false'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.build.outputs.sha }}
+          persist-credentials: false
+      - name: Extract release notes from the changelog
+        env:
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+          heading = f"## [{version}]("
+          changelog = Path("CHANGELOG.md").read_text()
+          sections = changelog.split(heading, 1)
+          if len(sections) != 2:
+              raise SystemExit("Release notes are missing from CHANGELOG.md")
+          notes = sections[1].split("\n", 1)[1].split("\n## ", 1)[0].strip()
+          if not notes:
+              raise SystemExit("Release notes are empty")
+          if ";" in notes:
+              raise SystemExit("Release notes must not contain semicolons")
+          Path("/tmp/release-notes.md").write_text(notes + "\n")
+          PY
+      - name: Update the existing release description
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: gh release edit "v$RELEASE_VERSION" --notes-file /tmp/release-notes.md
