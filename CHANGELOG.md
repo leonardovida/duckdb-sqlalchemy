@@ -8,6 +8,8 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+- Prevent transient retries from replaying sequence and MotherDuck function calls when SQL comments separate the function name from its arguments.
+
 ## [1.5.5.13](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.12...v1.5.5.13) (2026-09-30)
 
 ### Highlights
