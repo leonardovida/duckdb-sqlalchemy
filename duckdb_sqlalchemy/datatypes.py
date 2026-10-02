@@ -230,6 +230,37 @@ class Map(TypeEngine):
             return _convert
 
 
+class FixedArray(sqltypes.Indexable, TypeEngine):
+    """DuckDB ARRAY with an enforced size, unlike a variable-length LIST."""
+
+    cache_ok = True
+    comparator_factory = sqltypes.ARRAY.Comparator
+    dimensions = 1
+    zero_indexes = False
+
+    def __init__(self, item_type: TV, size: int):
+        if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+            raise ValueError("FixedArray size must be a positive integer")
+        self.item_type = type_api.to_instance(item_type)
+        self.size = size
+
+    def bind_processor(self, dialect: Dialect) -> Any:
+        processor = self.item_type.dialect_impl(dialect).bind_processor(dialect)
+        if processor is None:
+            return None
+        return lambda value: (
+            None if value is None else [processor(item) for item in value]
+        )
+
+    def result_processor(self, dialect: Dialect, coltype: object) -> Any:
+        processor = self.item_type.dialect_impl(dialect).result_processor(dialect, None)
+        if processor is None:
+            return None
+        return lambda value: (
+            None if value is None else [processor(item) for item in value]
+        )
+
+
 class Union(_FieldsType):
     """
     Represents a UNION type in DuckDB
@@ -384,3 +415,8 @@ def visit_map(instance: Map, compiler: PGTypeCompiler, **kw: Any) -> str:
         process_type(instance.key_type, compiler, **kw),
         process_type(instance.value_type, compiler, **kw),
     )
+
+
+@compiles(FixedArray, "duckdb")  # type: ignore[misc]
+def visit_fixed_array(instance: FixedArray, compiler: PGTypeCompiler, **kw: Any) -> str:
+    return f"{process_type(instance.item_type, compiler, **kw)}[{instance.size}]"

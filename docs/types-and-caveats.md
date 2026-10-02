@@ -143,8 +143,20 @@ to a table in the same schema.
 
 `STRUCT`, `MAP`, and `UNION` columns reflect as `Struct`, `Map`, and `Union`
 with their member types, so a reflected table recreates the same columns.
-Lists and fixed-size arrays reflect as `ARRAY` of the element type, including
-lists of structs.
+Lists reflect as SQLAlchemy `ARRAY`. Fixed-size DuckDB arrays reflect as
+`duckdb_sqlalchemy.datatypes.FixedArray(item_type, size)`, preserving their
+length when metadata is copied or Alembic generates a migration. Lists of
+fixed arrays, fixed arrays of lists, and nested fixed arrays retain their shape.
+
+```python
+from sqlalchemy import Float
+from duckdb_sqlalchemy.datatypes import FixedArray
+
+embedding_type = FixedArray(Float(), 384)  # DOUBLE[384]
+```
+
+DuckDB enforces the size at insertion. `FixedArray` supports SQLAlchemy indexing
+and item bind/result processors. `ARRAY(Float())` remains a variable-length list.
 
 A nested type reflects as `NullType` when one of its members is an ENUM, because
 DuckDB does not report the enum's type name inside a nested type, or when a

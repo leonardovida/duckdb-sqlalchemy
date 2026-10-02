@@ -26,6 +26,12 @@ pip install duckdb-sqlalchemy
 
 This installs DuckDB and SQLAlchemy as dependencies. Install `pandas` or `pyarrow` separately if you use their integrations.
 
+Optional integrations also have extras with tested dependency floors:
+
+```sh
+pip install "duckdb-sqlalchemy[arrow,pandas]"
+```
+
 ## Quick start: query DuckDB from Python
 
 Run a query against an in-memory DuckDB database:

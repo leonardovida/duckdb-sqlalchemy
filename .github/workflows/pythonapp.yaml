@@ -138,6 +138,20 @@ jobs:
       - name: Run SQLAlchemy prerelease tests
         run: pytest -q
 
+  optional_versions:
+    # Exercise declared optional floors alongside the dialect's dependency floors.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pip install "duckdb==1.3.0" "SQLAlchemy==2.0.0" "pyarrow==22.0.0" "pandas==2.2.0" "numpy<2"
+      - run: pytest -q duckdb_sqlalchemy/tests/test_review_contracts.py duckdb_sqlalchemy/tests/test_csv_review_fixes.py duckdb_sqlalchemy/tests/test_pandas.py duckdb_sqlalchemy/tests/test_execution_options.py
+
   duckdb_prerelease:
     # Informational: upstream nightly regressions do not block merges.
     runs-on: ubuntu-latest
@@ -254,7 +268,7 @@ jobs:
   tests_passed:
     # Single status check to require in branch rules.
     if: always()
-    needs: [build_backend, minimum_versions, sqlalchemy_2_0, platforms, upstream_suite, distributions, benchmarks]
+    needs: [build_backend, minimum_versions, sqlalchemy_2_0, optional_versions, platforms, upstream_suite, distributions, benchmarks]
     runs-on: ubuntu-latest
     steps:
       - name: Check job results

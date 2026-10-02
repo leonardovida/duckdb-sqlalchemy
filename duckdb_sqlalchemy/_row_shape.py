@@ -16,24 +16,42 @@ def infer_mapping_column_keys(rows: Sequence[Any]) -> Optional[list[str]]:
 
 
 def mapping_row_as_sequence(
-    row: Mapping[str, Any], columns: Sequence[str]
+    row: Mapping[str, Any],
+    columns: Sequence[str],
+    *,
+    strict: bool = False,
+    row_index: Optional[int] = None,
 ) -> Sequence[Any]:
-    return [row.get(col) for col in columns]
+    values = []
+    for col in columns:
+        if strict and col not in row:
+            location = "mapping row"
+            if row_index is not None:
+                location = f"mapping row {row_index}"
+            raise ValueError(f"{location} is missing key {col!r}")
+        values.append(row.get(col))
+    return values
 
 
 def rows_as_sequences(
     first: Union[Mapping[str, Any], Sequence[Any]],
     rows: Iterable[Union[Mapping[str, Any], Sequence[Any]]],
     columns: Optional[Sequence[str]],
+    *,
+    strict: bool = False,
 ) -> Tuple[Iterable[Sequence[Any]], Optional[Sequence[str]]]:
     if isinstance(first, Mapping):
         if columns is None:
             columns = [str(col) for col in cast(Mapping[str, Any], first).keys()]
 
-        first_row = mapping_row_as_sequence(cast(Mapping[str, Any], first), columns)
+        first_row = mapping_row_as_sequence(
+            cast(Mapping[str, Any], first), columns, strict=strict, row_index=0
+        )
         remaining_rows = (
-            mapping_row_as_sequence(cast(Mapping[str, Any], row), columns)
-            for row in rows
+            mapping_row_as_sequence(
+                cast(Mapping[str, Any], row), columns, strict=strict, row_index=index
+            )
+            for index, row in enumerate(rows, start=1)
         )
         return chain((first_row,), remaining_rows), columns
 

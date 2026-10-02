@@ -45,7 +45,7 @@ MUTATING_STATEMENT_PATTERN = re.compile(
 # Do not scan across it: repeated candidate names in a long line comment
 # would otherwise repeatedly scan the remaining comment text.
 SIDE_EFFECT_FUNCTION_PATTERN = re.compile(
-    r"\b(?:nextval|setval|md_\w*)\"?\s*(?:\(|/\*|--)"
+    r"\b(?:nextval|setval|md_\w*|query|quack_query|postgres_query|mysql_query|sqlite_query)\"?\s*(?:\(|/\*|--)"
 )
 
 

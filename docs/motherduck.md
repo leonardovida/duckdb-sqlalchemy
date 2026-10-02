@@ -229,6 +229,13 @@ rolls back and begins again). Otherwise the original error is raised. Queries
 that call `md_*` table functions, `nextval`, or `setval` are never retried. Only errors raised while the statement executes are retried; an error raised later while
 rows are fetched from a streaming result is not.
 
+Calls made through the raw driver connection count as earlier transaction work
+too, so the dialect will not roll them back silently to retry a later read.
+Opaque SQL functions (`query`, `quack_query`, `postgres_query`, `mysql_query`,
+`sqlite_query`) are excluded because bound SQL can contain side effects that
+the statement text does not reveal. Arbitrary user functions or views can also
+have side effects: enable retries only for workloads you know are idempotent.
+
 ### Multiple client-side instances
 
 To force distinct client instances, rotate across multiple database paths:
