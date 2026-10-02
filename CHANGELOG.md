@@ -8,6 +8,14 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+- Preserve SQL-side bind transformations and MAP/list-of-MAP values above the bulk threshold.
+- Prevent retry rollback from discarding raw-driver writes and decline retries for opaque query functions.
+- Preserve implicit sequences during reflected/model/offline Alembic batch recreation and avoid unsupported SERIAL DDL.
+- Preserve quoted catalog search paths and fixed-size array shapes with `FixedArray` reflection and migration rendering.
+- Close and remove CSV temporary files after failures, preserving the primary error. Add opt-in `copy_from_rows(strict=True)` mapping validation.
+- Add native conflict modes to typed Arrow ingestion and optional `arrow`/`pandas` installation extras with a hosted floor check.
+- Avoid redundant numeric scans for non-floating Arrow columns and Python tuple copies for Arrow RETURNING. Record comparable measured improvements and their limits.
+
 ## [1.5.5.14](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.13...v1.5.5.14) (2026-10-02)
 
 ### Highlights

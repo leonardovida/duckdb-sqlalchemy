@@ -54,6 +54,12 @@ values and DuckDB's target-column casts; SQLAlchemy bind processors and
 client-side defaults do not run. Use ordinary SQLAlchemy inserts when those
 processors or defaults are part of your data contract.
 
+For typed reloads, `on_conflict="ignore"` keeps existing rows whose keys conflict.
+`on_conflict="replace"` applies DuckDB's native `INSERT OR REPLACE` semantics.
+Supply all required target columns for replacement, particularly NOT NULL
+columns, and test the table's constraints. The default plain INSERT continues
+to raise on conflicts. Conflict modes do not change transaction ownership.
+
 Structured write statements with RETURNING buffer their returned rows to provide
 an exact affected-row count for ORM version checks. Arrow RETURNING uses a materialized Arrow table; the bounded batch interface
 is intended for SELECT results.
@@ -85,6 +91,17 @@ the same connection. Attempts to fetch rows from that active result raise
 Ordinary tuple results are buffered when another statement runs before they
 are exhausted. That preserves their rows but can use substantial memory.
 Fetch failures propagate instead of turning into empty successful results.
+
+Arrow RETURNING uses the Arrow table's row count without constructing a
+Python tuple copy. Automatic Python-row inserts retain ordinary execution for
+SQL-side bind expressions and MAP columns (including lists of MAP), because
+replacing their compiled SQL with inferred Arrow can change values or fail
+casts. These batches favor correctness over the register optimization. Direct
+typed Arrow ingestion remains available for already-typed SQL values.
+
+Arrow inference checks original integer precision only in inferred floating
+columns. Integer/string columns avoid the redundant Python safety scan, while
+mixed integers/floats still decline lossy inference.
 
 ## Reflection
 
@@ -123,6 +140,22 @@ For large loads, COPY from Parquet can avoid Python value conversion entirely;
 see [analytical queries and COPY helpers](olap). CSV serialization honors
 single-character delimiter (`delim`, `delimiter` or `sep`), quote and escape
 options. Prefer typed Arrow/Parquet for binary, nested and exact decimal data.
+
+The [reviewed-contracts comparison](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/benchmarks/results/reviewed-contracts-2026-10-02.json)
+uses Python 3.14.0, DuckDB 1.5.5, SQLAlchemy 2.0.52 and Arrow 25.0.1 on the same
+host, with two warmups and five repeated samples per implementation:
+
+| Workload | Released baseline median (range) | Fixed median (range) |
+| --- | ---: | ---: |
+| Convert 50,000 mapping rows × 8 integer columns | 82.995 ms (78.268–85.645) | 38.639 ms (32.951–40.667) |
+| Arrow RETURNING, 100,000 rows × 2 columns | 67.327 ms (65.156–73.569) | 6.507 ms (6.225–6.685) |
+
+These are 53.4% and 90.3% elapsed-time reductions for the measured workloads.
+RETURNING Python peak allocation fell from 17,278,562 to 4,876 bytes.
+Conversion excludes input-row construction. Count, boundary values and full
+Arrow-table equality were verified. `tracemalloc` excludes native DuckDB/Arrow allocations, so this is not
+a process-memory or general throughput claim. Raw samples and variation are in
+the linked JSON.
 
 ## Profiling and query tags
 

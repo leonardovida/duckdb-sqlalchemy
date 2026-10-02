@@ -184,11 +184,44 @@ def copy_to_parquet(
 
 def _close_and_unlink_tempfile(tmp: Any) -> None:
     path = tmp.name
+    errors = []
     try:
         tmp.flush()
-    finally:
+    except BaseException as error:
+        errors.append(error)
+    try:
         tmp.close()
-    Path(path).unlink(missing_ok=True)
+    except BaseException as error:
+        errors.append(error)
+    try:
+        Path(path).unlink(missing_ok=True)
+    except BaseException as error:
+        errors.append(error)
+    _raise_cleanup_errors(errors)
+
+
+def _raise_cleanup_errors(errors: Sequence[BaseException]) -> None:
+    if not errors:
+        return
+    primary = errors[0]
+    for secondary in errors[1:]:
+        add_note = getattr(primary, "add_note", None)
+        if callable(add_note):
+            add_note(f"Additional temporary-file cleanup error: {secondary!r}")
+    raise primary
+
+
+def _report_unlink_error(
+    path: Union[str, Path], primary: Optional[BaseException]
+) -> None:
+    try:
+        Path(path).unlink(missing_ok=True)
+    except BaseException as error:
+        if primary is None:
+            raise
+        add_note = getattr(primary, "add_note", None)
+        if callable(add_note):
+            add_note(f"Temporary-file unlink failed: {error!r}")
 
 
 _BINARY_TYPES = (bytes, bytearray, memoryview)
@@ -283,22 +316,40 @@ def _copy_rows_as_csv_chunks(
         tmp = tempfile.NamedTemporaryFile(
             "w", newline="", suffix=".csv", delete=False, encoding="utf-8"
         )
-        writer = csv.writer(
-            tmp,
-            lineterminator={"\\n": "\n", "\\r\\n": "\r\n", "\\r": "\r"}[
-                copy_options.get("new_line", "\\n")
-            ],
-            **_csv_writer_options(copy_options),
-        )
-        if include_header and columns:
-            writer.writerow(columns)
+        try:
+            writer = csv.writer(
+                tmp,
+                lineterminator={"\\n": "\n", "\\r\\n": "\r\n", "\\r": "\r"}[
+                    copy_options.get("new_line", "\\n")
+                ],
+                **_csv_writer_options(copy_options),
+            )
+            if include_header and columns:
+                writer.writerow(columns)
+        except BaseException as error:
+            try:
+                _close_and_unlink_tempfile(tmp)
+            except BaseException as cleanup_error:
+                add_note = getattr(error, "add_note", None)
+                if callable(add_note):
+                    add_note(f"Temporary-file cleanup failed: {cleanup_error!r}")
+            raise
         return tmp, writer, 0
 
     def flush_chunk(tmp: Any) -> None:
-        tmp.flush()
         path = tmp.name
-        tmp.close()
+        primary = None
         try:
+            errors = []
+            try:
+                tmp.flush()
+            except BaseException as error:
+                errors.append(error)
+            try:
+                tmp.close()
+            except BaseException as error:
+                errors.append(error)
+            _raise_cleanup_errors(errors)
             copy_from_csv(
                 connection,
                 table,
@@ -306,38 +357,59 @@ def _copy_rows_as_csv_chunks(
                 columns=columns if columns else None,
                 **copy_options,
             )
+        except BaseException as error:
+            primary = error
+            raise
         finally:
-            Path(path).unlink(missing_ok=True)
+            _report_unlink_error(path, primary)
 
     tmp = None
     writer = None
     count = 0
+    primary = None
 
     try:
         for row in rows:
             if tmp is None or writer is None:
                 tmp, writer, count = open_writer()
             elif chunk_size and count >= chunk_size:
-                flush_chunk(tmp)
+                current_tmp = tmp
+                tmp = None
+                writer = None
+                flush_chunk(current_tmp)
                 tmp, writer, count = open_writer()
 
             writer.writerow([_csv_value(value, null_marker) for value in row])
             count += 1
 
         if tmp is not None and count:
-            flush_chunk(tmp)
+            current_tmp = tmp
             tmp = None
+            writer = None
+            flush_chunk(current_tmp)
+    except BaseException as error:
+        primary = error
+        raise
     finally:
-        if tmp is not None and not tmp.closed:
-            _close_and_unlink_tempfile(tmp)
+        if tmp is not None:
+            try:
+                _close_and_unlink_tempfile(tmp)
+            except BaseException as cleanup_error:
+                if primary is None:
+                    raise
+                add_note = getattr(primary, "add_note", None)
+                if callable(add_note):
+                    add_note(f"Temporary-file cleanup failed: {cleanup_error!r}")
 
 
 def _copy_rows_as_sequences(
     first: Union[Mapping[str, Any], Sequence[Any]],
     rows: Iterable[Union[Mapping[str, Any], Sequence[Any]]],
     columns: Optional[Sequence[str]],
+    *,
+    strict: bool = False,
 ) -> Tuple[Iterable[Sequence[Any]], Optional[Sequence[str]]]:
-    return rows_as_sequences(first, rows, columns)
+    return rows_as_sequences(first, rows, columns, strict=strict)
 
 
 def copy_from_parquet(
@@ -403,8 +475,11 @@ def copy_from_rows(
     columns: Optional[Sequence[str]] = None,
     chunk_size: int = 100000,
     include_header: bool = False,
+    strict: bool = False,
     **copy_options: Any,
 ) -> Any:
+    if not isinstance(strict, bool):
+        raise TypeError("strict must be a boolean")
     normalized_options: Dict[str, Any] = {}
     for key, value in copy_options.items():
         normalized = str(key).lower()
@@ -445,7 +520,9 @@ def copy_from_rows(
     null_marker, copy_options = _resolve_null_marker(copy_options)
     copy_options = {"header": header, **copy_options}
 
-    chunked_rows, columns = _copy_rows_as_sequences(first, iterator, columns)
+    chunked_rows, columns = _copy_rows_as_sequences(
+        first, iterator, columns, strict=strict
+    )
     if header and columns is None:
         raise ValueError(
             "copy_from_rows header mode requires columns for sequence rows"
@@ -469,6 +546,7 @@ def insert_from_arrow(
     data: Any,
     *,
     columns: Optional[Sequence[str]] = None,
+    on_conflict: Optional[str] = None,
 ) -> Any:
     """Insert an Arrow Table, RecordBatch or RecordBatchReader without row conversion.
 
@@ -477,6 +555,9 @@ def insert_from_arrow(
     values because SQLAlchemy bind processors are not applied.
     """
     import pyarrow as pa
+
+    if on_conflict not in (None, "ignore", "replace"):
+        raise ValueError("on_conflict must be None, 'ignore' or 'replace'")
 
     if getattr(getattr(connection, "dialect", None), "name", None) != "duckdb":
         raise ValueError("insert_from_arrow requires a DuckDB SQLAlchemy connection")
@@ -501,8 +582,9 @@ def insert_from_arrow(
     dbapi_connection = connection.connection.dbapi_connection
     dbapi_connection.register(view_name, data)
     try:
+        insert = "INSERT" if on_conflict is None else f"INSERT OR {on_conflict.upper()}"
         result = connection.exec_driver_sql(
-            f"INSERT INTO {target} ({targets}) SELECT {sources} FROM {view_name}"
+            f"{insert} INTO {target} ({targets}) SELECT {sources} FROM {view_name}"
         )
     except BaseException:
         try:

@@ -380,6 +380,9 @@ installed, otherwise a pandas DataFrame (integer columns with NULLs use nullable
 `executemany`. The bulk-register path is skipped when `RETURNING` or
 `ON CONFLICT` is in use.
 
+SQL-side bind expressions and MAP/list-of-MAP columns also retain ordinary
+execution so the batch size cannot change their values or conversion behavior.
+
 On SQLAlchemy 2.x you can also tune multi-row INSERT batching with
 `insertmanyvalues_page_size` (defaults to 1000). The older
 `duckdb_insertmanyvalues_page_size` alias still works but is deprecated.
@@ -412,6 +415,13 @@ rows = ({"id": i, "name": f"user-{i}"} for i in range(1_000_000))
 with engine.begin() as conn:
     copy_from_rows(conn, "users", rows, columns=["id", "name"], chunk_size=100_000)
 ```
+
+Missing mapping keys become NULL by default, preserving sparse-row behavior.
+Use `strict=True` to require every selected key in every mapping row. A missing
+key raises `ValueError` identifying the zero-based row index and column name.
+Explicit `None` is still valid. Earlier chunks belong to the caller's transaction,
+so roll back the transaction if a later row fails validation. Temporary CSV files
+are closed and removed on success or failure, including header/flush failures.
 
 ## Export a query to Parquet
 

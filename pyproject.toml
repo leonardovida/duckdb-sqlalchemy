@@ -41,6 +41,8 @@ repository = "https://github.com/leonardovida/duckdb-sqlalchemy"
 Upstream = "https://github.com/Mause/duckdb_engine"
 
 [project.optional-dependencies]
+arrow = ["pyarrow>=22.0.0"]
+pandas = ["pandas>=2.2"]
 dev = [
     "numpy>=1.26,<3.0; python_version < '3.13'",
     "numpy>=2.0,<3.0; python_version >= '3.13'",

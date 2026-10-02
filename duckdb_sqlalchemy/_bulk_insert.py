@@ -4,7 +4,7 @@ import importlib.util
 import math
 from functools import lru_cache
 from numbers import Integral, Real
-from typing import Any, Optional, Sequence, cast
+from typing import Any, Mapping, Optional, Sequence, cast
 
 from ._row_shape import infer_mapping_column_keys, rows_use_mapping_shape
 
@@ -25,22 +25,27 @@ def _is_integer(value: Any) -> bool:
 
 
 def _has_unsafe_numeric_coercion(
-    rows: Sequence[Any], column_names: Sequence[str]
+    rows: Sequence[Any],
+    column_names: Sequence[str],
+    floating_columns: Optional[Mapping[int, int]] = None,
 ) -> bool:
     mapping_rows = rows_use_mapping_shape(rows)
     for index, name in enumerate(column_names):
-        has_float = False
+        if floating_columns is not None and index not in floating_columns:
+            continue
+        limit = 2**53 if floating_columns is None else floating_columns[index]
+        has_float = floating_columns is not None
         has_large_integer = False
         for row in rows:
             value = row.get(name) if mapping_rows else row[index]
             if value is None or isinstance(value, (str, bytes, bool)):
                 continue
             if isinstance(value, int):
-                has_large_integer = has_large_integer or abs(value) > 2**53
+                has_large_integer = has_large_integer or abs(value) > limit
             elif isinstance(value, float):
                 has_float = True
             elif isinstance(value, Integral):
-                has_large_integer = has_large_integer or abs(int(value)) > 2**53
+                has_large_integer = has_large_integer or abs(int(value)) > limit
             elif isinstance(value, Real):
                 has_float = True
             if has_float and has_large_integer:
@@ -113,19 +118,36 @@ def build_bulk_insert_arrow_table(
         return None
 
     try:
-        if _has_unsafe_numeric_coercion(rows, column_names):
-            return None
         if rows_use_mapping_shape(rows):
             table = pa.Table.from_pylist(rows)
             if column_names:
-                return table.select(column_names)
-            return table
-        # Build each column separately instead of retaining a transposed copy
-        # of every cell alongside the Arrow arrays.
-        arrays = [
-            pa.array([row[index] for row in rows]) for index in range(len(column_names))
-        ]
-        return pa.Table.from_arrays(arrays, names=column_names)
+                table = table.select(column_names)
+        else:
+            # Do not retain a transposed copy of all cells.
+            arrays = [
+                pa.array([row[index] for row in rows])
+                for index in range(len(column_names))
+            ]
+            table = pa.Table.from_arrays(arrays, names=column_names)
+        floating_columns = {
+            index: 2
+            ** (
+                11
+                if pa.types.is_float16(field.type)
+                else 24
+                if pa.types.is_float32(field.type)
+                else 53
+            )
+            for index, field in enumerate(table.schema)
+            if pa.types.is_floating(field.type)
+        }
+        # Only floating inference can round an integer. Inspect its original
+        # values before accepting it, and leave safe int/string columns alone.
+        if floating_columns and _has_unsafe_numeric_coercion(
+            rows, column_names, floating_columns
+        ):
+            return None
+        return table
     except Exception:
         return None
 

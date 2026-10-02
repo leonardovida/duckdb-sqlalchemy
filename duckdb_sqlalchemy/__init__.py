@@ -93,7 +93,7 @@ from .bulk import (
 )
 from .capabilities import get_capabilities
 from .config import apply_config, get_core_config
-from .datatypes import ISCHEMA_NAMES, Map, Struct, register_extension_types
+from .datatypes import ISCHEMA_NAMES, FixedArray, Map, Struct, register_extension_types
 from .datatypes import Union as UnionType
 from .motherduck import (
     DIALECT_QUERY_KEYS,
@@ -381,8 +381,10 @@ _DUCKDB_RELATION_COMMENTS = """(
 )"""
 
 
-def _search_path_relation(entry: str, current_database: str) -> Tuple[str, str]:
-    parts = [part.strip().strip('"') for part in entry.strip().split(".", 1)]
+def _search_path_relation(
+    entry: str, current_database: str, preparer: IdentifierPreparer
+) -> Tuple[str, str]:
+    parts = preparer.unformat_identifiers(entry.strip())
     if len(parts) == 2:
         return parts[0], parts[1]
     return current_database, parts[0]
@@ -484,6 +486,14 @@ class ConnectionWrapper:
     def __getattr__(self, name: str) -> Any:
         if name in _RESULT_DISCARDING_CONNECTION_METHODS:
             self._buffer_pending_result()
+            method = getattr(self.__c, name)
+
+            def call_native(*args: Any, **kwargs: Any) -> Any:
+                self._buffer_pending_result()
+                self._count_statement()
+                return method(*args, **kwargs)
+
+            return call_native
         return getattr(self.__c, name)
 
     def close(self) -> None:
@@ -965,13 +975,14 @@ class DuckDBExecutionContext(_PGExecutionContext):
                     arrow_table = fetch_arrow()
                     self._duckdb_returning_arrow = arrow_table
                     cursor._store_buffered_result(
-                        zip(*(column.to_pylist() for column in arrow_table.columns)),
+                        (),
                         cursor.description,
                         arrow_table.num_rows,
                     )
+                    self._rowcount = arrow_table.num_rows
                 else:
                     cursor._buffer_result()
-                self._rowcount = len(cursor._buffered_rows)
+                    self._rowcount = len(cursor._buffered_rows)
             cursor._dml_rowcount = self._rowcount
             cursor._result_consumed()
         result = super()._setup_result_proxy()
@@ -1168,6 +1179,8 @@ def _create_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
 
 
 def _drop_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
+    if target.info.get("_duckdb_preserve_implicit_sequence"):
+        return
     _execute_implicit_sequence_ddl(target, connection, "DROP SEQUENCE IF EXISTS")
 
 
@@ -1178,7 +1191,11 @@ event.listen(sa_schema.Table, "after_drop", _drop_implicit_sequences)
 class DuckDBDDLCompiler(PGDDLCompiler):
     def get_column_specification(self, column: Any, **kwargs: Any) -> str:
         if not _column_needs_implicit_sequence(column):
-            return super().get_column_specification(column, **kwargs)
+            # PostgreSQL renders SERIAL for reflected sequence-backed keys,
+            # even when a server default is present. DuckDB has no SERIAL.
+            from sqlalchemy.sql.compiler import DDLCompiler
+
+            return DDLCompiler.get_column_specification(self, column, **kwargs)
         colspec = self.preparer.format_column(column)
         colspec += " " + self.dialect.type_compiler_instance.process(
             column.type, type_expression=column
@@ -1812,8 +1829,8 @@ class Dialect(PGDialect_psycopg2):
         # search_path entries may name another database ("db2.main");
         # unqualified entries refer to the current database.
         search_entries = [
-            _search_path_relation(entry, current_database)
-            for entry in str(search_path_setting or "").split(",")
+            _search_path_relation(entry, current_database, self.identifier_preparer)
+            for entry in self._split_duckdb_list(str(search_path_setting or ""))
             if entry.strip()
         ]
         search_entries.extend(
@@ -2145,6 +2162,8 @@ class Dialect(PGDialect_psycopg2):
                 member_type, None, {}, type_description=type_description
             )
             item_type = getattr(reflected, "item_type", reflected)
+            while hasattr(item_type, "item_type"):
+                item_type = item_type.item_type
             if isinstance(item_type, sqltypes.Enum):
                 return sqltypes.NULLTYPE
             return reflected
@@ -2280,12 +2299,13 @@ class Dialect(PGDialect_psycopg2):
         type_description: str,
     ) -> Any:
         normalized = data_type.strip()
-        dimensions = 0
+        array_sizes: List[Optional[int]] = []
         while True:
             match = re.search(r"\[[0-9]*\]$", normalized)
             if match is None:
                 break
-            dimensions += 1
+            size = match.group()[1:-1]
+            array_sizes.append(int(size) if size else None)
             normalized = normalized[: match.start()].strip()
 
         upper = normalized.upper()
@@ -2328,10 +2348,18 @@ class Dialect(PGDialect_psycopg2):
                 type_description=type_description,
             )
 
-        if dimensions:
+        if array_sizes:
             if reflected == sqltypes.NULLTYPE:
                 return sqltypes.NULLTYPE
-            return sqltypes.ARRAY(reflected, dimensions=dimensions)
+            for size in reversed(array_sizes):
+                if size is not None:
+                    reflected = FixedArray(reflected, size)
+                elif isinstance(reflected, sqltypes.ARRAY):
+                    reflected = sqltypes.ARRAY(
+                        reflected.item_type, dimensions=(reflected.dimensions or 1) + 1
+                    )
+                else:
+                    reflected = sqltypes.ARRAY(reflected, dimensions=1)
         return reflected
 
     def _duckdb_columns_from_rows(
@@ -2900,6 +2928,22 @@ class Dialect(PGDialect_psycopg2):
         # unless the mapping is unambiguous; normal executemany handles these.
         if any(key not in table.c or table.c[key].name != key for key in column_names):
             return None
+        for name in column_names:
+            type_impl = table.c[name].type.dialect_impl(self)
+            if type_impl._has_bind_expression:
+                return None
+            while isinstance(
+                type_impl, (sqltypes.TypeDecorator, sqltypes.ARRAY, FixedArray)
+            ):
+                type_impl = (
+                    type_impl.impl
+                    if isinstance(type_impl, sqltypes.TypeDecorator)
+                    else type_impl.item_type.dialect_impl(self)
+                )
+            # The DBAPI representation of a MAP is a key/value dictionary.
+            # Inferred Arrow data treats it as STRUCT, not MAP.
+            if isinstance(type_impl, Map):
+                return None
         return column_names
 
     def _reaches_copy_threshold(self, context: Any, parameters: Sequence[Any]) -> bool:
