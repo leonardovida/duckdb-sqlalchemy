@@ -41,7 +41,11 @@ MUTATING_STATEMENT_PATTERN = re.compile(
 )
 # Functions with side effects that a read-shaped statement can still call:
 # sequence advancement and MotherDuck md_* functions such as md_run_job().
-SIDE_EFFECT_FUNCTION_PATTERN = re.compile(r"\b(?:nextval|setval|md_\w*)\"?\s*\(")
+SIDE_EFFECT_FUNCTION_PATTERN = re.compile(
+    r"\b(?:nextval|setval|md_\w*)\"?"
+    r"(?:\s|/\*.*?\*/|--[^\n]*(?:\n|$))*\(",
+    re.DOTALL,
+)
 
 
 def _strip_leading_sql_comments(statement: str) -> str:
