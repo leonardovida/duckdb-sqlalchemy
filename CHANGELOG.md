@@ -8,7 +8,29 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
-- Prevent transient retries from replaying sequence and MotherDuck function calls when SQL comments separate the function name from its arguments.
+## [1.5.5.14](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.13...v1.5.5.14) (2026-10-02)
+
+### Highlights
+
+- Prevent transient retries from replaying sequence or MotherDuck function calls when comments separate the function name from its arguments. [#187](https://github.com/leonardovida/duckdb-sqlalchemy/pull/187)
+
+### Bug Fixes
+
+- Commented `nextval`, `setval`, and `md_*` calls now execute once and preserve the original failure. Ordinary commented reads remain eligible for retries. The guard stops at comment openers to avoid repeated scanning of long comments. [#187](https://github.com/leonardovida/duckdb-sqlalchemy/pull/187)
+
+### Maintenance
+
+- Record the previous release's publication evidence and clarify its upgrade guidance. [#185](https://github.com/leonardovida/duckdb-sqlalchemy/pull/185) [#186](https://github.com/leonardovida/duckdb-sqlalchemy/pull/186)
+
+### Compatibility
+
+- Python 3.10+, DuckDB 1.3.0+ and existing SQLAlchemy version requirements are unchanged. Sensitive names followed by comments conservatively disable retries even when the occurrence is ambiguous. [#187](https://github.com/leonardovida/duckdb-sqlalchemy/pull/187)
+
+### Verification
+
+- Reproduced repeated sequence advancement on the published 1.5.5.13 wheel. The fixed source passes 555 tests, 29 focused current/floor checks, pre-commit, types, build, strict Twine and an isolated wheel reproduction. [#187](https://github.com/leonardovida/duckdb-sqlalchemy/pull/187)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.13...v1.5.5.14
 
 ## [1.5.5.13](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.12...v1.5.5.13) (2026-09-30)
 
