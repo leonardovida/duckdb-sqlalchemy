@@ -4,7 +4,7 @@ import importlib.util
 import math
 from functools import lru_cache
 from numbers import Integral, Real
-from typing import Any, Mapping, Optional, Sequence, cast
+from typing import Any, Iterable, Mapping, Optional, Sequence, cast
 
 from ._row_shape import infer_mapping_column_keys, rows_use_mapping_shape
 
@@ -53,6 +53,32 @@ def _has_unsafe_numeric_coercion(
     return False
 
 
+def _has_unsafe_nested_numeric_coercion(values: Iterable[Any]) -> bool:
+    """Track precision per nested field (list elements share one field)."""
+    integers: dict[tuple[Any, ...], int] = {}
+    limits: dict[tuple[Any, ...], int] = {}
+
+    def visit(value: Any, path: tuple[Any, ...]) -> bool:
+        if isinstance(value, Mapping):
+            return any(visit(item, (*path, key)) for key, item in value.items())
+        if isinstance(value, (list, tuple)) or (
+            not isinstance(value, (str, bytes, bytearray, memoryview))
+            and getattr(value, "ndim", 0) > 0
+        ):
+            return any(visit(item, (*path, None)) for item in value)
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, Integral):
+            integers[path] = max(integers.get(path, 0), abs(int(value)))
+        elif isinstance(value, Real):
+            width = getattr(getattr(value, "dtype", None), "itemsize", 8)
+            limit = 2 ** (11 if width == 2 else 24 if width == 4 else 53)
+            limits[path] = min(limits.get(path, limit), limit)
+        return path in limits and integers.get(path, 0) > limits[path]
+
+    return any(visit(value, ()) for value in values)
+
+
 def _restore_nullable_integers(
     pd: Any, frame: Any, rows: Sequence[Any], column_names: Sequence[str]
 ) -> None:
@@ -83,6 +109,12 @@ def build_bulk_insert_dataframe(
         mapping_rows = rows_use_mapping_shape(rows)
         for index, name in enumerate(column_names):
             values = [row.get(name) if mapping_rows else row[index] for row in rows]
+            if any(
+                isinstance(value, (Mapping, list, tuple))
+                or getattr(value, "ndim", 0) > 0
+                for value in values
+            ) and _has_unsafe_nested_numeric_coercion(values):
+                return None
             # DuckDB's pandas scan treats NaN as NULL. Ordinary bindings
             # preserve NaN, so this batch must keep the ordinary insert path.
             if any(
@@ -141,6 +173,13 @@ def build_bulk_insert_arrow_table(
             for index, field in enumerate(table.schema)
             if pa.types.is_floating(field.type)
         }
+        mapping_rows = rows_use_mapping_shape(rows)
+        for index, field in enumerate(table.schema):
+            if pa.types.is_nested(field.type) and _has_unsafe_nested_numeric_coercion(
+                row.get(column_names[index]) if mapping_rows else row[index]
+                for row in rows
+            ):
+                return None
         # Only floating inference can round an integer. Inspect its original
         # values before accepting it, and leave safe int/string columns alone.
         if floating_columns and _has_unsafe_numeric_coercion(

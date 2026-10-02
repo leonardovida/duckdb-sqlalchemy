@@ -101,7 +101,8 @@ typed Arrow ingestion remains available for already-typed SQL values.
 
 Arrow inference checks original integer precision only in inferred floating
 columns. Integer/string columns avoid the redundant Python safety scan, while
-mixed integers/floats still decline lossy inference.
+mixed integers/floats still decline lossy inference. Nested numeric fields are
+checked as well, including the pandas fallback.
 
 ## Reflection
 

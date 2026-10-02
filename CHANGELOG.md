@@ -8,13 +8,42 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
-- Preserve SQL-side bind transformations and MAP/list-of-MAP values above the bulk threshold.
-- Prevent retry rollback from discarding raw-driver writes and decline retries for opaque query functions.
-- Preserve implicit sequences during reflected/model/offline Alembic batch recreation and avoid unsupported SERIAL DDL.
-- Preserve quoted catalog search paths and fixed-size array shapes with `FixedArray` reflection and migration rendering.
-- Close and remove CSV temporary files after failures, preserving the primary error. Add opt-in `copy_from_rows(strict=True)` mapping validation.
-- Add native conflict modes to typed Arrow ingestion and optional `arrow`/`pandas` installation extras with a hosted floor check.
-- Avoid redundant numeric scans for non-floating Arrow columns and Python tuple copies for Arrow RETURNING. Record comparable measured improvements and their limits.
+## [1.5.5.15](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.14...v1.5.5.15) (2026-10-02)
+
+### Highlights
+
+- Preserve values, transaction writes and generated IDs across bulk inserts, retries and migrations. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
+
+### Features
+
+- Model and reflect fixed-size arrays with `FixedArray`, including nested shapes, cache identity and Alembic rendering. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
+- Add opt-in strict CSV mapping validation and native Arrow ignore/replace conflict modes. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
+
+### Bug Fixes
+
+- Keep SQL-side bind expressions and MAP values on their correct insertion path regardless of batch size. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
+- Preserve large integers during nested STRUCT inference and retain Python list results for fixed arrays. [#190](https://github.com/leonardovida/duckdb-sqlalchemy/pull/190)
+- Prevent retries from discarding raw-driver writes or replaying side effects hidden in bound query SQL. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
+- Preserve sequences in reflected, model, offline and renamed-key Alembic batches, and avoid unsupported SERIAL DDL. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
+- Preserve quoted catalog paths and clean up temporary CSV files after failures without hiding the original error. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
+
+### Maintenance
+
+- Avoid unnecessary Arrow numeric scans and duplicate RETURNING tuple copies. The same-environment measured workloads improved 53.4% and 90.3% in elapsed time, with full result equality and recorded sample variation. These are workload-specific results. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
+
+### Tooling and Release
+
+- Add Arrow/pandas installation extras and a required optional-dependency floor CI lane while retaining existing distribution checks. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
+
+### Compatibility
+
+- Runtime version requirements are unchanged. Sparse CSV mappings retain their NULL default unless strict mode is selected. Fixed arrays now reflect as `FixedArray` rather than variable-length `ARRAY`, so update type checks when needed. Existing copies already created as LIST require an explicit migration to recover a fixed-size contract. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
+
+### Verification
+
+- The implementation passed 589 local tests, 82 optional-floor cases, all 30 hosted checks, and installed-wheel smokes. Release preparation passed 595 local tests and 88 optional-floor cases. The public 1.5.5.14 package failed 16 selected regressions that pass on the fix. Real MotherDuck credentialed coverage was unavailable. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.14...v1.5.5.15
 
 ## [1.5.5.14](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.13...v1.5.5.14) (2026-10-02)
 
