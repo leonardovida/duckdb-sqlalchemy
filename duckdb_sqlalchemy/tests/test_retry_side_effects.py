@@ -53,6 +53,11 @@ def test_side_effect_function_comments_disable_retries(
     assert not _is_idempotent_statement(f"SELECT {function}{separator}('ids')")
 
 
+def test_long_comment_with_repeated_side_effect_names_is_conservative() -> None:
+    statement = "SELECT 42 -- " + "nextval -- x " * 10000
+    assert not _is_idempotent_statement(statement)
+
+
 def test_commented_read_still_retries(
     engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
