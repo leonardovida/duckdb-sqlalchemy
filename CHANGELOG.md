@@ -22,7 +22,7 @@ preserved from the upstream project for historical context.
 ### Bug Fixes
 
 - Keep SQL-side bind expressions and MAP values on their correct insertion path regardless of batch size. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
-- Preserve large integers during nested STRUCT inference and retain Python list results for fixed arrays. [Release changes](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.14...v1.5.5.15)
+- Preserve large integers during nested STRUCT inference and retain Python list results for fixed arrays. [#190](https://github.com/leonardovida/duckdb-sqlalchemy/pull/190)
 - Prevent retries from discarding raw-driver writes or replaying side effects hidden in bound query SQL. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
 - Preserve sequences in reflected, model, offline and renamed-key Alembic batches, and avoid unsupported SERIAL DDL. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
 - Preserve quoted catalog paths and clean up temporary CSV files after failures without hiding the original error. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
@@ -41,7 +41,7 @@ preserved from the upstream project for historical context.
 
 ### Verification
 
-- The implementation passed 589 local tests, 82 optional-floor cases, all 30 hosted checks, and installed-wheel smokes. The public 1.5.5.14 package failed 16 selected regressions that pass on the fix. Real MotherDuck credentialed coverage was unavailable. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
+- The implementation passed 589 local tests, 82 optional-floor cases, all 30 hosted checks, and installed-wheel smokes. Release preparation passed 595 local tests and 88 optional-floor cases. The public 1.5.5.14 package failed 16 selected regressions that pass on the fix. Real MotherDuck credentialed coverage was unavailable. [#189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189)
 
 **Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.14...v1.5.5.15
 
