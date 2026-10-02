@@ -2929,21 +2929,21 @@ class Dialect(PGDialect_psycopg2):
         if any(key not in table.c or table.c[key].name != key for key in column_names):
             return None
         for name in column_names:
-            type_impl = table.c[name].type.dialect_impl(self)
-            if type_impl._has_bind_expression:
-                return None
-            while isinstance(
-                type_impl, (sqltypes.TypeDecorator, sqltypes.ARRAY, FixedArray)
-            ):
-                type_impl = (
-                    type_impl.impl
-                    if isinstance(type_impl, sqltypes.TypeDecorator)
-                    else type_impl.item_type.dialect_impl(self)
-                )
-            # The DBAPI representation of a MAP is a key/value dictionary.
-            # Inferred Arrow data treats it as STRUCT, not MAP.
-            if isinstance(type_impl, Map):
-                return None
+            pending = [table.c[name].type.dialect_impl(self)]
+            while pending:
+                type_impl = pending.pop()
+                if type_impl._has_bind_expression or isinstance(type_impl, Map):
+                    # Processed MAP key/value dictionaries infer as STRUCT.
+                    return None
+                if isinstance(type_impl, sqltypes.TypeDecorator):
+                    pending.append(type_impl.impl)
+                elif isinstance(type_impl, (sqltypes.ARRAY, FixedArray)):
+                    pending.append(type_impl.item_type.dialect_impl(self))
+                elif isinstance(type_impl, (Struct, UnionType)):
+                    pending.extend(
+                        member.dialect_impl(self)
+                        for _, member in type_impl._fields or ()
+                    )
         return column_names
 
     def _reaches_copy_threshold(self, context: Any, parameters: Sequence[Any]) -> bool:

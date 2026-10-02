@@ -40,3 +40,12 @@ A confirmed public bugfix qualifies for the established patch release flow.
 Main agent owns integration and final validation. One Luna delegate owns only
 CSV/row-shape implementation and its tests. Opus is stopped and will not be run
 again in this task. Worktree is isolated and the canonical checkout is preserved.
+
+## Implementation delivery
+
+[PR #189](https://github.com/leonardovida/duckdb-sqlalchemy/pull/189) merged as
+`d5323f72e260fad4fb9604dd36c45fceec138b67`, identical to the tested tree.
+All 30 hosted checks and exact-main workflows passed. Release preparation also
+closes nested STRUCT numeric inference and keeps fixed-array results as Python
+lists, preserving the prior SQLAlchemy ARRAY value convention. The automation
+continuity record retains final publication and immutable-artifact evidence.

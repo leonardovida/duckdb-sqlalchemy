@@ -216,7 +216,7 @@ def test_fixed_array_values_cache_and_indexing(engine: Any) -> None:
         table.create(connection)
         connection.execute(table.insert(), [{"v": [1, 2, 3]}, {"v": None}])
         assert connection.execute(select(table.c.v)).scalars().all() == [
-            (1, 2, 3),
+            [1, 2, 3],
             None,
         ]
         assert connection.execute(select(table.c.v[1])).scalars().all() == [1, None]
@@ -363,3 +363,42 @@ def test_fixed_array_alembic_render_and_comparison(engine: Any) -> None:
         existing.create_all(connection)
         assert compare_metadata(context, existing) == []
         assert compare_metadata(context, desired)[0][0][0] == "modify_type"
+
+
+@pytest.mark.parametrize("backend", ["ordinary", "arrow", "pandas"])
+@pytest.mark.parametrize("array", [False, True])
+def test_nested_numeric_precision_parity(
+    engine: Any, backend: str, array: bool
+) -> None:
+    import numpy as np
+    from sqlalchemy import BigInteger
+
+    from duckdb_sqlalchemy.datatypes import Struct
+
+    table = Table(
+        "precise_structs",
+        MetaData(),
+        Column("v", Struct({"n": ARRAY(BigInteger) if array else BigInteger})),
+    )
+    values = (
+        [np.array([2**53 + 1], dtype=np.int64), np.array([1.0])]
+        if array
+        else [2**53 + 1, 1.0]
+    )
+    with engine.begin() as connection:
+        table.create(connection)
+        with (
+            patch(
+                "duckdb_sqlalchemy._bulk_insert.build_bulk_insert_arrow_table",
+                return_value=None,
+            )
+            if backend == "pandas"
+            else nullcontext()
+        ):
+            connection.execution_options(
+                duckdb_copy_threshold=0 if backend == "ordinary" else 1
+            ).execute(table.insert(), [{"v": {"n": value}} for value in values])
+        assert connection.execute(select(table.c.v)).scalars().all() == [
+            {"n": [2**53 + 1] if array else 2**53 + 1},
+            {"n": [1] if array else 1},
+        ]

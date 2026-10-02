@@ -254,10 +254,10 @@ class FixedArray(sqltypes.Indexable, TypeEngine):
 
     def result_processor(self, dialect: Dialect, coltype: object) -> Any:
         processor = self.item_type.dialect_impl(dialect).result_processor(dialect, None)
-        if processor is None:
-            return None
         return lambda value: (
-            None if value is None else [processor(item) for item in value]
+            None
+            if value is None
+            else [processor(item) if processor is not None else item for item in value]
         )
 
 
