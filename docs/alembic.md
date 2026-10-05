@@ -106,6 +106,12 @@ def upgrade() -> None:
 DuckDB will not drop a table that another table's foreign key references, so
 batch mode fails for such a table. Declare its constraints when you create it.
 
+Batch recreation preserves an existing implicit primary-key sequence and its
+position, both with reflection and with `copy_from=your_table`. Copying explicit
+ids does not create a replacement sequence starting at 1. Offline batch scripts
+with `copy_from` retain the model's existing implicit sequence name. Reflected
+sequence-backed keys compile as INTEGER/BIGINT plus `nextval`, never SERIAL.
+
 ## Known limitations
 
 - **Dropping constraints by name.** DuckDB ignores the names in your DDL, so

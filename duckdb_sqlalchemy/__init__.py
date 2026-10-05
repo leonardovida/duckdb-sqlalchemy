@@ -1,4 +1,5 @@
 import decimal
+import json
 import os
 import re
 import sys
@@ -40,14 +41,20 @@ from sqlalchemy.dialects.postgresql.base import (
     PGDialect,
     PGIdentifierPreparer,
     PGInspector,
+    PGTypeCompiler,
 )
 from sqlalchemy.dialects.postgresql.psycopg2 import PGDialect_psycopg2
 from sqlalchemy.engine import processors
 from sqlalchemy.engine.default import DefaultDialect, DefaultExecutionContext
 from sqlalchemy.engine.interfaces import ExecuteStyle
-from sqlalchemy.engine.reflection import ObjectKind, ReflectionDefaults, cache
+from sqlalchemy.engine.reflection import (
+    ObjectKind,
+    ObjectScope,
+    ReflectionDefaults,
+    cache,
+)
 from sqlalchemy.engine.url import URL as SAURL
-from sqlalchemy.exc import NoSuchTableError
+from sqlalchemy.exc import CompileError, InvalidRequestError, NoSuchTableError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import bindparam
 from sqlalchemy.sql.compiler import IdentifierPreparer
@@ -72,13 +79,21 @@ from ._statements import (
     _is_aborted_transaction_error,
     _is_idempotent_statement,
     _is_transient_error,
+    _strip_leading_sql_comments,
+    _top_level_sql_words,
 )
 from ._supports import has_comment_support
 from ._validation import validate_extension_name
-from .bulk import copy_from_csv, copy_from_parquet, copy_from_rows, copy_to_parquet
+from .bulk import (
+    copy_from_csv,
+    copy_from_parquet,
+    copy_from_rows,
+    copy_to_parquet,
+    insert_from_arrow,
+)
 from .capabilities import get_capabilities
 from .config import apply_config, get_core_config
-from .datatypes import ISCHEMA_NAMES, Map, Struct, register_extension_types
+from .datatypes import ISCHEMA_NAMES, FixedArray, Map, Struct, register_extension_types
 from .datatypes import Union as UnionType
 from .motherduck import (
     DIALECT_QUERY_KEYS,
@@ -261,6 +276,7 @@ __all__ = [
     "copy_from_parquet",
     "copy_from_csv",
     "copy_from_rows",
+    "insert_from_arrow",
     "copy_to_parquet",
     "checkpoint",
 ]
@@ -347,6 +363,7 @@ _NATIVE_RESULT_FETCH_METHODS = frozenset(
         "pl",
         "tf",
         "to_arrow_table",
+        "to_arrow_reader",
         "torch",
     }
 )
@@ -354,18 +371,20 @@ _NATIVE_RESULT_FETCH_METHODS = frozenset(
 
 # Tables and views with their comments, as one relation for reflection queries.
 _DUCKDB_RELATION_COMMENTS = """(
-    SELECT database_name, schema_name, table_name, comment, internal,
+    SELECT database_name, schema_name, table_name, comment, internal, temporary,
         'table' AS relation_kind
     FROM duckdb_tables()
     UNION ALL BY NAME
-    SELECT database_name, schema_name, view_name AS table_name, comment, internal,
+    SELECT database_name, schema_name, view_name AS table_name, comment, internal, temporary,
         'view' AS relation_kind
     FROM duckdb_views()
 )"""
 
 
-def _search_path_relation(entry: str, current_database: str) -> Tuple[str, str]:
-    parts = [part.strip().strip('"') for part in entry.strip().split(".", 1)]
+def _search_path_relation(
+    entry: str, current_database: str, preparer: IdentifierPreparer
+) -> Tuple[str, str]:
+    parts = preparer.unformat_identifiers(entry.strip())
     if len(parts) == 2:
         return parts[0], parts[1]
     return current_database, parts[0]
@@ -429,9 +448,9 @@ class ConnectionWrapper:
         Results nothing references any more are skipped (weak reference).
         """
         pending = self._pending_cursor() if self._pending_cursor is not None else None
-        self._pending_cursor = None
         if pending is not None and pending is not requester:
             pending._buffer_result()
+        self._pending_cursor = None
 
     def begin(self) -> None:
         if not self.autocommit:
@@ -451,9 +470,14 @@ class ConnectionWrapper:
         # Rolling back ends the unit of work, and it runs on every pool
         # checkin; buffering here would download the rest of any partly read
         # result. Forget the pending cursor instead.
-        self._pending_cursor = None
-        self._transaction_statements = None
-        self.__c.rollback()
+        pending = self._pending_cursor() if self._pending_cursor is not None else None
+        try:
+            if pending is not None:
+                pending.close()
+        finally:
+            self._pending_cursor = None
+            self._transaction_statements = None
+            self.__c.rollback()
 
     def _count_statement(self) -> None:
         if self._transaction_statements is not None:
@@ -462,11 +486,25 @@ class ConnectionWrapper:
     def __getattr__(self, name: str) -> Any:
         if name in _RESULT_DISCARDING_CONNECTION_METHODS:
             self._buffer_pending_result()
+            method = getattr(self.__c, name)
+
+            def call_native(*args: Any, **kwargs: Any) -> Any:
+                self._buffer_pending_result()
+                self._count_statement()
+                return method(*args, **kwargs)
+
+            return call_native
         return getattr(self.__c, name)
 
     def close(self) -> None:
-        self.__c.close()
-        self.closed = True
+        pending = self._pending_cursor() if self._pending_cursor is not None else None
+        try:
+            if pending is not None:
+                pending.close()
+        finally:
+            self._pending_cursor = None
+            self.__c.close()
+            self.closed = True
 
 
 _REGISTER_NAME_KEYS = ("name", "view_name", "table")
@@ -536,18 +574,26 @@ class CursorWrapper:
         # Rows changed by the last INSERT/UPDATE/DELETE/MERGE, which DuckDB
         # reports as a "Count" result while its own rowcount stays -1.
         self._dml_rowcount: Optional[int] = None
+        self._is_dml_count = False
         # True once rows of the current result were read as Python tuples;
         # DuckDB then cannot return the rest of that result as Arrow.
         self._rows_fetched = False
+        self._native_reader_active = False
+        self._native_reader: Any = None
 
     def _clear_result(self) -> None:
         self.__c.execute("")
 
     def _before_execute(self) -> None:
+        if self._native_reader_active:
+            raise InvalidRequestError(
+                "Consume or close the Arrow batch reader before executing another statement"
+            )
         self.__connection_wrapper._buffer_pending_result(self)
         self._buffered_rows = None
         self._buffered_description = None
         self._dml_rowcount = None
+        self._is_dml_count = False
         self._rows_fetched = False
 
     def _capture_dml_rowcount(self, statement: str) -> bool:
@@ -556,17 +602,45 @@ class CursorWrapper:
         The count row stays readable, buffered like any other result. A
         RETURNING clause yields its own columns instead, so it is left alone.
         """
-        if not statement.startswith(_DML_ROWCOUNT_PREFIXES):
-            return False
-        description = self.description
+        description = getattr(self, "description", None)
         if not description or len(description) != 1 or description[0][0] != "Count":
+            return False
+        normalized = _strip_leading_sql_comments(statement)
+        match = re.match(
+            r"\s*(insert|update|delete|merge)\b", normalized, re.IGNORECASE
+        )
+        # Common generated DML has neither RETURNING nor separators. Avoid
+        # scanning every placeholder in a large multi-values INSERT.
+        if (
+            match is not None
+            and ";" not in normalized
+            and "returning" not in normalized.lower()
+            and statement.count("/*") <= 1
+        ):
+            operation = match.group(1).lower()
+        else:
+            words = _top_level_sql_words(statement)
+            if not words:
+                return False
+            operation = words[0]
+            if operation == "with":
+                operation = next(
+                    (
+                        word
+                        for word in words[1:]
+                        if word in (*_DML_ROWCOUNT_PREFIXES, "select")
+                    ),
+                    "",
+                )
+            if "returning" in words:
+                return False
+        if operation not in _DML_ROWCOUNT_PREFIXES:
             return False
         rows = self.__c.fetchall()
         if len(rows) == 1 and isinstance(rows[0][0], int):
             self._dml_rowcount = rows[0][0]
-        self._buffered_rows = deque(rows)
-        self._buffered_description = description
-        self._buffered_rowcount = -1
+        self._store_buffered_result(rows, description, -1)
+        self._is_dml_count = True
         return True
 
     def _after_execute(self) -> None:
@@ -575,12 +649,19 @@ class CursorWrapper:
 
     def _buffer_result(self) -> None:
         """Fetch this cursor's unread rows before another statement replaces them."""
+        if self._native_reader_active:
+            raise InvalidRequestError(
+                "Consume or close the Arrow batch reader before executing another statement"
+            )
         description = self.description
         rowcount = self.__c.rowcount
-        try:
-            rows = self.__c.fetchall()
-        except duckdb.Error:
-            rows = []
+        rows = self.__c.fetchall()
+        self._store_buffered_result(rows, description, rowcount)
+
+    def _store_buffered_result(
+        self, rows: Iterable[Tuple[Any, ...]], description: Any, rowcount: int
+    ) -> None:
+        """Keep buffered rows together with their original result metadata."""
         self._buffered_rows = deque(rows)
         self._buffered_description = description
         self._buffered_rowcount = rowcount
@@ -605,7 +686,11 @@ class CursorWrapper:
         self._before_execute()
         self.__connection_wrapper._count_statement()
         self.__c.executemany(statement, params)
-        self._after_execute()
+        if self._capture_dml_rowcount(statement):
+            # DuckDB exposes only the final count for executemany, not a total.
+            self._dml_rowcount = None
+        else:
+            self._after_execute()
 
     def execute(
         self,
@@ -647,8 +732,10 @@ class CursorWrapper:
         return self.__connection_wrapper
 
     def close(self) -> None:
-        # closing cursors is not supported in duckdb; just drop this cursor's rows
-        self._buffered_rows = None
+        if self._native_reader is not None:
+            self._native_reader.close()
+        # Preserve an exhausted result so an old cursor cannot read a new query.
+        self._store_buffered_result([], self.description, self.rowcount)
         self._result_consumed()
 
     @property
@@ -684,34 +771,68 @@ class CursorWrapper:
                 "before the result was consumed, so its remaining rows were "
                 "buffered as Python tuples"
             )
-        return getattr(self.__c, name)
+        method = getattr(self.__c, name)
+        if name not in _NATIVE_RESULT_FETCH_METHODS:
+            return method
+
+        def fetch_native(*args: Any, **kwargs: Any) -> Any:
+            if self._buffered_rows is not None:
+                raise NotImplementedError(
+                    "Native results are unavailable after buffering"
+                )
+            if self._native_reader_active:
+                raise InvalidRequestError(
+                    "An Arrow batch reader already owns this result"
+                )
+            value = method(*args, **kwargs)
+            self._rows_fetched = True
+            if hasattr(value, "read_next_batch"):
+                return value
+            if name != "fetch_df_chunk":
+                self._store_buffered_result([], self.description, self.rowcount)
+                self._result_consumed()
+            return value
+
+        return fetch_native
 
     def fetchone(self) -> Optional[Tuple[Any, ...]]:
+        if self._native_reader_active:
+            raise InvalidRequestError("An Arrow batch reader already owns this result")
         if self._buffered_rows is not None:
             return self._buffered_rows.popleft() if self._buffered_rows else None
         self._rows_fetched = True
         row = self.__c.fetchone()
         if row is None:
+            self._store_buffered_result([], self.description, self.__c.rowcount)
             self._result_consumed()
         return row
 
     def fetchall(self) -> List:
+        if self._native_reader_active:
+            raise InvalidRequestError("An Arrow batch reader already owns this result")
         if self._buffered_rows is not None:
             rows = list(self._buffered_rows)
             self._buffered_rows.clear()
             return rows
         self._rows_fetched = True
         rows = self.__c.fetchall()
+        self._store_buffered_result([], self.description, self.__c.rowcount)
         self._result_consumed()
         return rows
 
     def fetchmany(self, size: Optional[int] = None) -> List:
+        if self._native_reader_active:
+            raise InvalidRequestError("An Arrow batch reader already owns this result")
         count = self.arraysize if size is None else size
         if self._buffered_rows is not None:
             buffered = self._buffered_rows
             return [buffered.popleft() for _ in range(min(count, len(buffered)))]
         self._rows_fetched = True
-        return self.__c.fetchmany(count)
+        rows = self.__c.fetchmany(count)
+        if not rows and count != 0:
+            self._store_buffered_result([], self.description, self.__c.rowcount)
+            self._result_consumed()
+        return rows
 
 
 def _is_ignored_postgres_config_set(statement: str) -> bool:
@@ -825,11 +946,55 @@ class DuckDBExecutionContext(_PGExecutionContext):
         cursor = getattr(self, "cursor", None)
         if arraysize is not None and hasattr(cursor, "arraysize"):
             cursor.arraysize = arraysize
+        if (
+            cursor is not None
+            and getattr(cursor, "_is_dml_count", False)
+            and (self.isinsert or self.isupdate or self.isdelete)
+        ):
+            # Count is DuckDB's DML acknowledgement, not a RETURNING result.
+            # Preserve rowcount while following SQLAlchemy's non-row contract.
+            cursor._buffered_description = None
+            cursor._buffered_rows.clear()
+            cursor._result_consumed()
+        if (
+            cursor is not None
+            and not getattr(cursor, "_is_dml_count", False)
+            and (self.isinsert or self.isupdate or self.isdelete)
+            and getattr(self.compiled, "returning", None)
+        ):
+            # Native RETURNING rowcount is -1. Materialize its write result
+            # so ORM version checks can verify affected rows on SQLAlchemy 2.0.
+            returning_rows = getattr(self, "_insertmanyvalues_rows", None)
+            if returning_rows is not None:
+                self._rowcount = len(returning_rows)
+            else:
+                if self.execution_options.get("duckdb_arrow"):
+                    fetch_arrow = getattr(cursor, "to_arrow_table", None)
+                    if fetch_arrow is None:
+                        fetch_arrow = cursor.fetch_arrow_table
+                    arrow_table = fetch_arrow()
+                    self._duckdb_returning_arrow = arrow_table
+                    cursor._store_buffered_result(
+                        (),
+                        cursor.description,
+                        arrow_table.num_rows,
+                    )
+                    self._rowcount = arrow_table.num_rows
+                else:
+                    cursor._buffer_result()
+                    self._rowcount = len(cursor._buffered_rows)
+            cursor._dml_rowcount = self._rowcount
+            cursor._result_consumed()
         result = super()._setup_result_proxy()
         if self.execution_options.get("duckdb_arrow") and getattr(
             result, "returns_rows", False
         ):
-            return DuckDBArrowResult(result)
+            arrow_result = DuckDBArrowResult(result)
+            returning_arrow = getattr(self, "_duckdb_returning_arrow", None)
+            if returning_arrow is not None:
+                arrow_result._arrow = returning_arrow
+                result.close()
+            return arrow_result
         return result
 
 
@@ -930,14 +1095,35 @@ def _column_needs_implicit_sequence(column: Any) -> bool:
         return False
     if not column.primary_key or column is not table._autoincrement_column:
         return False
-    if getattr(column, "identity", None) is not None:
-        return False
     if column.default is not None and not (
         isinstance(column.default, sa_schema.Sequence) and column.default.optional
     ):
         return False
-    if column.server_default is not None:
+    if column.server_default is not None and not isinstance(
+        column.server_default, sa_schema.Identity
+    ):
         return False
+    identity = getattr(column, "identity", None)
+    if identity is not None and (
+        any(
+            getattr(identity, option, None) is not None
+            for option in ("start", "increment", "minvalue", "maxvalue", "cache")
+        )
+        or any(
+            getattr(identity, option, None)
+            for option in (
+                "always",
+                "nominvalue",
+                "nomaxvalue",
+                "cycle",
+                "order",
+                "on_null",
+            )
+        )
+    ):
+        raise CompileError(
+            "DuckDB cannot honor Identity options; use an explicit Sequence"
+        )
     return True
 
 
@@ -981,10 +1167,20 @@ def _execute_implicit_sequence_ddl(
 
 
 def _create_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
-    _execute_implicit_sequence_ddl(target, connection, "CREATE SEQUENCE IF NOT EXISTS")
+    temporary = any(
+        str(prefix).upper() in {"TEMP", "TEMPORARY"} for prefix in target._prefixes
+    )
+    statement = (
+        "CREATE TEMPORARY SEQUENCE IF NOT EXISTS"
+        if temporary
+        else "CREATE SEQUENCE IF NOT EXISTS"
+    )
+    _execute_implicit_sequence_ddl(target, connection, statement)
 
 
 def _drop_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
+    if target.info.get("_duckdb_preserve_implicit_sequence"):
+        return
     _execute_implicit_sequence_ddl(target, connection, "DROP SEQUENCE IF EXISTS")
 
 
@@ -995,7 +1191,11 @@ event.listen(sa_schema.Table, "after_drop", _drop_implicit_sequences)
 class DuckDBDDLCompiler(PGDDLCompiler):
     def get_column_specification(self, column: Any, **kwargs: Any) -> str:
         if not _column_needs_implicit_sequence(column):
-            return super().get_column_specification(column, **kwargs)
+            # PostgreSQL renders SERIAL for reflected sequence-backed keys,
+            # even when a server default is present. DuckDB has no SERIAL.
+            from sqlalchemy.sql.compiler import DDLCompiler
+
+            return DDLCompiler.get_column_specification(self, column, **kwargs)
         colspec = self.preparer.format_column(column)
         colspec += " " + self.dialect.type_compiler_instance.process(
             column.type, type_expression=column
@@ -1009,7 +1209,70 @@ class DuckDBDDLCompiler(PGDDLCompiler):
         return colspec
 
 
+class DuckDBTypeCompiler(PGTypeCompiler):
+    def visit_FLOAT(self, type_: Any, **kw: Any) -> str:
+        # Generic Float(None) must preserve Python's 64-bit float precision.
+        return (
+            "FLOAT"
+            if type_.precision is not None and type_.precision <= 24
+            else "DOUBLE"
+        )
+
+
+def _json_pointer(value: Any) -> str:
+    parts = value if isinstance(value, (tuple, list)) else (value,)
+    if not parts:
+        return "$"
+    if any(isinstance(part, int) and part < 0 for part in parts):
+        return "$" + "".join(
+            (f"[#{part}]" if part < 0 else f"[{part}]")
+            if isinstance(part, int)
+            else "." + json.dumps(str(part), ensure_ascii=False)
+            for part in parts
+        )
+    return "/" + "/".join(
+        str(part).replace("~", "~0").replace("/", "~1") for part in parts
+    )
+
+
+class DuckDBJSONIndex(sqltypes.JSON.JSONIndexType):
+    def bind_processor(self, dialect: Any) -> Any:
+        return _json_pointer
+
+    def literal_processor(self, dialect: Any) -> Any:
+        render = sqltypes.String().literal_processor(dialect)
+        return lambda value: render(_json_pointer(value))
+
+
+class DuckDBJSONPath(sqltypes.JSON.JSONPathType):
+    def bind_processor(self, dialect: Any) -> Any:
+        return _json_pointer
+
+    def literal_processor(self, dialect: Any) -> Any:
+        render = sqltypes.String().literal_processor(dialect)
+        return lambda value: render(_json_pointer(value))
+
+
 class DuckDBCompiler(PGCompiler):
+    def _json_extract(self, binary: Any, **kw: Any) -> str:
+        as_json = isinstance(binary.type, sqltypes.JSON)
+        function = "json_extract" if as_json else "json_extract_string"
+        expression = f"{function}({self.process(binary.left, **kw)}, {self.process(binary.right, **kw)})"
+        if as_json:
+            return expression
+        target_type = self.dialect.type_compiler_instance.process(binary.type)
+        return f"CAST({expression} AS {target_type})"
+
+    def visit_json_getitem_op_binary(
+        self, binary: Any, operator: Any, _cast_applied: bool = False, **kw: Any
+    ) -> str:
+        return self._json_extract(binary, **kw)
+
+    def visit_json_path_getitem_op_binary(
+        self, binary: Any, operator: Any, _cast_applied: bool = False, **kw: Any
+    ) -> str:
+        return self._json_extract(binary, **kw)
+
     # DuckDB's ``~`` operator is a full-string match (regexp_full_match) and it
     # has no ``~*``; regexp_matches() searches like PostgreSQL's ``~`` and takes
     # the flags as options.
@@ -1059,9 +1322,7 @@ class DuckDBNumeric(sqltypes.Numeric):
             return processors.to_float
         float_to_decimal = processors.to_decimal_processor_factory(
             decimal.Decimal,
-            self.scale
-            if self.scale is not None
-            else self._default_decimal_return_scale,
+            self._effective_decimal_return_scale,
         )
 
         def process(value: Any) -> Any:
@@ -1090,13 +1351,18 @@ class DuckDBNullType(sqltypes.NullType):
 class Dialect(PGDialect_psycopg2):
     name = "duckdb"
     driver = "duckdb_sqlalchemy"
+    type_compiler_cls = DuckDBTypeCompiler
+    supports_identity_columns = False
     _has_events = False
     supports_statement_cache = True
     # COMMENT ON exists in every supported DuckDB; initialize() re-checks, and
     # the class default covers DDL compiled without connecting (--sql mode)
     supports_comments = True
+    supports_constraint_comments = False
     # single-statement DML rowcount comes from DuckDB's "Count" result
     supports_sane_rowcount = True
+    supports_sane_multi_rowcount = False
+    supports_sane_rowcount_returning = True
     supports_server_side_cursors = False
     # duckdb binds and returns decimal.Decimal without going through float
     supports_native_decimal = True
@@ -1116,6 +1382,10 @@ class Dialect(PGDialect_psycopg2):
             sqltypes.Numeric: DuckDBNumeric,
             sqltypes.Float: DuckDBFloat,
             sqltypes.JSON: sqltypes.JSON,
+            sqltypes.JSON.JSONIndexType: DuckDBJSONIndex,
+            sqltypes.JSON.JSONIntIndexType: DuckDBJSONIndex,
+            sqltypes.JSON.JSONStrIndexType: DuckDBJSONIndex,
+            sqltypes.JSON.JSONPathType: DuckDBJSONPath,
             UUID: UUID,
         },
     )
@@ -1131,7 +1401,13 @@ class Dialect(PGDialect_psycopg2):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         kwargs["use_native_hstore"] = False
         super().__init__(*args, **kwargs)
+        self._backslash_escapes = False
         self._capabilities = get_capabilities(duckdb.__version__)
+
+    @classmethod
+    def load_provisioning(cls) -> None:
+        # The dialect lives in a package __init__, unlike built-in dialects.
+        from . import provision  # noqa: F401
 
     def initialize(self, connection: "Connection") -> None:
         _register_alembic_support()
@@ -1289,6 +1565,48 @@ class Dialect(PGDialect_psycopg2):
 
         quote = self.identifier_preparer.quote
         return [".".join(quote(identifier) for identifier in nspname) for nspname in rs]
+
+    @cache  # type: ignore[call-arg]
+    def has_sequence(
+        self,
+        connection: "Connection",
+        sequence_name: str,
+        schema: Optional[str] = None,
+        **kw: Any,
+    ) -> bool:
+        where, params = self._build_query_where(
+            schema_name=schema, default_to_current_schema=True
+        )
+        params["sequence_name"] = sequence_name
+        return (
+            connection.execute(
+                text(
+                    "SELECT 1 FROM duckdb_sequences() WHERE sequence_name = :sequence_name "
+                    + where
+                    + " LIMIT 1"
+                ),
+                params,
+            ).first()
+            is not None
+        )
+
+    @cache  # type: ignore[call-arg]
+    def get_sequence_names(
+        self, connection: "Connection", schema: Optional[str] = None, **kw: Any
+    ) -> List[str]:
+        where, params = self._build_query_where(
+            schema_name=schema, default_to_current_schema=True
+        )
+        return list(
+            connection.execute(
+                text(
+                    "SELECT sequence_name FROM duckdb_sequences() WHERE 1 = 1 "
+                    + where
+                    + " ORDER BY sequence_name"
+                ),
+                params,
+            ).scalars()
+        )
 
     def _build_query_where(
         self,
@@ -1511,8 +1829,8 @@ class Dialect(PGDialect_psycopg2):
         # search_path entries may name another database ("db2.main");
         # unqualified entries refer to the current database.
         search_entries = [
-            _search_path_relation(entry, current_database)
-            for entry in str(search_path_setting or "").split(",")
+            _search_path_relation(entry, current_database, self.identifier_preparer)
+            for entry in self._split_duckdb_list(str(search_path_setting or ""))
             if entry.strip()
         ]
         search_entries.extend(
@@ -1599,6 +1917,72 @@ class Dialect(PGDialect_psycopg2):
             for row in rows
         }
 
+    def _duckdb_relation_rows(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+        scope: Any = None,
+        kind: Any = None,
+    ) -> List[Dict[str, Any]]:
+        """Select kinds and scopes before resolving names that shadow each other."""
+        scope = ObjectScope.ANY if scope is None else scope
+        kind = ObjectKind.ANY if kind is None else kind
+        stmt, params = self._duckdb_reflection_stmt(
+            _DUCKDB_RELATION_COMMENTS,
+            "database_name, schema_name, table_name, comment, temporary, relation_kind",
+            schema=schema,
+            # Temporary relations belong to the temp catalog. A listing must
+            # include that catalog before applying the requested scope.
+            filter_names=[] if filter_names == [] else filter_names,
+            include_internal_filter=True,
+        )
+        sql = stmt.text
+        if schema is None and filter_names is None and ObjectScope.TEMPORARY in scope:
+            sql = sql.replace(
+                "AND database_name = current_database()\nAND schema_name = current_schema()",
+                "AND (temporary OR (database_name = current_database() "
+                "AND schema_name = current_schema()))",
+            )
+        if schema is not None and ObjectScope.DEFAULT not in scope:
+            database_name, schema_name = self.identifier_preparer._separate(schema)
+            if database_name is None:
+                sql = sql.replace(
+                    "AND database_name = (\n",
+                    "AND (temporary OR database_name = (\n",
+                ).replace("    LIMIT 1\n)\n", "    LIMIT 1\n))\n")
+        if ObjectScope.DEFAULT not in scope:
+            sql += "\nAND temporary"
+        elif ObjectScope.TEMPORARY not in scope:
+            sql += "\nAND NOT temporary"
+        kinds = []
+        if ObjectKind.TABLE in kind:
+            kinds.append("'table'")
+        if ObjectKind.VIEW in kind:
+            kinds.append("'view'")
+        sql += "\nAND relation_kind IN (" + ", ".join(kinds or ["NULL"]) + ")"
+        stmt = text(sql)
+        if params.get("filter_names"):
+            stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
+        return self._execute_visible_duckdb_relation_rows(
+            connection, stmt, params, schema
+        )
+
+    def _duckdb_relations(
+        self,
+        connection: "Connection",
+        schema: Optional[str] = None,
+        filter_names: Optional[Collection[str]] = None,
+        scope: Any = None,
+        kind: Any = None,
+    ) -> Dict[str, Tuple[str, str]]:
+        return {
+            row["table_name"]: (row["database_name"], row["schema_name"])
+            for row in self._duckdb_relation_rows(
+                connection, schema, filter_names, scope, kind
+            )
+        }
+
     def _duckdb_view_relations(
         self,
         connection: "Connection",
@@ -1647,7 +2031,7 @@ class Dialect(PGDialect_psycopg2):
                 "constraint_column_names, expression, referenced_table, "
                 "referenced_column_names"
             ),
-            schema=schema,
+            schema=None,
             filter_names=filter_names,
             suffix=(
                 "AND constraint_type = :constraint_type\n"
@@ -1778,6 +2162,8 @@ class Dialect(PGDialect_psycopg2):
                 member_type, None, {}, type_description=type_description
             )
             item_type = getattr(reflected, "item_type", reflected)
+            while hasattr(item_type, "item_type"):
+                item_type = item_type.item_type
             if isinstance(item_type, sqltypes.Enum):
                 return sqltypes.NULLTYPE
             return reflected
@@ -1913,12 +2299,13 @@ class Dialect(PGDialect_psycopg2):
         type_description: str,
     ) -> Any:
         normalized = data_type.strip()
-        dimensions = 0
+        array_sizes: List[Optional[int]] = []
         while True:
             match = re.search(r"\[[0-9]*\]$", normalized)
             if match is None:
                 break
-            dimensions += 1
+            size = match.group()[1:-1]
+            array_sizes.append(int(size) if size else None)
             normalized = normalized[: match.start()].strip()
 
         upper = normalized.upper()
@@ -1961,17 +2348,30 @@ class Dialect(PGDialect_psycopg2):
                 type_description=type_description,
             )
 
-        if dimensions:
+        if array_sizes:
             if reflected == sqltypes.NULLTYPE:
                 return sqltypes.NULLTYPE
-            return sqltypes.ARRAY(reflected, dimensions=dimensions)
+            for size in reversed(array_sizes):
+                if size is not None:
+                    reflected = FixedArray(reflected, size)
+                elif isinstance(reflected, sqltypes.ARRAY):
+                    reflected = sqltypes.ARRAY(
+                        reflected.item_type, dimensions=(reflected.dimensions or 1) + 1
+                    )
+                else:
+                    reflected = sqltypes.ARRAY(reflected, dimensions=1)
         return reflected
 
     def _duckdb_columns_from_rows(
         self, connection: "Connection", rows: Sequence[Dict[str, Any]]
     ) -> Dict[str, List[Dict[str, Any]]]:
         enum_rows = self._duckdb_enum_rows(
-            connection, [row["data_type_id"] for row in rows]
+            connection,
+            [
+                row["data_type_id"]
+                for row in rows
+                if row["data_type"].upper().startswith("ENUM")
+            ],
         )
         columns: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for row in rows:
@@ -1986,7 +2386,11 @@ class Dialect(PGDialect_psycopg2):
                     ),
                     "nullable": bool(row["is_nullable"]),
                     "default": row["column_default"],
-                    "autoincrement": False,
+                    "autoincrement": bool(
+                        re.match(
+                            r"^nextval\s*\(", row["column_default"] or "", re.IGNORECASE
+                        )
+                    ),
                     "comment": row["comment"],
                 }
             )
@@ -2018,8 +2422,8 @@ class Dialect(PGDialect_psycopg2):
         default_factory: Any,
         **kw: Any,
     ) -> Any:
-        scope = kw.pop("scope", None)
-        kind = kw.pop("kind", None)
+        scope = kw.pop("scope", ObjectScope.ANY)
+        kind = kw.pop("kind", ObjectKind.ANY)
         reflected = dict(
             get_multi(
                 connection,
@@ -2037,6 +2441,7 @@ class Dialect(PGDialect_psycopg2):
             return default_factory()
         raise NoSuchTableError(table_name)
 
+    @cache  # type: ignore[call-arg]
     def has_table(
         self,
         connection: "Connection",
@@ -2056,10 +2461,15 @@ class Dialect(PGDialect_psycopg2):
         schema: Optional[str] = None,
         **kw: Any,
     ) -> Iterable[Tuple[Tuple[Optional[str], str], bool]]:
-        # SQLAlchemy 2.1 create_all()/drop_all() check tables here; PostgreSQL's
-        # pg_catalog query would ignore the dialect's database scoping.
+        relations = (
+            self._duckdb_relations(
+                connection, schema, table_names, ObjectScope.ANY, ObjectKind.ANY
+            )
+            if table_names
+            else {}
+        )
         return [
-            ((schema, table_name), self.has_table(connection, table_name, schema))
+            ((schema, table_name), table_name in relations)
             for table_name in table_names
         ]
 
@@ -2098,9 +2508,9 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        tables = self._duckdb_tables(connection, schema, filter_names)
+        tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
         rows = self._duckdb_constraint_rows(
-            connection, "PRIMARY KEY", tables, schema, filter_names
+            connection, "PRIMARY KEY", tables, schema, list(tables)
         )
         constraints = {
             table_name: {
@@ -2141,18 +2551,34 @@ class Dialect(PGDialect_psycopg2):
         postgresql_ignore_search_path: bool = False,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        tables = self._duckdb_tables(connection, schema, filter_names)
+        tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
         rows = self._duckdb_constraint_rows(
-            connection, "FOREIGN KEY", tables, schema, filter_names
+            connection, "FOREIGN KEY", tables, schema, list(tables)
         )
-        # DuckDB only allows foreign keys within one schema, so the referred
-        # table is in the schema being reflected.
+        # DuckDB foreign keys stay within the resolved child's schema.
+        referred_schemas: Dict[str, Optional[str]] = {}
+        if rows and schema is None:
+            current_database, current_schema = connection.execute(
+                text("SELECT current_database(), current_schema()")
+            ).one()
+            quote = self.identifier_preparer.quote
+            for table_name, (database_name, schema_name) in tables.items():
+                referred_schemas[table_name] = (
+                    None
+                    if (database_name, schema_name)
+                    == (current_database, current_schema)
+                    else schema_name
+                    if database_name == current_database
+                    else f"{quote(database_name)}.{quote(schema_name)}"
+                )
         foreign_keys = {
             table_name: [
                 {
                     "name": row["constraint_name"],
                     "constrained_columns": list(row["constraint_column_names"]),
-                    "referred_schema": schema,
+                    "referred_schema": schema
+                    if schema is not None
+                    else referred_schemas.get(table_name),
                     "referred_table": row["referenced_table"],
                     "referred_columns": list(row["referenced_column_names"]),
                     "options": {},
@@ -2192,9 +2618,9 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        tables = self._duckdb_tables(connection, schema, filter_names)
+        tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
         rows = self._duckdb_constraint_rows(
-            connection, "UNIQUE", tables, schema, filter_names
+            connection, "UNIQUE", tables, schema, list(tables)
         )
         unique_constraints = {
             table_name: [
@@ -2237,9 +2663,9 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        tables = self._duckdb_tables(connection, schema, filter_names)
+        tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
         rows = self._duckdb_constraint_rows(
-            connection, "CHECK", tables, schema, filter_names
+            connection, "CHECK", tables, schema, list(tables)
         )
         check_constraints = {
             table_name: [
@@ -2256,6 +2682,7 @@ class Dialect(PGDialect_psycopg2):
             schema, tables, check_constraints, ReflectionDefaults.check_constraints
         )
 
+    @cache  # type: ignore[call-arg]
     def get_indexes(
         self,
         connection: "Connection",
@@ -2282,15 +2709,15 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        tables = self._duckdb_tables(connection, schema, filter_names)
+        tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
         stmt, params = self._duckdb_reflection_stmt(
             "duckdb_indexes()",
             (
                 "database_name, schema_name, table_name, index_name, "
                 "expressions, is_unique"
             ),
-            schema=schema,
-            filter_names=filter_names,
+            schema=None,
+            filter_names=list(tables),
             suffix="ORDER BY table_name, index_name",
         )
         indexes: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
@@ -2324,29 +2751,13 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        # PostgreSQL's pg_description query matches tables by name only, so a
-        # same-named table in another schema or database supplied the comment.
-        stmt, params = self._duckdb_reflection_stmt(
-            _DUCKDB_RELATION_COMMENTS,
-            "database_name, schema_name, table_name, comment, relation_kind",
-            schema=schema,
-            filter_names=filter_names,
-            include_internal_filter=True,
-            suffix="ORDER BY table_name",
-        )
-        rows = self._execute_visible_duckdb_relation_rows(
-            connection, stmt, params, schema
-        )
-        kinds = set()
-        if kind is None or ObjectKind.TABLE in kind:
-            kinds.add("table")
-        if kind is None or ObjectKind.VIEW in kind:
-            kinds.add("view")
-        schema_key = self._reflection_schema_key(schema)
+        rows = self._duckdb_relation_rows(connection, schema, filter_names, scope, kind)
         return [
-            ((schema_key, row["table_name"]), {"text": row["comment"]})
+            (
+                (self._reflection_schema_key(schema), row["table_name"]),
+                {"text": row["comment"]},
+            )
             for row in rows
-            if row["relation_kind"] in kinds
         ]
 
     @cache  # type: ignore[call-arg]
@@ -2409,6 +2820,7 @@ class Dialect(PGDialect_psycopg2):
             for row in connection.execute(text(sql), params).mappings()
         ]
 
+    @cache  # type: ignore[call-arg]
     def has_schema(self, connection: "Connection", schema: str, **kw: Any) -> bool:
         """Whether ``schema`` (``schema`` or ``database.schema``) exists."""
         database_name, schema_name = self.identifier_preparer._separate(schema)
@@ -2419,6 +2831,18 @@ class Dialect(PGDialect_psycopg2):
             params["database_name"] = database_name
         return connection.execute(text(sql + " LIMIT 1"), params).first() is not None
 
+    @cache  # type: ignore[call-arg]
+    def get_table_options(
+        self,
+        connection: "Connection",
+        table_name: str,
+        schema: Optional[str] = None,
+        **kw: Any,
+    ) -> Dict[str, Any]:
+        return self._get_single_reflection_result(
+            connection, table_name, schema, self.get_multi_table_options, dict, **kw
+        )
+
     def get_multi_table_options(
         self,
         connection: "Connection",
@@ -2428,8 +2852,8 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        table_names = self._duckdb_table_names(
-            connection, schema=schema, filter_names=filter_names
+        table_names = self._duckdb_relations(
+            connection, schema, filter_names, scope, kind
         )
         return self._iter_reflection_results(schema, table_names, {}, dict)
 
@@ -2504,6 +2928,22 @@ class Dialect(PGDialect_psycopg2):
         # unless the mapping is unambiguous; normal executemany handles these.
         if any(key not in table.c or table.c[key].name != key for key in column_names):
             return None
+        for name in column_names:
+            pending = [table.c[name].type.dialect_impl(self)]
+            while pending:
+                type_impl = pending.pop()
+                if type_impl._has_bind_expression or isinstance(type_impl, Map):
+                    # Processed MAP key/value dictionaries infer as STRUCT.
+                    return None
+                if isinstance(type_impl, sqltypes.TypeDecorator):
+                    pending.append(type_impl.impl)
+                elif isinstance(type_impl, (sqltypes.ARRAY, FixedArray)):
+                    pending.append(type_impl.item_type.dialect_impl(self))
+                elif isinstance(type_impl, (Struct, UnionType)):
+                    pending.extend(
+                        member.dialect_impl(self)
+                        for _, member in type_impl._fields or ()
+                    )
         return column_names
 
     def _reaches_copy_threshold(self, context: Any, parameters: Sequence[Any]) -> bool:
@@ -2522,11 +2962,20 @@ class Dialect(PGDialect_psycopg2):
         through a registered Arrow table or DataFrame instead.
         """
         parameters = context.parameters
-        return (
-            _has_bulk_insert_data_library()
-            and self._reaches_copy_threshold(context, parameters)
-            and self._bulk_insert_register_columns(context, parameters) is not None
-        )
+        if not _has_bulk_insert_data_library() or not self._reaches_copy_threshold(
+            context, parameters
+        ):
+            return False
+        columns = self._bulk_insert_register_columns(context, parameters)
+        if columns is None:
+            return False
+        data = _build_bulk_insert_data(parameters, columns)
+        if data is None:
+            return False
+        # Reuse the conversion in do_executemany; if conversion is unsafe,
+        # retain the normal batched VALUES path.
+        context._duckdb_bulk_data = data
+        return True
 
     def _bulk_insert_via_register(
         self,
@@ -2538,8 +2987,11 @@ class Dialect(PGDialect_psycopg2):
         if column_names is None:
             return False
         table = context.compiled.statement.table
-        rows = parameters if isinstance(parameters, list) else list(parameters)
-        data = _build_bulk_insert_data(rows, column_names)
+        data = getattr(context, "_duckdb_bulk_data", None)
+        if data is None:
+            data = _build_bulk_insert_data(parameters, column_names)
+        else:
+            del context._duckdb_bulk_data
         if data is None:
             return False
 
@@ -2709,26 +3161,26 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Any:
-        rows = self._duckdb_column_rows(
-            connection, schema=schema, filter_names=filter_names
+        relations = self._duckdb_relations(
+            connection, schema, filter_names, scope, kind
         )
-        include_tables = kind is None or ObjectKind.TABLE in kind
-        include_views = kind is None or ObjectKind.VIEW in kind
-        if not (include_tables or include_views):
-            # DuckDB has no materialized views
-            rows = []
-        elif not (include_tables and include_views):
-            # duckdb_columns() covers tables and views alike
-            views = self._duckdb_view_relations(connection, schema, filter_names)
-            rows = [
-                row
-                for row in rows
-                if (
-                    (row["database_name"], row["schema_name"], row["table_name"])
-                    in views
-                )
-                == include_views
-            ]
+        if not relations:
+            return iter(())
+        stmt, params = self._duckdb_reflection_stmt(
+            "duckdb_columns()",
+            "database_name, schema_name, table_name, column_name, column_default, "
+            "is_nullable, data_type, data_type_id, comment, column_index",
+            schema=None,
+            filter_names=list(relations),
+            include_internal_filter=True,
+            suffix="ORDER BY table_name, column_index",
+        )
+        rows = [
+            dict(row)
+            for row in connection.execute(stmt, params).mappings()
+            if relations.get(row["table_name"])
+            == (row["database_name"], row["schema_name"])
+        ]
         columns = self._duckdb_columns_from_rows(connection, rows)
         schema_key = self._reflection_schema_key(schema)
         return (

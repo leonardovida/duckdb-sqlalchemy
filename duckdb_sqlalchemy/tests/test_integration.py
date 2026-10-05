@@ -1,10 +1,10 @@
-import duckdb
+import os
+
 import pandas as pd
-from pytest import mark, raises
+from pytest import mark
 from sqlalchemy import __version__, text
 from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.base import Connection
-from sqlalchemy.exc import ProgrammingError
 
 df = pd.DataFrame([{"a": 1}])
 
@@ -23,24 +23,34 @@ def test_plain_register(conn: Connection) -> None:
     conn.execute(text("select * from test_df"))
 
 
-duckdb_version = duckdb.__version__
-
-
 @mark.remote_data
 @mark.skipif(
-    "dev" in duckdb_version, reason="md extension not available for dev builds"
-)
-@mark.skipif(
-    duckdb_version != "1.1.1", reason="md extension not available for this version"
+    not (os.getenv("MOTHERDUCK_TOKEN") or os.getenv("motherduck_token")),
+    reason="Set MOTHERDUCK_TOKEN to run real MotherDuck integration",
 )
 def test_motherduck() -> None:
-    engine = create_engine(
-        "duckdb:///md:motherdb",
-        connect_args={"config": {"motherduck_token": "motherduckdb_token"}},
-    )
+    from sqlalchemy import inspect
+    from sqlalchemy.pool import QueuePool
 
-    with raises(
-        ProgrammingError,
-        match="Jwt is not in the form of Header.Payload.Signature with two dots and 3 sections",
-    ):
-        engine.connect()
+    database = os.getenv("MOTHERDUCK_TEST_DATABASE", "")
+    engine = create_engine(
+        f"duckdb:///md:{database}",
+        poolclass=QueuePool,
+        pool_size=2,
+        max_overflow=0,
+    )
+    try:
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT 42")).scalar_one() == 42
+            assert connection.execute(text("SELECT current_database()")).scalar_one()
+            assert isinstance(inspect(connection).get_table_names(), list)
+            with (
+                connection.execution_options(duckdb_arrow=True)
+                .execute(text("SELECT i FROM range(5) AS t(i)"))
+                .batches(2) as reader
+            ):
+                assert sum(batch.num_rows for batch in reader) == 5
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT 43")).scalar_one() == 43
+    finally:
+        engine.dispose()

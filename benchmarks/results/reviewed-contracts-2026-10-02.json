@@ -1,0 +1,95 @@
+{
+  "versions": {
+    "python": "3.14.0",
+    "duckdb": "1.5.5",
+    "sqlalchemy": "2.0.52",
+    "arrow": "25.0.1"
+  },
+  "warmups": 2,
+  "samples": 5,
+  "conversion_50000x8": {
+    "baseline": {
+      "median_ms": 82.99541697488166,
+      "range_ms": [
+        78.26783397467807,
+        85.64487501280382
+      ],
+      "sd_ms": 2.9303390669842404,
+      "samples_ms": [
+        85.15933400485665,
+        78.26783397467807,
+        82.99541697488166,
+        82.40737501182593,
+        85.64487501280382
+      ]
+    },
+    "fixed": {
+      "median_ms": 38.63937500864267,
+      "range_ms": [
+        32.95120899565518,
+        40.66729100304656
+      ],
+      "sd_ms": 3.0099845085641124,
+      "samples_ms": [
+        38.63937500864267,
+        39.401167014148086,
+        40.66729100304656,
+        32.95120899565518,
+        36.64379200199619
+      ]
+    },
+    "reduction_percent": 53.443965441686046
+  },
+  "arrow_returning_100000x2": {
+    "baseline": {
+      "median_ms": 67.3266249941662,
+      "range_ms": [
+        65.15570799820125,
+        73.56891699600965
+      ],
+      "sd_ms": 4.162256058380721,
+      "python_peak_median_bytes": 17278562,
+      "python_peak_range_bytes": [
+        17278419,
+        17278570
+      ],
+      "samples_ms": [
+        73.56891699600965,
+        67.3266249941662,
+        65.7492500031367,
+        65.15570799820125,
+        73.50500000757165
+      ]
+    },
+    "fixed": {
+      "median_ms": 6.5065830131061375,
+      "range_ms": [
+        6.2245829903986305,
+        6.684708001557738
+      ],
+      "sd_ms": 0.16718902508274758,
+      "python_peak_median_bytes": 4876,
+      "python_peak_range_bytes": [
+        4673,
+        4985
+      ],
+      "samples_ms": [
+        6.467458006227389,
+        6.2245829903986305,
+        6.542749993968755,
+        6.684708001557738,
+        6.5065830131061375
+      ]
+    },
+    "time_reduction_percent": 90.33579506819193,
+    "python_peak_reduction_percent": 99.97178005901185
+  },
+  "limits": "Same interpreter/versions/data, 2 warmups and 5 repeated samples. Conversion excludes row construction. RETURNING uses identical statement and rollback per sample. Exact rowcount/boundary data checked. tracemalloc excludes native DuckDB/Arrow allocations, RSS not measured. No general workload throughput guarantee.",
+  "full_result_equivalence": {
+    "conversion_table_equals": true,
+    "returning_table_equals": true,
+    "returning_count": 100000
+  },
+  "baseline_sha": "2e18a806be6f9d8b2ef8c30eee9b0d5d06ce15e9",
+  "platform": "macOS-26.5.1-arm64-arm-64bit-Mach-O"
+}

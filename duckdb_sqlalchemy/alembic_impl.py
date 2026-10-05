@@ -8,17 +8,22 @@ no implementation class.
 """
 
 import re
-from typing import Any, Collection, Dict, List, Tuple
+from typing import Any, Collection, Dict, List, Optional, Tuple
 
 from alembic.autogenerate.render import _repr_type
 from alembic.ddl import impl as _alembic_impl
 from alembic.ddl.base import ColumnComment, format_column_name, format_table_name
 from alembic.ddl.impl import DefaultImpl
+from sqlalchemy import inspect, schema, text
 from sqlalchemy import types as sqltypes
 from sqlalchemy.ext.compiler import compiles
 
-from . import _strip_enclosing_parentheses
-from .datatypes import Map, Struct, Union
+from . import (
+    _column_needs_implicit_sequence,
+    _implicit_sequence_ddl_name,
+    _strip_enclosing_parentheses,
+)
+from .datatypes import FixedArray, Map, Struct, Union
 
 __all__ = ["DuckDBImpl"]
 
@@ -30,6 +35,64 @@ class DuckDBImpl(DefaultImpl):
 
     __dialect__ = "duckdb"
     transactional_ddl = True
+
+    def prep_table_for_batch(self, batch_impl: Any, table: Any) -> None:
+        new_table = batch_impl.new_table
+        implicit = [
+            column
+            for column in new_table.columns
+            if _column_needs_implicit_sequence(column)
+        ]
+        if not implicit:
+            return
+        # copy_from models do not carry reflected defaults. Reuse the actual
+        # sequence so copying explicit ids cannot reset its position.
+        if self.as_sql:
+            preparer = self.dialect.identifier_preparer
+            defaults = {
+                column.name: "nextval("
+                + self.dialect.statement_compiler(
+                    self.dialect, None
+                ).render_literal_value(
+                    _implicit_sequence_ddl_name(preparer, column), sqltypes.String()
+                )
+                + ")"
+                for column in table.columns
+                if _column_needs_implicit_sequence(column)
+            }
+        else:
+            inspector = inspect(self.connection)
+            assert inspector is not None
+            defaults = {
+                column["name"]: column["default"]
+                for column in inspector.get_columns(table.name, schema=table.schema)
+            }
+        source_names = {
+            column.name: name for name, column in batch_impl.columns.items()
+        }
+        for column in implicit:
+            default = defaults.get(source_names.get(column.name, column.name))
+            if default and default.lower().startswith("nextval("):
+                column.server_default = schema.DefaultClause(text(default))
+                preserved = getattr(self, "_preserved_batch_sequences", set())
+                preserved.add(table)
+                self._preserved_batch_sequences = preserved
+
+    def drop_table(self, table: Any, **kw: Any) -> None:
+        preserved = getattr(self, "_preserved_batch_sequences", set())
+        if table not in preserved:
+            return super().drop_table(table, **kw)
+        preserved.discard(table)
+        marker = "_duckdb_preserve_implicit_sequence"
+        previous = table.info.get(marker)
+        table.info[marker] = True
+        try:
+            super().drop_table(table, **kw)
+        finally:
+            if previous is None:
+                table.info.pop(marker, None)
+            else:
+                table.info[marker] = previous
 
     def compare_server_default(
         self,
@@ -55,19 +118,24 @@ class DuckDBImpl(DefaultImpl):
         # instead of querying, which would abort the migration transaction
         # on an error.
         boolean = isinstance(inspector_column.type, sqltypes.Boolean)
+        column_type = self.dialect.type_compiler_instance.process(inspector_column.type)
         return _normalize_default(
-            rendered_inspector_default, boolean
-        ) != _normalize_default(rendered_metadata_default, boolean)
+            rendered_inspector_default, boolean, column_type
+        ) != _normalize_default(rendered_metadata_default, boolean, column_type)
 
     def compare_type(self, inspector_column: Any, metadata_column: Any) -> bool:
         # Alembic compares type classes, so a STRUCT that gained a field
         # looks unchanged. Compare the DDL of nested types instead.
         inspector_type = inspector_column.type
         metadata_type = metadata_column.type
-        if _is_nested(inspector_type) and _is_nested(metadata_type):
+        if (
+            isinstance(inspector_type, FixedArray)
+            or isinstance(metadata_type, FixedArray)
+            or (_is_nested(inspector_type) and _is_nested(metadata_type))
+        ):
             compiler = self.dialect.type_compiler_instance
-            return re.sub(r"\s+", "", compiler.process(inspector_type)) != re.sub(
-                r"\s+", "", compiler.process(metadata_type)
+            return _normalize_sql_expression(compiler.process(inspector_type)) != (
+                _normalize_sql_expression(compiler.process(metadata_type))
             )
         return super().compare_type(inspector_column, metadata_column)
 
@@ -99,6 +167,10 @@ class DuckDBImpl(DefaultImpl):
     def render_type(self, type_obj: Any, autogen_context: Any) -> Any:
         # Alembic's default rendering uses repr(), which prints member types
         # as classes (<class 'sqlalchemy...Integer'>) inside these types.
+        if isinstance(type_obj, FixedArray):
+            autogen_context.imports.add("import duckdb_sqlalchemy.datatypes")
+            item = _repr_type(type_obj.item_type, autogen_context)
+            return f"duckdb_sqlalchemy.datatypes.FixedArray({item}, {type_obj.size})"
         if isinstance(type_obj, (Struct, Union, Map)):
             autogen_context.imports.add("import duckdb_sqlalchemy.datatypes")
             name = f"duckdb_sqlalchemy.datatypes.{type(type_obj).__name__}"
@@ -112,7 +184,7 @@ class DuckDBImpl(DefaultImpl):
             )
             return f"{name}({{{fields}}})"
         if isinstance(type_obj, sqltypes.ARRAY) and isinstance(
-            type_obj.item_type, (Struct, Union, Map)
+            type_obj.item_type, (Struct, Union, Map, FixedArray)
         ):
             item = _repr_type(type_obj.item_type, autogen_context)
             dimensions = (
@@ -122,35 +194,52 @@ class DuckDBImpl(DefaultImpl):
         return False
 
 
-_CAST_RE = re.compile(r"CAST\((.*) AS [\w\s(),]+\)", re.IGNORECASE | re.DOTALL)
+_CAST_RE = re.compile(r"CAST\((.*) AS ([\w\s(),]+)\)", re.IGNORECASE | re.DOTALL)
 # DuckDB stores x::VARCHAR as CAST(x AS VARCHAR)
-_SHORT_CAST_RE = re.compile(r"(.*?)\s*::\s*[\w\s(),]+", re.DOTALL)
+_SHORT_CAST_RE = re.compile(r"(.*?)\s*::\s*([\w\s(),]+)", re.DOTALL)
 _STRING_RE = re.compile(r"('(?:[^']|'')*')")
 _BOOLEAN_DEFAULTS = {"t": "true", "true": "true", "f": "false", "false": "false"}
 
 
-def _normalize_default(value: str, boolean: bool) -> str:
+def _normalize_sql_expression(value: str) -> str:
+    """Normalize SQL tokens while retaining quoted identifier/literal contents."""
+    parts = re.split(r"""('(?:[^']|'')*'|"(?:[^"]|"")*")""", value)
+    return "".join(
+        part if part.startswith(("'", '"')) else re.sub(r"\s+", "", part.lower())
+        for part in parts
+    )
+
+
+def _normalize_default(
+    value: str, boolean: bool, column_type: Optional[str] = None
+) -> str:
     value = _strip_enclosing_parentheses(str(value))
     match = _CAST_RE.fullmatch(value) or _SHORT_CAST_RE.fullmatch(value)
-    if match:
+    if match and (
+        column_type is None
+        or _normalize_sql_expression(match.group(2)).replace("decimal", "numeric")
+        == _normalize_sql_expression(column_type).replace("decimal", "numeric")
+    ):
+        # Casting to the column type is redundant at insertion. A cast to a
+        # different type can round or truncate first and must remain visible.
         value = _strip_enclosing_parentheses(match.group(1))
-    if _STRING_RE.fullmatch(value):
-        value = value[1:-1].replace("''", "'")
-    elif not boolean:
-        # SQL outside string literals (now(), 1 + 1) ignores case and spacing
-        value = "".join(
-            part if part.startswith("'") else re.sub(r"\s+", "", part.lower())
-            for part in _STRING_RE.split(value)
-        )
     if boolean:
-        value = _BOOLEAN_DEFAULTS.get(value.lower(), value)
-    return value
+        if _STRING_RE.fullmatch(value):
+            value = value[1:-1].replace("''", "'")
+        return _BOOLEAN_DEFAULTS.get(value.lower(), value)
+    # Numeric quoted literals are DuckDB's canonical spelling of numeric
+    # defaults. Other strings must stay quoted: '1+1' is not the expression 1+1.
+    if _STRING_RE.fullmatch(value) and re.fullmatch(
+        r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", value[1:-1]
+    ):
+        return value[1:-1]
+    return _normalize_sql_expression(value)
 
 
 def _is_nested(type_obj: Any) -> bool:
     if isinstance(type_obj, sqltypes.ARRAY):
         type_obj = type_obj.item_type
-    return isinstance(type_obj, (Struct, Union, Map))
+    return isinstance(type_obj, (Struct, Union, Map, FixedArray))
 
 
 def _column_names(columns: Collection[Any]) -> Tuple[str, ...]:

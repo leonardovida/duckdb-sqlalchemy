@@ -184,11 +184,44 @@ def copy_to_parquet(
 
 def _close_and_unlink_tempfile(tmp: Any) -> None:
     path = tmp.name
+    errors = []
     try:
         tmp.flush()
-    finally:
+    except BaseException as error:
+        errors.append(error)
+    try:
         tmp.close()
-    Path(path).unlink(missing_ok=True)
+    except BaseException as error:
+        errors.append(error)
+    try:
+        Path(path).unlink(missing_ok=True)
+    except BaseException as error:
+        errors.append(error)
+    _raise_cleanup_errors(errors)
+
+
+def _raise_cleanup_errors(errors: Sequence[BaseException]) -> None:
+    if not errors:
+        return
+    primary = errors[0]
+    for secondary in errors[1:]:
+        add_note = getattr(primary, "add_note", None)
+        if callable(add_note):
+            add_note(f"Additional temporary-file cleanup error: {secondary!r}")
+    raise primary
+
+
+def _report_unlink_error(
+    path: Union[str, Path], primary: Optional[BaseException]
+) -> None:
+    try:
+        Path(path).unlink(missing_ok=True)
+    except BaseException as error:
+        if primary is None:
+            raise
+        add_note = getattr(primary, "add_note", None)
+        if callable(add_note):
+            add_note(f"Temporary-file unlink failed: {error!r}")
 
 
 _BINARY_TYPES = (bytes, bytearray, memoryview)
@@ -243,6 +276,31 @@ def _csv_value(value: Any, null_marker: str) -> Any:
     return value
 
 
+def _csv_writer_options(options: Mapping[str, Any]) -> Dict[str, Any]:
+    normalized = {str(key).lower(): value for key, value in options.items()}
+    aliases = {
+        "delimiter": ("delim", "delimiter", "sep"),
+        "quotechar": ("quote",),
+        "escapechar": ("escape",),
+    }
+    writer_options: Dict[str, Any] = {}
+    for target, names in aliases.items():
+        supplied = [normalized[name] for name in names if name in normalized]
+        if len(supplied) > 1:
+            raise ValueError(f"Conflicting CSV options for {target}")
+        if supplied:
+            value = supplied[0]
+            if not isinstance(value, str) or len(value) != 1:
+                raise ValueError(f"copy_from_rows {names[0]} must be one character")
+            writer_options[target] = value
+    quote = writer_options.get("quotechar", '"')
+    escape = writer_options.pop("escapechar", quote)
+    writer_options["doublequote"] = escape == quote
+    if escape != quote:
+        writer_options["escapechar"] = escape
+    return writer_options
+
+
 def _copy_rows_as_csv_chunks(
     connection: Any,
     table: TableLike,
@@ -258,16 +316,40 @@ def _copy_rows_as_csv_chunks(
         tmp = tempfile.NamedTemporaryFile(
             "w", newline="", suffix=".csv", delete=False, encoding="utf-8"
         )
-        writer = csv.writer(tmp)
-        if include_header and columns:
-            writer.writerow(columns)
+        try:
+            writer = csv.writer(
+                tmp,
+                lineterminator={"\\n": "\n", "\\r\\n": "\r\n", "\\r": "\r"}[
+                    copy_options.get("new_line", "\\n")
+                ],
+                **_csv_writer_options(copy_options),
+            )
+            if include_header and columns:
+                writer.writerow(columns)
+        except BaseException as error:
+            try:
+                _close_and_unlink_tempfile(tmp)
+            except BaseException as cleanup_error:
+                add_note = getattr(error, "add_note", None)
+                if callable(add_note):
+                    add_note(f"Temporary-file cleanup failed: {cleanup_error!r}")
+            raise
         return tmp, writer, 0
 
     def flush_chunk(tmp: Any) -> None:
-        tmp.flush()
         path = tmp.name
-        tmp.close()
+        primary = None
         try:
+            errors = []
+            try:
+                tmp.flush()
+            except BaseException as error:
+                errors.append(error)
+            try:
+                tmp.close()
+            except BaseException as error:
+                errors.append(error)
+            _raise_cleanup_errors(errors)
             copy_from_csv(
                 connection,
                 table,
@@ -275,38 +357,59 @@ def _copy_rows_as_csv_chunks(
                 columns=columns if columns else None,
                 **copy_options,
             )
+        except BaseException as error:
+            primary = error
+            raise
         finally:
-            Path(path).unlink(missing_ok=True)
+            _report_unlink_error(path, primary)
 
     tmp = None
     writer = None
     count = 0
+    primary = None
 
     try:
         for row in rows:
             if tmp is None or writer is None:
                 tmp, writer, count = open_writer()
             elif chunk_size and count >= chunk_size:
-                flush_chunk(tmp)
+                current_tmp = tmp
+                tmp = None
+                writer = None
+                flush_chunk(current_tmp)
                 tmp, writer, count = open_writer()
 
             writer.writerow([_csv_value(value, null_marker) for value in row])
             count += 1
 
         if tmp is not None and count:
-            flush_chunk(tmp)
+            current_tmp = tmp
             tmp = None
+            writer = None
+            flush_chunk(current_tmp)
+    except BaseException as error:
+        primary = error
+        raise
     finally:
-        if tmp is not None and not tmp.closed:
-            _close_and_unlink_tempfile(tmp)
+        if tmp is not None:
+            try:
+                _close_and_unlink_tempfile(tmp)
+            except BaseException as cleanup_error:
+                if primary is None:
+                    raise
+                add_note = getattr(primary, "add_note", None)
+                if callable(add_note):
+                    add_note(f"Temporary-file cleanup failed: {cleanup_error!r}")
 
 
 def _copy_rows_as_sequences(
     first: Union[Mapping[str, Any], Sequence[Any]],
     rows: Iterable[Union[Mapping[str, Any], Sequence[Any]]],
     columns: Optional[Sequence[str]],
+    *,
+    strict: bool = False,
 ) -> Tuple[Iterable[Sequence[Any]], Optional[Sequence[str]]]:
-    return rows_as_sequences(first, rows, columns)
+    return rows_as_sequences(first, rows, columns, strict=strict)
 
 
 def copy_from_parquet(
@@ -372,8 +475,42 @@ def copy_from_rows(
     columns: Optional[Sequence[str]] = None,
     chunk_size: int = 100000,
     include_header: bool = False,
+    strict: bool = False,
     **copy_options: Any,
 ) -> Any:
+    if not isinstance(strict, bool):
+        raise TypeError("strict must be a boolean")
+    normalized_options: Dict[str, Any] = {}
+    for key, value in copy_options.items():
+        normalized = str(key).lower()
+        if normalized in normalized_options:
+            raise ValueError(f"Duplicate COPY option: {normalized}")
+        normalized_options[normalized] = value
+    copy_options = normalized_options
+    writer_options = _csv_writer_options(copy_options)
+    for alias in ("delim", "delimiter", "sep"):
+        copy_options.pop(alias, None)
+    copy_options["delim"] = writer_options.get("delimiter", ",")
+    copy_options.setdefault("quote", writer_options.get("quotechar", '"'))
+    copy_options.setdefault(
+        "escape", writer_options.get("escapechar", copy_options["quote"])
+    )
+    # The serializer knows the dialect; sniffing a tiny chunk can choose
+    # incompatible quotes, newlines or a column count.
+    copy_options.setdefault("auto_detect", False)
+    newline = copy_options.setdefault("new_line", "\\n")
+    if newline in ("\n", "\r\n", "\r"):
+        copy_options["new_line"] = newline.encode("unicode_escape").decode("ascii")
+    elif newline not in ("\\n", "\\r\\n", "\\r"):
+        raise ValueError("copy_from_rows new_line must be LF, CRLF or CR")
+    if str(copy_options.get("encoding", "utf-8")).lower().replace("-", "") != "utf8":
+        raise ValueError("copy_from_rows writes UTF-8; encoding must be UTF-8")
+    if (
+        isinstance(chunk_size, bool)
+        or not isinstance(chunk_size, int)
+        or chunk_size < 0
+    ):
+        raise ValueError("chunk_size must be a non-negative integer")
     iterator = iter(rows)
     first = next(iterator, None)
     if first is None:
@@ -383,7 +520,9 @@ def copy_from_rows(
     null_marker, copy_options = _resolve_null_marker(copy_options)
     copy_options = {"header": header, **copy_options}
 
-    chunked_rows, columns = _copy_rows_as_sequences(first, iterator, columns)
+    chunked_rows, columns = _copy_rows_as_sequences(
+        first, iterator, columns, strict=strict
+    )
     if header and columns is None:
         raise ValueError(
             "copy_from_rows header mode requires columns for sequence rows"
@@ -399,3 +538,59 @@ def copy_from_rows(
         null_marker=null_marker,
     )
     return None
+
+
+def insert_from_arrow(
+    connection: Any,
+    table: TableLike,
+    data: Any,
+    *,
+    columns: Optional[Sequence[str]] = None,
+    on_conflict: Optional[str] = None,
+) -> Any:
+    """Insert an Arrow Table, RecordBatch or RecordBatchReader without row conversion.
+
+    Target columns correspond positionally to the Arrow schema. The connection
+    owns the transaction; Arrow input must already represent the intended SQL
+    values because SQLAlchemy bind processors are not applied.
+    """
+    import pyarrow as pa
+
+    if on_conflict not in (None, "ignore", "replace"):
+        raise ValueError("on_conflict must be None, 'ignore' or 'replace'")
+
+    if getattr(getattr(connection, "dialect", None), "name", None) != "duckdb":
+        raise ValueError("insert_from_arrow requires a DuckDB SQLAlchemy connection")
+    if not isinstance(data, (pa.Table, pa.RecordBatch, pa.RecordBatchReader)):
+        raise TypeError("data must be an Arrow Table, RecordBatch or RecordBatchReader")
+    source_columns = data.schema.names
+    target_columns = list(source_columns if columns is None else columns)
+    if not source_columns or len(target_columns) != len(source_columns):
+        raise ValueError("Target columns must match the non-empty Arrow schema")
+    for names in (source_columns, target_columns):
+        if any(not isinstance(name, str) or not name for name in names):
+            raise ValueError("Arrow and target column names must be non-empty strings")
+        if len(names) != len(set(names)):
+            raise ValueError("Arrow and target column names must be unique")
+    if isinstance(data, pa.RecordBatch):
+        data = pa.Table.from_batches([data])
+    preparer = connection.dialect.identifier_preparer
+    target = _format_table(connection, table)
+    targets = ", ".join(preparer.quote_identifier(name) for name in target_columns)
+    sources = ", ".join(preparer.quote_identifier(name) for name in source_columns)
+    view_name = f"__duckdb_sa_arrow_{uuid.uuid4().hex}"
+    dbapi_connection = connection.connection.dbapi_connection
+    dbapi_connection.register(view_name, data)
+    try:
+        insert = "INSERT" if on_conflict is None else f"INSERT OR {on_conflict.upper()}"
+        result = connection.exec_driver_sql(
+            f"{insert} INTO {target} ({targets}) SELECT {sources} FROM {view_name}"
+        )
+    except BaseException:
+        try:
+            dbapi_connection.unregister(view_name)
+        except Exception:
+            pass
+        raise
+    dbapi_connection.unregister(view_name)
+    return result

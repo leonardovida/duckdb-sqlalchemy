@@ -17,7 +17,8 @@ boundaries:
 - `duckdb_sqlalchemy/config.py` validates and renders DuckDB config settings.
 - `duckdb_sqlalchemy/datatypes.py` implements custom DuckDB type support and
   SQL compilation helpers.
-- `duckdb_sqlalchemy/bulk.py` provides COPY helpers for files and row streams.
+- `duckdb_sqlalchemy/bulk.py` provides COPY helpers for files and row streams,
+  and direct typed Arrow ingestion with temporary registration cleanup.
 - `duckdb_sqlalchemy/alembic_impl.py` is the Alembic implementation
   (`DuckDBImpl`): server default and nested type comparison, unique
   constraint matching, nested type rendering, and `COMMENT ON COLUMN`. The
@@ -29,7 +30,7 @@ boundaries:
 - Private helpers: `_statements.py` (idempotent-statement, transient-error, and
   disconnect detection for retries), `_bulk_insert.py` and `_row_shape.py`
   (Arrow/pandas data for the register bulk-insert path), `_arrow.py`
-  (`duckdb_arrow` results), `_checkpoint.py` (`checkpoint()`), `_query.py` (URL
+  (`duckdb_arrow` results and owned batch readers), `_checkpoint.py` (`checkpoint()`), `_query.py` (URL
   query coercion), `_validation.py` (identifier checks), and `capabilities.py`
   / `_supports.py` (DuckDB version feature flags).
 
@@ -43,8 +44,13 @@ boundaries:
   `duckdb_constraints()`, ...), not the `pg_catalog` emulation, and resolve
   each unqualified name to one database and schema the way DuckDB binds it.
 - Every cursor shares one DuckDB connection and its single open result, so
-  buffer an unread result before another statement replaces it.
-- Validate identifiers before rendering SQL fragments.
+  buffer an unread tuple result before another statement replaces it. Fetch
+  failures propagate. An active public Arrow batch reader owns its result until
+  exhausted or closed; replacement queries fail before executing.
+- Filter reflection object scope/kind before name resolution; never combine
+  metadata from relations that shadow one another.
+- Preserve exact values before selecting a bulk data path; decline lossy inference.
+- Validate or quote identifiers before rendering SQL fragments.
 - Preserve compatibility with the supported SQLAlchemy 2.0 and 2.1 lines
   without breaking the DuckDB releases tested in `noxfile.py`.
 - Prefer small wrappers and targeted helpers over broad abstractions.

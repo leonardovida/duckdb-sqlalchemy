@@ -14,7 +14,7 @@ from typing import Dict, List, Literal, Optional, Tuple, Union, cast
 
 import pandas as pd
 from pandas.testing import assert_frame_equal
-from pytest import importorskip, mark
+from pytest import importorskip, mark, raises
 from sqlalchemy import create_engine
 
 from .util import pandas_sqlalchemy_compatible
@@ -72,16 +72,29 @@ def test_to_sql(
 ) -> None:
     eng = create_engine("duckdb:///:memory:")
     try:
-        sample_df.to_sql(
+        sample_df.to_sql(name="foo", con=eng, index=index)
+        kwargs = dict(
             name="foo",
             con=eng,
             if_exists=if_exists,
             chunksize=chunksize,
             index=index,
+            method=method,
         )
-    except ValueError as e:
-        if if_exists != "fail":
-            raise e
+        if if_exists == "fail":
+            with raises(ValueError, match="already exists"):
+                sample_df.to_sql(**kwargs)
+        else:
+            sample_df.to_sql(**kwargs)
+        actual = pd.read_sql("SELECT * FROM foo", eng)
+        expected = (
+            pd.concat([sample_df, sample_df], ignore_index=True)
+            if if_exists == "append"
+            else sample_df
+        )
+        assert_frame_equal(actual, expected, check_dtype=False)
+    finally:
+        eng.dispose()
 
 
 table_name = "test_read"

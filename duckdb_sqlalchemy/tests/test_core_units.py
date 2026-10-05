@@ -1,4 +1,5 @@
 import importlib.metadata
+import os
 import threading
 import time
 import warnings
@@ -585,6 +586,9 @@ def test_looks_like_motherduck_detection() -> None:
 
 
 def test_apply_motherduck_defaults_env_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Windows environment keys are case-insensitive. Use an explicit mapping
+    # to exercise precedence between the two supported spellings.
+    monkeypatch.setattr(os, "environ", dict(os.environ))
     config = {}
     monkeypatch.setenv("MOTHERDUCK_TOKEN", "token123")
     monkeypatch.delenv("motherduck_token", raising=False)
@@ -597,6 +601,9 @@ def test_apply_motherduck_defaults_env_token(monkeypatch: pytest.MonkeyPatch) ->
 def test_apply_motherduck_defaults_prefers_standard_env_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Windows environment keys are case-insensitive. Use an explicit mapping
+    # to exercise precedence between the two supported spellings.
+    monkeypatch.setattr(os, "environ", dict(os.environ))
     config = {}
     monkeypatch.setenv("MOTHERDUCK_TOKEN", "standard-token")
     monkeypatch.setenv("motherduck_token", "legacy-token")
@@ -2639,3 +2646,63 @@ def test_create_engine_from_paths_driver_mismatch() -> None:
     url2 = SAURL.create("sqlite", database=":memory:")
     with pytest.raises(ValueError):
         create_engine_from_paths([url1, url2])
+
+
+@pytest.mark.parametrize("capture_count", [False, True])
+@pytest.mark.parametrize("error_type", [duckdb.InvalidInputException, ValueError])
+def test_cursor_buffer_fetch_error_contracts(
+    capture_count: bool, error_type: type[Exception]
+) -> None:
+    error = error_type("fetch failed")
+
+    class FailedFetch:
+        description = [("Count", "NUMBER")]
+        rowcount = 17
+
+        def fetchall(self) -> Any:
+            raise error
+
+    cursor = _cursor(FailedFetch())
+    with pytest.raises(error_type) as caught:
+        if capture_count:
+            cursor._capture_dml_rowcount("delete from items")
+        else:
+            cursor._buffer_result()
+    assert caught.value is error
+    assert cursor.rowcount == 17
+
+
+@pytest.mark.parametrize("dml", [False, True])
+def test_cursor_buffer_preserves_metadata_and_remaining_rows(dml: bool) -> None:
+    with duckdb.connect() as native:
+        connection = ConnectionWrapper(native)
+        cursor = connection.cursor()
+        if dml:
+            cursor.execute("CREATE TABLE items AS SELECT range AS i FROM range(3)")
+            cursor.execute("DELETE FROM items")
+            expected = [(3,)]
+            assert cursor.rowcount == 3
+        else:
+            cursor.execute("SELECT range AS i, 'label' AS label FROM range(4)")
+            assert cursor.fetchone() == (0, "label")
+            expected = [(1, "label"), (2, "label"), (3, "label")]
+            assert cursor.rowcount == -1
+        description = cursor.description
+        rowcount = cursor.rowcount
+
+        other = connection.cursor()
+        other.execute("SELECT 42 AS replacement")
+        assert other.fetchall() == [(42,)]
+        assert cursor.description == description
+        assert cursor.rowcount == rowcount
+        cursor.arraysize = 2
+        assert cursor.fetchmany() == expected[:2]
+        assert cursor.fetchall() == expected[2:]
+        assert cursor.fetchone() is None
+        assert cursor.description == description
+        assert cursor.rowcount == rowcount
+
+        cursor.execute("SELECT 7 AS fresh")
+        assert cursor.description[0][0] == "fresh"
+        assert cursor.rowcount == -1
+        assert cursor.fetchall() == [(7,)]

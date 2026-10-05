@@ -14,7 +14,7 @@ from typing import (
     Type,
     Union,
 )
-from urllib.parse import parse_qsl, urlencode
+from urllib.parse import parse_qs, parse_qsl, urlencode
 
 import sqlalchemy
 from sqlalchemy import create_engine
@@ -299,11 +299,11 @@ def append_query_to_database(
     base, separator, existing = database.partition("?")
     if not separator:
         return f"{database}?{urlencode(query, doseq=True)}"
-    merged: Dict[str, Any] = {}
-    for key, value in parse_qsl(existing, keep_blank_values=True):
-        if key in query:
-            continue
-        merged.setdefault(key, []).append(value)
+    merged: Dict[str, Any] = {
+        key: values
+        for key, values in parse_qs(existing, keep_blank_values=True).items()
+        if key not in query
+    }
     merged.update(query)
     return f"{base}?{urlencode(merged, doseq=True)}"
 
@@ -374,11 +374,9 @@ def MotherDuckURL(
     validate_motherduck_database_name(database_name)
     embedded_query: Dict[str, Any] = {}
     if separator:
-        for key, value in parse_qsl(embedded, keep_blank_values=True):
-            embedded_query.setdefault(key, []).append(value)
         embedded_query = {
             key: values[0] if len(values) == 1 else tuple(values)
-            for key, values in embedded_query.items()
+            for key, values in parse_qs(embedded, keep_blank_values=True).items()
         }
     embedded_path, embedded_config = _partition_query(embedded_query)
     query_path, query_config = _partition_query(query or {})

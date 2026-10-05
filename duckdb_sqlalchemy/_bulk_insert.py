@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import math
 from functools import lru_cache
-from typing import Any, Optional, Sequence, cast
+from numbers import Integral, Real
+from typing import Any, Iterable, Mapping, Optional, Sequence, cast
 
 from ._row_shape import infer_mapping_column_keys, rows_use_mapping_shape
 
@@ -19,7 +21,62 @@ def has_bulk_insert_data_library() -> bool:
 
 
 def _is_integer(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(value, Integral) and not isinstance(value, bool)
+
+
+def _has_unsafe_numeric_coercion(
+    rows: Sequence[Any],
+    column_names: Sequence[str],
+    floating_columns: Optional[Mapping[int, int]] = None,
+) -> bool:
+    mapping_rows = rows_use_mapping_shape(rows)
+    for index, name in enumerate(column_names):
+        if floating_columns is not None and index not in floating_columns:
+            continue
+        limit = 2**53 if floating_columns is None else floating_columns[index]
+        has_float = floating_columns is not None
+        has_large_integer = False
+        for row in rows:
+            value = row.get(name) if mapping_rows else row[index]
+            if value is None or isinstance(value, (str, bytes, bool)):
+                continue
+            if isinstance(value, int):
+                has_large_integer = has_large_integer or abs(value) > limit
+            elif isinstance(value, float):
+                has_float = True
+            elif isinstance(value, Integral):
+                has_large_integer = has_large_integer or abs(int(value)) > limit
+            elif isinstance(value, Real):
+                has_float = True
+            if has_float and has_large_integer:
+                return True
+    return False
+
+
+def _has_unsafe_nested_numeric_coercion(values: Iterable[Any]) -> bool:
+    """Track precision per nested field (list elements share one field)."""
+    integers: dict[tuple[Any, ...], int] = {}
+    limits: dict[tuple[Any, ...], int] = {}
+
+    def visit(value: Any, path: tuple[Any, ...]) -> bool:
+        if isinstance(value, Mapping):
+            return any(visit(item, (*path, key)) for key, item in value.items())
+        if isinstance(value, (list, tuple)) or (
+            not isinstance(value, (str, bytes, bytearray, memoryview))
+            and getattr(value, "ndim", 0) > 0
+        ):
+            return any(visit(item, (*path, None)) for item in value)
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, Integral):
+            integers[path] = max(integers.get(path, 0), abs(int(value)))
+        elif isinstance(value, Real):
+            width = getattr(getattr(value, "dtype", None), "itemsize", 8)
+            limit = 2 ** (11 if width == 2 else 24 if width == 4 else 53)
+            limits[path] = min(limits.get(path, limit), limit)
+        return path in limits and integers.get(path, 0) > limits[path]
+
+    return any(visit(value, ()) for value in values)
 
 
 def _restore_nullable_integers(
@@ -47,7 +104,34 @@ def build_bulk_insert_dataframe(
         return None
 
     try:
-        if rows_use_mapping_shape(rows):
+        if _has_unsafe_numeric_coercion(rows, column_names):
+            return None
+        mapping_rows = rows_use_mapping_shape(rows)
+        for index, name in enumerate(column_names):
+            values = [row.get(name) if mapping_rows else row[index] for row in rows]
+            if any(
+                isinstance(value, (Mapping, list, tuple))
+                or getattr(value, "ndim", 0) > 0
+                for value in values
+            ) and _has_unsafe_nested_numeric_coercion(values):
+                return None
+            # DuckDB's pandas scan treats NaN as NULL. Ordinary bindings
+            # preserve NaN, so this batch must keep the ordinary insert path.
+            if any(
+                isinstance(value, Real)
+                and not isinstance(value, Integral)
+                and math.isnan(value)
+                for value in values
+            ):
+                return None
+            kinds = {type(value) for value in values if value is not None}
+            if len(kinds) > 1 and not all(
+                value is None
+                or (isinstance(value, Real) and not isinstance(value, bool))
+                for value in values
+            ):
+                return None
+        if mapping_rows:
             frame = pd.DataFrame.from_records(rows, columns=column_names)
         else:
             frame = pd.DataFrame(rows, columns=cast(Any, column_names))
@@ -69,10 +153,40 @@ def build_bulk_insert_arrow_table(
         if rows_use_mapping_shape(rows):
             table = pa.Table.from_pylist(rows)
             if column_names:
-                return table.select(column_names)
-            return table
-        columns = list(zip(*rows)) if rows else [[] for _ in column_names]
-        return pa.Table.from_arrays(columns, names=column_names)
+                table = table.select(column_names)
+        else:
+            # Do not retain a transposed copy of all cells.
+            arrays = [
+                pa.array([row[index] for row in rows])
+                for index in range(len(column_names))
+            ]
+            table = pa.Table.from_arrays(arrays, names=column_names)
+        floating_columns = {
+            index: 2
+            ** (
+                11
+                if pa.types.is_float16(field.type)
+                else 24
+                if pa.types.is_float32(field.type)
+                else 53
+            )
+            for index, field in enumerate(table.schema)
+            if pa.types.is_floating(field.type)
+        }
+        mapping_rows = rows_use_mapping_shape(rows)
+        for index, field in enumerate(table.schema):
+            if pa.types.is_nested(field.type) and _has_unsafe_nested_numeric_coercion(
+                row.get(column_names[index]) if mapping_rows else row[index]
+                for row in rows
+            ):
+                return None
+        # Only floating inference can round an integer. Inspect its original
+        # values before accepting it, and leave safe int/string columns alone.
+        if floating_columns and _has_unsafe_numeric_coercion(
+            rows, column_names, floating_columns
+        ):
+            return None
+        return table
     except Exception:
         return None
 

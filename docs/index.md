@@ -19,6 +19,8 @@ Production-ready DuckDB SQLAlchemy dialect for DuckDB and MotherDuck.
 - [Pandas and Jupyter](pandas-jupyter)
 - [Types and caveats](types-and-caveats)
 - [Alembic integration](alembic)
+- [Performance and exact values](performance)
+- [Ecosystem adoption](adoption)
 
 ## Examples
 

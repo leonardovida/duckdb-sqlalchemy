@@ -26,6 +26,12 @@ pip install duckdb-sqlalchemy
 
 This installs DuckDB and SQLAlchemy as dependencies. Install `pandas` or `pyarrow` separately if you use their integrations.
 
+Optional integrations also have extras with tested dependency floors:
+
+```sh
+pip install "duckdb-sqlalchemy[arrow,pandas]"
+```
+
 ## Quick start: query DuckDB from Python
 
 Run a query against an in-memory DuckDB database:
@@ -108,6 +114,7 @@ See the [MotherDuck connection guide](https://leonardovida.github.io/duckdb-sqla
 | Query Parquet/CSV, load rows, or attach databases | [Analytical queries and COPY helpers](https://leonardovida.github.io/duckdb-sqlalchemy/olap.html) |
 | Use pandas DataFrames or Jupyter notebooks | [Pandas and Jupyter](https://leonardovida.github.io/duckdb-sqlalchemy/pandas-jupyter.html) |
 | Check data types and known limitations | [Types and caveats](https://leonardovida.github.io/duckdb-sqlalchemy/types-and-caveats.html) |
+| Choose bulk ingestion, Arrow streams, and benchmarks | [Performance](https://leonardovida.github.io/duckdb-sqlalchemy/performance.html) |
 | Configure schema migrations | [Alembic integration](https://leonardovida.github.io/duckdb-sqlalchemy/alembic.html) |
 | Move from duckdb-engine | [Migration guide](https://leonardovida.github.io/duckdb-sqlalchemy/migration-from-duckdb-engine.html) |
 
@@ -133,7 +140,7 @@ Use `URL` or `MotherDuckURL` when building connection URLs in Python. See [conne
 | SQLAlchemy | 2.0.0+ on Python below 3.14; 2.0.45+ on Python 3.14+; SQLAlchemy 2.1 requires Python 3.11+ |
 | DuckDB | 1.3.0+ |
 
-Hosted CI tests the latest SQLAlchemy and DuckDB releases on Python 3.10–3.14, the minimum supported versions (Python 3.10, SQLAlchemy 2.0.0, DuckDB 1.3.0), SQLAlchemy 2.0 on Python 3.13 and 3.14, and SQLAlchemy and DuckDB prereleases (informational). The full `nox -s tests` matrix (DuckDB 1.3.0–1.5.6 against SQLAlchemy 2.0.0, 2.0.52, and 2.1.1) runs locally. See [test configuration](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/noxfile.py), [CI runs](https://github.com/leonardovida/duckdb-sqlalchemy/actions), and [known caveats](https://leonardovida.github.io/duckdb-sqlalchemy/types-and-caveats.html) for the scope of compatibility checks. MotherDuck connections also require a DuckDB version supported by the service.
+Hosted CI tests the latest SQLAlchemy and DuckDB releases on Python 3.10–3.14, the minimum supported versions (Python 3.10, SQLAlchemy 2.0.0, DuckDB 1.3.0), SQLAlchemy 2.0 on Python 3.13 and 3.14, SQLAlchemy's upstream dialect suite on 2.0 and 2.1, Windows/macOS, wheel/sdist installations with optional libraries absent or installed independently, and SQLAlchemy and DuckDB prereleases (informational). CI also records correctness-checked benchmark results. Real MotherDuck checks run separately when service credentials are configured. The full `nox -s tests` matrix (DuckDB 1.3.0–1.5.6 against SQLAlchemy 2.0.0, 2.0.52, and 2.1.1) runs locally. See [test configuration](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/noxfile.py), [CI runs](https://github.com/leonardovida/duckdb-sqlalchemy/actions), and [known caveats](https://leonardovida.github.io/duckdb-sqlalchemy/types-and-caveats.html) for the scope of compatibility checks. MotherDuck connections also require a DuckDB version supported by the service.
 
 ## Migrating from duckdb-engine
 
