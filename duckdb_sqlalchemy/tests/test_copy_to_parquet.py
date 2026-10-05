@@ -14,12 +14,14 @@ from sqlalchemy import (
     bindparam,
     create_engine,
     insert,
+    or_,
     select,
     text,
     union_all,
 )
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.sql.selectable import FromClause, Select
 
 from duckdb_sqlalchemy import copy_to_parquet
 from duckdb_sqlalchemy import read_parquet as parquet_scan
@@ -245,3 +247,82 @@ def test_partitioned_export_refuses_existing_snapshot(
         assert {
             path: path.read_bytes() for path in destination.rglob("*.parquet")
         } == before
+
+
+def test_partitioned_snapshot_joins_live_table_with_null_key(tmp_path: Path) -> None:
+    engine = create_engine("duckdb:///:memory:")
+    metadata = MetaData()
+    events = Table(
+        "events",
+        metadata,
+        Column("id", Integer),
+        Column("account_id", Integer),
+        Column("region", String),
+    )
+    accounts = Table(
+        "accounts",
+        metadata,
+        Column("id", Integer),
+        Column("tier", String),
+    )
+    try:
+        with engine.begin() as connection:
+            metadata.create_all(connection)
+            connection.execute(
+                events.insert(),
+                [
+                    {"id": 1, "account_id": 10, "region": "123"},
+                    {"id": 2, "account_id": 11, "region": None},
+                    {"id": 3, "account_id": 10, "region": "eu"},
+                ],
+            )
+            connection.execute(
+                accounts.insert(),
+                [{"id": 10, "tier": "pro"}, {"id": 11, "tier": "free"}],
+            )
+            destination = tmp_path / "snapshot"
+            assert (
+                copy_to_parquet(
+                    connection,
+                    select(events).where(events.c.id >= bindparam("export_minimum")),
+                    destination,
+                    parameters={"export_minimum": 1},
+                    partition_by=["region"],
+                ).scalar_one()
+                == 3
+            )
+            partitions = {path.parent.name for path in destination.rglob("*.parquet")}
+            assert len(partitions) == 3
+            assert {"region=123", "region=eu"} <= partitions
+
+            connection.execute(
+                accounts.update().where(accounts.c.id == 11).values(tier="pro")
+            )
+            snapshot = parquet_scan(
+                str(destination / "**" / "*.parquet"),
+                columns=["id", "account_id", "region"],
+                hive_partitioning=True,
+                hive_types={"region": "VARCHAR"},
+            )
+
+            def report(source: FromClause) -> Select:
+                return (
+                    select(source.c.id, source.c.region, accounts.c.tier)
+                    .join(accounts, source.c.account_id == accounts.c.id)
+                    .where(source.c.id >= bindparam("report_minimum"))
+                    .where(
+                        or_(
+                            source.c.region == bindparam("region"),
+                            source.c.region.is_(None),
+                        )
+                    )
+                    .where(accounts.c.tier == bindparam("tier"))
+                    .order_by(source.c.id)
+                )
+
+            parameters = {"report_minimum": 1, "region": "123", "tier": "pro"}
+            expected = [(1, "123", "pro"), (2, None, "pro")]
+            assert connection.execute(report(events), parameters).all() == expected
+            assert connection.execute(report(snapshot), parameters).all() == expected
+    finally:
+        engine.dispose()

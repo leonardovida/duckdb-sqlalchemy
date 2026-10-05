@@ -8,6 +8,10 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+### Maintenance
+
+- Add a runnable example and integration coverage for joining a typed, partitioned Parquet snapshot to a live DuckDB table, including NULL partition keys and bound report filters. [#181](https://github.com/leonardovida/duckdb-sqlalchemy/pull/181)
+
 ## [1.5.5.15](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.14...v1.5.5.15) (2026-10-02)
 
 ### Highlights
