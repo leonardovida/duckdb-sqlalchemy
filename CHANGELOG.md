@@ -12,16 +12,16 @@ preserved from the upstream project for historical context.
 
 ### Highlights
 
-- Support DuckDB 1.5.6. The package version now follows DuckDB 1.5.6, and the full test suite passes on DuckDB 1.5.6 with SQLAlchemy 2.0.0, 2.0.52 and 2.1.1. See the [DuckDB 1.5.6 release notes](https://github.com/duckdb/duckdb/releases/tag/v1.5.6) for the engine fixes it brings.
+- Support DuckDB 1.5.6. The package version now follows DuckDB 1.5.6, and the full test suite passes on DuckDB 1.5.6 with SQLAlchemy 2.0.0, 2.0.52 and 2.1.1. See the [DuckDB 1.5.6 release notes](https://github.com/duckdb/duckdb/releases/tag/v1.5.6) for the engine fixes it brings. [#193](https://github.com/leonardovida/duckdb-sqlalchemy/pull/193)
 
 ### Compatibility
 
-- Runtime requirements are unchanged. DuckDB 1.3.0 or newer, SQLAlchemy 2.0 or newer and Python 3.10 or newer are still supported, so you do not need to upgrade DuckDB to install this release. MotherDuck connections still need a DuckDB version that the service supports.
+- Runtime requirements are unchanged. DuckDB 1.3.0 or newer, SQLAlchemy 2.0 or newer and Python 3.10 or newer are still supported, so you do not need to upgrade DuckDB to install this release. MotherDuck connections still need a DuckDB version that the service supports. [#193](https://github.com/leonardovida/duckdb-sqlalchemy/pull/193)
 
 ### Maintenance
 
-- Lock DuckDB 1.5.6 for development and refresh the documented tested versions for Parquet export and the partitioned Parquet example.
-- Report 1.5.6 as the version fallback when the package is imported from a source tree without installed metadata.
+- Lock DuckDB 1.5.6 for development and refresh the documented tested versions for Parquet export and the partitioned Parquet example. [#193](https://github.com/leonardovida/duckdb-sqlalchemy/pull/193)
+- Report 1.5.6 as the version fallback when the package is imported from a source tree without installed metadata. [#193](https://github.com/leonardovida/duckdb-sqlalchemy/pull/193)
 
 **Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.16...v1.5.6
 
