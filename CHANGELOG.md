@@ -8,9 +8,18 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+## [1.5.5.16](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.15...v1.5.5.16) (2026-10-06)
+
+### Highlights
+
+- Document how to join a partitioned Parquet snapshot to a live DuckDB table with SQLAlchemy, with a runnable example. See [Join a snapshot to a live table](https://github.com/leonardovida/duckdb-sqlalchemy/blob/v1.5.5.16/docs/olap.md#join-a-snapshot-to-a-live-table). [#181](https://github.com/leonardovida/duckdb-sqlalchemy/pull/181)
+
 ### Maintenance
 
-- Add a runnable example and integration coverage for joining a typed, partitioned Parquet snapshot to a live DuckDB table, including NULL partition keys and bound report filters. [#181](https://github.com/leonardovida/duckdb-sqlalchemy/pull/181)
+- Add integration coverage for snapshot joins, including string partition keys kept as text through `hive_types`, NULL partition keys and bound report filters. [#181](https://github.com/leonardovida/duckdb-sqlalchemy/pull/181)
+- Simplify repeated query parameter grouping in the MotherDuck URL helpers. The URLs and query values they produce are unchanged. [a1a4ffd](https://github.com/leonardovida/duckdb-sqlalchemy/commit/a1a4ffd40a74fe04b45ca6e1ef33eaeabddcf6dc)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.15...v1.5.5.16
 
 ## [1.5.5.15](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.14...v1.5.5.15) (2026-10-02)
 
