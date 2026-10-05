@@ -456,7 +456,7 @@ expressions remain trusted application code.
 COPY options such as `compression` are passed as keyword arguments. The format
 is always Parquet and cannot be overridden. Paths may be strings or `Path`
 objects and are escaped as SQL literals for compatibility with older DuckDB
-versions. The helper is tested with DuckDB 1.3.0 and 1.5.5 and SQLAlchemy 2.0;
+versions. The helper is tested with DuckDB 1.3.0 and 1.5.6 and SQLAlchemy 2.0;
 older DuckDB versions are not verified for this workflow.
 
 File writes follow DuckDB COPY semantics: a single-file export replaces an
@@ -511,7 +511,7 @@ Run the self-contained [partitioned Parquet example](https://github.com/leonardo
 with `uv run python examples/partitioned_parquet.py` from the repository. It
 creates temporary sample data, exports a bound query, and verifies the recovered
 rows and partition directories. This local workflow is verified with DuckDB
-1.3.0 / SQLAlchemy 2.0.0 and DuckDB 1.5.5 / SQLAlchemy 2.0.52.
+1.3.0 / SQLAlchemy 2.0.0 and DuckDB 1.5.6 / SQLAlchemy 2.0.52.
 
 By default, a second export to a nonempty destination fails. Prefer a distinct
 directory per snapshot. `append=True` adds files; it does not update or
