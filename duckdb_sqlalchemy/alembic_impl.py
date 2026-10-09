@@ -261,9 +261,8 @@ def _visit_rename_table(element: RenameTable, compiler: Any, **kw: Any) -> str:
     # DuckDB keeps the table in its current schema. RENAME TO accepts only
     # the new identifier, unlike Alembic's generic schema-qualified target.
     preparer = compiler.preparer
-    table = preparer.quote(element.table_name)
-    if element.schema:
-        table = f"{preparer.quote_schema(element.schema)}.{table}"
+    source = schema.Table(element.table_name, schema.MetaData(), schema=element.schema)
+    table = preparer.format_table(source)
     return f"ALTER TABLE {table} RENAME TO {preparer.quote(element.new_table_name)}"
 
 

@@ -366,3 +366,29 @@ def test_offline_rename_in_schema() -> None:
     assert buffer.getvalue().strip() == (
         'ALTER TABLE "odd schema"."old.table" RENAME TO "new.table";'
     )
+
+
+@pytest.mark.parametrize("logical_schema", [None, "logical"])
+def test_rename_table_respects_schema_translation(
+    engine: Engine, logical_schema: Any
+) -> None:
+    table = Table(
+        "old.table", MetaData(), Column("value", Integer), schema=logical_schema
+    )
+    with engine.connect() as connection:
+        connection.exec_driver_sql('CREATE SCHEMA "odd schema"')
+        connection.exec_driver_sql('CREATE TABLE "old.table" (value INTEGER)')
+        connection.exec_driver_sql('INSERT INTO "old.table" VALUES (99)')
+        translated = connection.execution_options(
+            schema_translate_map={logical_schema: "odd schema"}
+        )
+        table.create(translated)
+        translated.execute(table.insert(), {"value": 42})
+        connection.commit()
+        Operations(MigrationContext.configure(translated)).rename_table(
+            table.name, "new.table", schema=logical_schema
+        )
+        renamed = table.to_metadata(MetaData(), name="new.table")
+        assert translated.execute(select(renamed.c.value)).scalars().all() == [42]
+        assert connection.exec_driver_sql('SELECT * FROM "old.table"').all() == [(99,)]
+        assert not inspect(connection).has_table(table.name, schema="odd schema")
