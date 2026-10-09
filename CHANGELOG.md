@@ -8,6 +8,10 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+### Bug Fixes
+
+- Fix Alembic table renames and batch recreation in named schemas and attached catalogs. DuckDB now receives an unqualified, quoted destination name while the source retains its schema and catalog.
+
 ## [1.5.6](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.5.16...v1.5.6) (2026-10-06)
 
 ### Highlights

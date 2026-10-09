@@ -12,7 +12,12 @@ from typing import Any, Collection, Dict, List, Optional, Tuple
 
 from alembic.autogenerate.render import _repr_type
 from alembic.ddl import impl as _alembic_impl
-from alembic.ddl.base import ColumnComment, format_column_name, format_table_name
+from alembic.ddl.base import (
+    ColumnComment,
+    RenameTable,
+    format_column_name,
+    format_table_name,
+)
 from alembic.ddl.impl import DefaultImpl
 from sqlalchemy import inspect, schema, text
 from sqlalchemy import types as sqltypes
@@ -249,6 +254,16 @@ def _column_names(columns: Collection[Any]) -> Tuple[str, ...]:
 if _previous_impl is not None:
     # keep an implementation that env.py registered before this module loaded
     _alembic_impl._impls["duckdb"] = _previous_impl
+
+
+@compiles(RenameTable, "duckdb")
+def _visit_rename_table(element: RenameTable, compiler: Any, **kw: Any) -> str:
+    # DuckDB keeps the table in its current schema. RENAME TO accepts only
+    # the new identifier, unlike Alembic's generic schema-qualified target.
+    preparer = compiler.preparer
+    source = schema.Table(element.table_name, schema.MetaData(), schema=element.schema)
+    table = preparer.format_table(source)
+    return f"ALTER TABLE {table} RENAME TO {preparer.quote(element.new_table_name)}"
 
 
 @compiles(ColumnComment, "duckdb")
