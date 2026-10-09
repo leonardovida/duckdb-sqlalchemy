@@ -112,6 +112,11 @@ ids does not create a replacement sequence starting at 1. Offline batch scripts
 with `copy_from` retain the model's existing implicit sequence name. Reflected
 sequence-backed keys compile as INTEGER/BIGINT plus `nextval`, never SERIAL.
 
+Pass `schema="analytics"` (or a catalog-qualified schema) to
+`batch_alter_table()` for tables outside the default schema. Table renames,
+including the final rename during batch recreation, keep the table in that
+schema and quote the new table name as a single identifier.
+
 ## Known limitations
 
 - **Dropping constraints by name.** DuckDB ignores the names in your DDL, so
