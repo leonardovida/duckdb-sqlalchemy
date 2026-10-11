@@ -1358,7 +1358,8 @@ class DuckDBCompiler(PGCompiler):
             self._unscaled_decimal(binary.left, left, **kw),
             10 ** (scale + s2 - s1),
         )
-        divisor = self._unscaled_decimal(binary.right, right, **kw)
+        # NULLIF keeps division by zero NULL: DuckDB 2.0 raises on `x // 0`.
+        divisor = "nullif(%s, 0)" % self._unscaled_decimal(binary.right, right, **kw)
         quotient = f"({numerator} // {divisor})"
         remainder = f"({numerator} - {quotient} * {divisor})"
         rounded = (
