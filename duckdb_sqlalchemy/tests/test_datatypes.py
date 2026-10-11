@@ -1,23 +1,31 @@
 import decimal
 import json
 import warnings
-from typing import Any, Callable, Dict, Type, cast
+from typing import Any, Callable, Dict, Generator, Tuple, Type, cast
 from uuid import uuid4
 
+from hypothesis import assume, example, given, settings
+from hypothesis import strategies as st
 from packaging.version import Version
-from pytest import importorskip, mark
+from pytest import fixture, importorskip, mark
 from sqlalchemy import (
+    BigInteger,
     Column,
     Integer,
     MetaData,
+    Numeric,
     Sequence,
     String,
     Table,
+    bindparam,
+    func,
     inspect,
+    literal_column,
     schema,
     select,
     text,
 )
+from sqlalchemy import cast as cast_
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.engine import Engine, create_engine
 from sqlalchemy.orm import Session, declarative_base
@@ -514,3 +522,150 @@ def test_div_is_floordiv(engine: Engine) -> None:
     stmt = test_table.c.value / test_table.c.eur2usd_rate
 
     assert str(stmt.compile(engine)) == "test_table.value / test_table.eur2usd_rate"
+
+
+@fixture
+def exact_engine() -> Generator[Engine, None, None]:
+    engine = create_engine("duckdb:///:memory:", exact_decimal_division=True)
+    try:
+        yield engine
+    finally:
+        engine.dispose()
+
+
+def _half_away_from_zero(value: decimal.Decimal, exponent: int) -> decimal.Decimal:
+    context = decimal.Context(prec=100, rounding=decimal.ROUND_HALF_UP)
+    return context.quantize(value, decimal.Decimal(1).scaleb(exponent))
+
+
+@mark.parametrize(
+    "left, right, type_, expected",
+    [
+        ("5.02797279921331664759", "0.71828182845904523537", Numeric(22, 20), "7"),
+        ("1", "2.00", Numeric(10, 2), "0.5"),
+        ("1", "3", Numeric(10, 2), "0.3333333333333333"),
+        ("2", "3", Numeric(10, 2), "0.6666666666666667"),
+        ("-2", "3", Numeric(10, 2), "-0.6666666666666667"),
+        ("1", "0", Numeric(10, 2), None),
+        ("1", "NULL", Numeric(10, 2), None),
+    ],
+)
+def test_exact_decimal_division(
+    exact_engine: Engine, left: str, right: str, type_: Numeric, expected: Any
+) -> None:
+    expr = cast_(literal_column(left), type_) / cast_(literal_column(right), type_)
+    with exact_engine.connect() as conn:
+        result = conn.scalar(select(expr))
+    assert result == (None if expected is None else decimal.Decimal(expected))
+
+
+def test_exact_decimal_division_uses_declared_column_types(
+    exact_engine: Engine,
+) -> None:
+    table = Table(
+        "ledger",
+        MetaData(),
+        Column("amount", Numeric(18, 6)),
+        Column("rate", Numeric(12, 8)),
+        Column("units", BigInteger),
+        Column("total", Integer),
+    )
+    table.metadata.create_all(exact_engine)
+    row = {
+        "amount": decimal.Decimal("1234.567891"),
+        "rate": decimal.Decimal("0.00000003"),
+        "units": 7,
+        "total": 10,
+    }
+    with exact_engine.begin() as conn:
+        conn.execute(table.insert(), row)
+        amount_per_rate, amount_per_unit, units_per_total = conn.execute(
+            select(
+                table.c.amount / table.c.rate,
+                table.c.amount / table.c.units,
+                table.c.units / table.c.total,
+            )
+        ).one()
+
+    quotient = decimal.Context(prec=100).divide
+    for value, numerator, denominator in [
+        (amount_per_rate, row["amount"], row["rate"]),
+        (amount_per_unit, row["amount"], decimal.Decimal(row["units"])),
+    ]:
+        assert isinstance(value, decimal.Decimal)
+        exponent = value.as_tuple().exponent
+        assert isinstance(exponent, int) and exponent <= -16
+        assert value == _half_away_from_zero(quotient(numerator, denominator), exponent)
+    # Integer division keeps DuckDB's DOUBLE result.
+    assert units_per_total == decimal.Decimal("0.7")
+
+
+def _many_decimals(divisor: Callable[[Any], Any] = lambda value: value) -> Any:
+    type_ = Numeric(22, 20)
+    return cast_(literal_column("5.02797279921331664759"), type_) / divisor(
+        cast_(literal_column("0.71828182845904523537"), type_)
+    )
+
+
+def test_exact_decimal_division_keeps_double_without_declared_types(
+    exact_engine: Engine,
+) -> None:
+    wide = Numeric(38, 10)  # the quotient may need 38 integer digits
+    huge = cast_(literal_column("9999999999999999999999999999"), wide) / cast_(
+        literal_column("0.0000000001"), wide
+    )
+    with exact_engine.connect() as conn:
+        assert float(conn.scalar(select(huge))) == 1e38
+        # A function hides the divisor's DECIMAL type, so DOUBLE is used.
+        untyped = conn.scalar(select(_many_decimals(lambda d: func.nullif(d, 0))))
+        assert untyped != 7
+
+
+def test_decimal_division_is_double_by_default(engine: Engine) -> None:
+    with engine.connect() as conn:
+        assert conn.scalar(select(_many_decimals())) != 7
+
+
+@st.composite
+def _decimal_operand(draw: Any) -> Tuple[decimal.Decimal, int, int]:
+    precision = draw(st.integers(1, 38))
+    scale = draw(st.integers(0, precision))
+    digits = draw(st.integers(1, precision))
+    unscaled = draw(st.integers(-(10**digits) + 1, 10**digits - 1))
+    value = decimal.Decimal(unscaled).scaleb(-scale, decimal.Context(prec=100))
+    return value, precision, scale
+
+
+@settings(max_examples=200, deadline=None)
+@given(left=_decimal_operand(), right=_decimal_operand())
+@example(  # result scale 38
+    left=(decimal.Decimal("-0." + "9" * 38), 38, 38),
+    right=(decimal.Decimal(7), 1, 0),
+)
+@example(  # largest exact quotient: 22 integer digits
+    left=(decimal.Decimal("9" * 22), 22, 0),
+    right=(decimal.Decimal("-0.0000000000000001"), 16, 16),
+)
+def test_exact_decimal_division_matches_python_decimal(
+    left: Tuple[decimal.Decimal, int, int],
+    right: Tuple[decimal.Decimal, int, int],
+) -> None:
+    (a, p1, s1), (b, p2, s2) = left, right
+    assume(p1 - s1 + s2 <= 22)  # wider quotients keep DuckDB's DOUBLE
+    expr = cast_(bindparam("a", a), Numeric(p1, s1)) / cast_(
+        bindparam("b", b), Numeric(p2, s2)
+    )
+    with _EXACT_ENGINE.connect() as conn:
+        result = conn.scalar(select(expr))
+    if b == 0:
+        assert result is None
+        return
+    assert isinstance(result, decimal.Decimal)
+    exponent = result.as_tuple().exponent
+    assert isinstance(exponent, int) and exponent <= -16
+    exact = decimal.Context(prec=100).divide(a, b)
+    assert result == _half_away_from_zero(exact, exponent)
+
+
+# hypothesis examples share one engine instead of a function-scoped fixture
+_EXACT_ENGINE = create_engine("duckdb:///:memory:", exact_decimal_division=True)
