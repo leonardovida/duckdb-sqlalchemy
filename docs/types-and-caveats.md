@@ -194,6 +194,30 @@ Generic `Float()` and `Float(precision > 24)` compile to `DOUBLE` (64 bits);
 `REAL` and `Float(24)` use 32 bits. Existing FLOAT columns retain their original
 precision until explicitly migrated.
 
+### Decimal division
+
+DuckDB divides `DECIMAL` values in `DOUBLE`, so `Numeric` division can come back
+slightly off, for example `7.00000000000000088818` instead of `7`. Pass
+`exact_decimal_division=True` to `create_engine()` to divide exactly:
+
+```python
+engine = create_engine("duckdb:///app.duckdb", exact_decimal_division=True)
+```
+
+With the option on, `a / b` is exact when both sides are columns or casts with a
+declared `Numeric(precision, scale)` or integer type, and at least one side is
+`Numeric`. The result is a `DECIMAL(38, R)` rounded half away from zero, where
+`R` is the larger of the two scales, at least 16, and limited to what fits in 38
+digits. Dividing by zero returns `NULL` instead of infinity or NaN.
+
+Other divisions keep DuckDB's `DOUBLE` result: integer by integer, `Float`,
+`Numeric` without precision and scale, bound literals and function results whose
+type is unknown, and quotients that could need more than 22 integer digits
+(`precision - scale` of the dividend plus the scale of the divisor). Exact
+division uses 128-bit integer division and is much slower than `DOUBLE`. On 10
+million `DECIMAL(18, 6)` rows it took about 2.5 seconds instead of 30
+milliseconds, so turn it on where exact results matter more than speed.
+
 ## Auto-increment columns
 
 DuckDB does not support PostgreSQL `SERIAL`. For an integer primary key that

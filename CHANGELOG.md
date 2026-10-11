@@ -14,6 +14,10 @@ preserved from the upstream project for historical context.
 - Tables and columns named `at`, `by` and other DuckDB type-function keywords now work.
 - A new end-to-end test suite runs real applications against file databases, which found and fixed the bugs below.
 
+### Features
+
+- Add `create_engine(..., exact_decimal_division=True)` for exact `Numeric` division. DuckDB divides `DECIMAL` values in `DOUBLE`, so a quotient such as 7 could come back as `7.00000000000000088818`. With the option on, columns and casts with a declared precision and scale divide exactly to at least 16 decimal places, and dividing by zero returns `NULL` instead of infinity or NaN. It is off by default because it is much slower. See [Decimal division](docs/types-and-caveats.md#decimal-division).
+
 ### Bug Fixes
 
 - Fix Alembic table renames and batch recreation in named schemas and attached catalogs. DuckDB now receives an unqualified, quoted destination name while the source retains its schema and catalog. [#194](https://github.com/leonardovida/duckdb-sqlalchemy/pull/194)

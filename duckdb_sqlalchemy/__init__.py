@@ -58,7 +58,7 @@ from sqlalchemy.exc import CompileError, InvalidRequestError, NoSuchTableError
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import bindparam
 from sqlalchemy.sql.compiler import IdentifierPreparer
-from sqlalchemy.sql.elements import BindParameter
+from sqlalchemy.sql.elements import BindParameter, Cast, ColumnClause
 from sqlalchemy.sql.selectable import Select
 
 from ._arrow import DuckDBArrowResult
@@ -93,7 +93,14 @@ from .bulk import (
 )
 from .capabilities import get_capabilities
 from .config import apply_config, get_core_config
-from .datatypes import ISCHEMA_NAMES, FixedArray, Map, Struct, register_extension_types
+from .datatypes import (
+    ISCHEMA_NAMES,
+    DuckDBInteger,
+    FixedArray,
+    Map,
+    Struct,
+    register_extension_types,
+)
 from .datatypes import Union as UnionType
 from .motherduck import (
     DIALECT_QUERY_KEYS,
@@ -1320,6 +1327,96 @@ class DuckDBCompiler(PGCompiler):
     ) -> str:
         return "NOT %s" % self._regexp_matches(binary, **kw)
 
+    def visit_truediv_binary(self, binary: Any, operator: Any, **kw: Any) -> str:
+        if getattr(self.dialect, "exact_decimal_division", False):
+            exact = self._exact_decimal_division(binary, **kw)
+            if exact is not None:
+                return exact
+        return super().visit_truediv_binary(binary, operator, **kw)
+
+    def _exact_decimal_division(self, binary: Any, **kw: Any) -> Optional[str]:
+        # DuckDB divides DECIMALs in DOUBLE. With declared precision and
+        # scale on both sides, divide the unscaled HUGEINTs instead and round
+        # half away from zero to R fractional digits, as DECIMAL(38, R).
+        result = binary.type
+        if not isinstance(result, sqltypes.Numeric) or isinstance(
+            result, sqltypes.Float
+        ):
+            return None
+        left = _exact_decimal_operand(binary.left)
+        right = _exact_decimal_operand(binary.right)
+        if left is None or right is None or left[2] and right[2]:
+            return None
+        (p1, s1, _), (_, s2, _) = left, right
+        # The quotient has at most p1 - s1 + s2 integer digits. Keep at least
+        # 16 fractional digits, otherwise fall back to DuckDB's DOUBLE.
+        integer_digits = p1 - s1 + s2
+        if integer_digits > 22:
+            return None
+        scale = min(max(s1, s2, 16), 38 - integer_digits)
+        numerator = "(%s * CAST(%d AS HUGEINT))" % (
+            self._unscaled_decimal(binary.left, left, **kw),
+            10 ** (scale + s2 - s1),
+        )
+        # NULLIF keeps division by zero NULL: DuckDB 2.0 raises on `x // 0`.
+        divisor = "nullif(%s, 0)" % self._unscaled_decimal(binary.right, right, **kw)
+        quotient = f"({numerator} // {divisor})"
+        remainder = f"({numerator} - {quotient} * {divisor})"
+        rounded = (
+            f"{quotient} + CASE WHEN abs({remainder}) >= (abs({divisor}) + 1) >> 1 "
+            f"THEN sign({numerator}) * sign({divisor}) ELSE 0 END"
+        )
+        unit = f"CAST('{decimal.Decimal(1).scaleb(-scale):f}' AS DECIMAL(38, {scale}))"
+        return f"(CAST({rounded} AS DECIMAL(38, 0)) * {unit})"
+
+    def _unscaled_decimal(
+        self, element: Any, shape: Tuple[int, int, bool], **kw: Any
+    ) -> str:
+        precision, scale, _ = shape
+        value = self.process(element, **kw)
+        if not scale:
+            return f"CAST({value} AS HUGEINT)"
+        # DECIMAL(p, s) renders exactly s fractional digits, so dropping the
+        # point yields the unscaled integer even when p + s exceeds 38.
+        return (
+            f"CAST(replace(CAST(CAST({value} AS DECIMAL({precision}, {scale})) "
+            f"AS VARCHAR), '.', '') AS HUGEINT)"
+        )
+
+
+def _exact_decimal_operand(element: Any) -> Optional[Tuple[int, int, bool]]:
+    """Return (precision, scale, is_integer) when the SQL type is declared.
+
+    Only columns and casts of columns or bound values qualify: other
+    expressions may have a different DuckDB type, or a volatile value that the
+    exact rewrite would evaluate more than once.
+    """
+    if isinstance(element, Cast):
+        if not isinstance(element.clause, (ColumnClause, BindParameter)):
+            return None
+    elif not isinstance(element, ColumnClause) or element.is_literal:
+        return None
+    type_ = element.type
+    if isinstance(type_, sqltypes.Numeric):
+        if (
+            isinstance(type_, sqltypes.Float)
+            or type_.precision is None
+            or type_.scale is None
+            or not 0 <= type_.scale <= type_.precision <= 38
+        ):
+            return None
+        return type_.precision, type_.scale, False
+    if isinstance(type_, DuckDBInteger):
+        # unsigned, HUGEINT and VARINT ranges may not fit the quotient
+        return None
+    if isinstance(type_, sqltypes.SmallInteger):
+        return 5, 0, True
+    if isinstance(type_, sqltypes.BigInteger):
+        return 19, 0, True
+    if isinstance(type_, sqltypes.Integer):
+        return 10, 0, True
+    return None
+
 
 def _process_decimal_bind(value: Any) -> Any:
     # DuckDB's binder drops a positive exponent (``Decimal("1E+5")`` binds as
@@ -1424,9 +1521,12 @@ class Dialect(PGDialect_psycopg2):
     statement_compiler = DuckDBCompiler
     ddl_compiler = DuckDBDDLCompiler
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, exact_decimal_division: bool = False, *args: Any, **kwargs: Any
+    ) -> None:
         kwargs["use_native_hstore"] = False
         super().__init__(*args, **kwargs)
+        self.exact_decimal_division = exact_decimal_division
         self._backslash_escapes = False
         self._capabilities = get_capabilities(duckdb.__version__)
 
