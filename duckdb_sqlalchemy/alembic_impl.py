@@ -35,6 +35,10 @@ __all__ = ["DuckDBImpl"]
 _previous_impl = _alembic_impl._impls.get("duckdb")
 
 
+def _float_width(ddl: str) -> int:
+    return 4 if ddl.strip().upper() in ("REAL", "FLOAT", "FLOAT4") else 8
+
+
 class DuckDBImpl(DefaultImpl):
     """Alembic implementation for DuckDB."""
 
@@ -82,6 +86,68 @@ class DuckDBImpl(DefaultImpl):
                 preserved = getattr(self, "_preserved_batch_sequences", set())
                 preserved.add(table)
                 self._preserved_batch_sequences = preserved
+
+    # DuckDB rejects DROP COLUMN, RENAME COLUMN, type and nullability changes
+    # on a table that has an index, even after DROP INDEX in the same
+    # transaction. Those operations recreate the table in batch mode instead,
+    # which rebuilds the remaining indexes afterwards.
+
+    def drop_index(self, index: Any, **kw: Any) -> None:
+        super().drop_index(index, **kw)
+        dropped = getattr(self, "_tables_with_dropped_index", set())
+        dropped.add((index.table.schema, index.table.name))
+        self._tables_with_dropped_index = dropped
+
+    def drop_column(
+        self, table_name: str, column: Any, schema: Optional[str] = None, **kw: Any
+    ) -> None:
+        indexes = self._indexes_blocking_alter(table_name, schema)
+        if indexes is None:
+            return super().drop_column(table_name, column, schema=schema, **kw)
+        with self._recreate(table_name, schema) as batch:
+            # Like PostgreSQL's DROP COLUMN, drop the column's own indexes.
+            for index in indexes:
+                if column.name in (index.get("column_names") or ()):
+                    batch.drop_index(index["name"])
+            batch.drop_column(column.name)
+
+    def alter_column(self, table_name: str, column_name: str, **kw: Any) -> None:
+        schema = kw.get("schema")
+        blocked = any(kw.get(key) is not None for key in ("nullable", "type_", "name"))
+        if not blocked or self._indexes_blocking_alter(table_name, schema) is None:
+            return super().alter_column(table_name, column_name, **kw)
+        options = {
+            key: value
+            for key, value in kw.items()
+            if key not in ("schema", "name", "autoincrement", "existing_autoincrement")
+        }
+        if kw.get("name") is not None:
+            options["new_column_name"] = kw["name"]
+        with self._recreate(table_name, schema) as batch:
+            batch.alter_column(column_name, **options)
+
+    def _indexes_blocking_alter(
+        self, table_name: str, schema: Optional[str]
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Return the table's indexes when they block ALTER, else None."""
+        if self.as_sql:
+            return None  # offline scripts cannot reflect the table
+        inspector = inspect(self.connection)
+        assert inspector is not None
+        indexes = list(inspector.get_indexes(table_name, schema=schema))
+        dropped = getattr(self, "_tables_with_dropped_index", ())
+        if indexes or (schema, table_name) in dropped:
+            return indexes
+        return None
+
+    def _recreate(self, table_name: str, schema: Optional[str]) -> Any:
+        from alembic.migration import MigrationContext
+        from alembic.operations import Operations
+
+        operations = Operations(MigrationContext.configure(self.connection))
+        return operations.batch_alter_table(
+            table_name, schema=schema, recreate="always"
+        )
 
     def drop_table(self, table: Any, **kw: Any) -> None:
         preserved = getattr(self, "_preserved_batch_sequences", set())
@@ -141,6 +207,20 @@ class DuckDBImpl(DefaultImpl):
             compiler = self.dialect.type_compiler_instance
             return _normalize_sql_expression(compiler.process(inspector_type)) != (
                 _normalize_sql_expression(compiler.process(metadata_type))
+            )
+        if isinstance(inspector_type, sqltypes.Enum) and isinstance(
+            metadata_type, sqltypes.Enum
+        ):
+            if not inspector_type.name:
+                # DuckDB does not report which named type a column uses.
+                return list(inspector_type.enums) != list(metadata_type.enums)
+        elif isinstance(inspector_type, sqltypes.Float) and isinstance(
+            metadata_type, sqltypes.Float
+        ):
+            # FLOAT, FLOAT4 and REAL are one 4-byte type in DuckDB.
+            compiler = self.dialect.type_compiler_instance
+            return _float_width(compiler.process(inspector_type)) != _float_width(
+                compiler.process(metadata_type)
             )
         return super().compare_type(inspector_column, metadata_column)
 

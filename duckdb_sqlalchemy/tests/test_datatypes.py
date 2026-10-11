@@ -259,7 +259,8 @@ def test_double_reflection_uses_double_type(engine: Engine) -> None:
 
     assert type(table.c.double_col.type) is sqltypes.DOUBLE
     assert type(table.c.float8_col.type) is sqltypes.DOUBLE
-    assert type(table.c.float4_col.type) is FLOAT
+    # 4-byte floats stay 4 bytes when the reflected table is created again.
+    assert type(table.c.float4_col.type) is sqltypes.REAL
 
 
 def test_pk_and_index_reflection(engine: Engine) -> None:
