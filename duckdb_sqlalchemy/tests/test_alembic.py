@@ -19,6 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
     inspect,
+    select,
     true,
 )
 from sqlalchemy.engine import Engine
@@ -255,3 +256,139 @@ def test_user_defined_impl_keeps_precedence() -> None:
         """
     )
     assert output == "AlembicDuckDBImpl"
+
+
+def _prepare_rename_schema(connection: Any, schema: Any) -> None:
+    if schema == '"other.db"."odd schema"':
+        connection.exec_driver_sql("ATTACH ':memory:' AS \"other.db\"")
+        connection.commit()
+        connection.exec_driver_sql('CREATE SCHEMA "other.db"."odd schema"')
+    elif schema is not None:
+        quote = connection.dialect.identifier_preparer.quote
+        connection.exec_driver_sql(f"CREATE SCHEMA {quote(schema)}")
+
+
+@pytest.mark.parametrize(
+    "schema", [None, "analytics", "odd schema", '"other.db"."odd schema"']
+)
+def test_rename_table_in_schema(engine: Engine, schema: Any) -> None:
+    table = Table("old.table", MetaData(), Column("value", Integer), schema=schema)
+    with engine.connect() as connection:
+        _prepare_rename_schema(connection, schema)
+        table.create(connection)
+        connection.execute(table.insert(), {"value": 42})
+        connection.commit()
+        Operations(MigrationContext.configure(connection)).rename_table(
+            table.name, "new.table", schema=schema
+        )
+        renamed = table.to_metadata(MetaData(), name="new.table")
+        assert connection.execute(select(renamed.c.value)).scalars().all() == [42]
+        assert not inspect(connection).has_table(table.name, schema=schema)
+
+
+@pytest.mark.parametrize(
+    "schema", [None, "analytics", "odd schema", '"other.db"."odd schema"']
+)
+@pytest.mark.parametrize("copy_from_model", [False, True])
+def test_batch_recreation_in_schema(
+    engine: Engine, schema: Any, copy_from_model: bool
+) -> None:
+    table = Table(
+        "items",
+        MetaData(),
+        Column("id", Integer, primary_key=True),
+        Column("sku", String, comment="stock keeping unit"),
+        schema=schema,
+    )
+    with engine.connect() as connection:
+        _prepare_rename_schema(connection, schema)
+        table.create(connection)
+        connection.execute(table.insert(), [{"sku": "a"}, {"sku": "b"}])
+        connection.commit()
+        with Operations(MigrationContext.configure(connection)).batch_alter_table(
+            table.name,
+            schema=schema,
+            recreate="always",
+            copy_from=table if copy_from_model else None,
+        ) as batch:
+            batch.create_unique_constraint("uq_items_sku", ["sku"])
+        connection.commit()
+        connection.execute(table.insert(), {"sku": "c"})
+        assert connection.execute(select(table).order_by(table.c.id)).all() == [
+            (1, "a"),
+            (2, "b"),
+            (3, "c"),
+        ]
+        inspector = inspect(connection)
+        assert inspector.get_sequence_names(schema=schema) == ["items_id_seq"]
+        assert inspector.get_unique_constraints(table.name, schema=schema)[0][
+            "column_names"
+        ] == ["sku"]
+        assert (
+            inspector.get_columns(table.name, schema=schema)[1]["comment"]
+            == "stock keeping unit"
+        )
+        assert table.info == {}
+        assert not inspector.has_table("_alembic_tmp_items", schema=schema)
+        if schema in (None, "analytics"):
+            table.append_constraint(UniqueConstraint("sku", name="uq_items_sku"))
+            # Named schemas reflect as catalog.schema. Match that namespace
+            # when checking Alembic's schema-inclusive autogeneration.
+            autogen_schema = schema
+            metadata = table.metadata
+            if schema is not None:
+                database = connection.exec_driver_sql(
+                    "SELECT current_database()"
+                ).scalar_one()
+                quote = connection.dialect.identifier_preparer.quote
+                autogen_schema = f"{quote(database)}.{quote(schema)}"
+                metadata = MetaData()
+                table.to_metadata(metadata, schema=autogen_schema)
+            context = MigrationContext.configure(
+                connection,
+                opts={
+                    "include_schemas": True,
+                    "include_name": lambda name, type_, parents: (
+                        type_ != "schema" or name == autogen_schema
+                    ),
+                    "compare_server_default": True,
+                },
+            )
+            assert compare_metadata(context, metadata) == []
+
+
+def test_offline_rename_in_schema() -> None:
+    buffer = io.StringIO()
+    context = MigrationContext.configure(
+        dialect_name="duckdb", opts={"as_sql": True, "output_buffer": buffer}
+    )
+    Operations(context).rename_table("old.table", "new.table", schema="odd schema")
+    assert buffer.getvalue().strip() == (
+        'ALTER TABLE "odd schema"."old.table" RENAME TO "new.table";'
+    )
+
+
+@pytest.mark.parametrize("logical_schema", [None, "logical"])
+def test_rename_table_respects_schema_translation(
+    engine: Engine, logical_schema: Any
+) -> None:
+    table = Table(
+        "old.table", MetaData(), Column("value", Integer), schema=logical_schema
+    )
+    with engine.connect() as connection:
+        connection.exec_driver_sql('CREATE SCHEMA "odd schema"')
+        connection.exec_driver_sql('CREATE TABLE "old.table" (value INTEGER)')
+        connection.exec_driver_sql('INSERT INTO "old.table" VALUES (99)')
+        translated = connection.execution_options(
+            schema_translate_map={logical_schema: "odd schema"}
+        )
+        table.create(translated)
+        translated.execute(table.insert(), {"value": 42})
+        connection.commit()
+        Operations(MigrationContext.configure(translated)).rename_table(
+            table.name, "new.table", schema=logical_schema
+        )
+        renamed = table.to_metadata(MetaData(), name="new.table")
+        assert translated.execute(select(renamed.c.value)).scalars().all() == [42]
+        assert connection.exec_driver_sql('SELECT * FROM "old.table"').all() == [(99,)]
+        assert not inspect(connection).has_table(table.name, schema="odd schema")
