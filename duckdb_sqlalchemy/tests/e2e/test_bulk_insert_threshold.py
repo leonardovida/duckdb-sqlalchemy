@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
+import sqlalchemy
+from packaging.version import Version
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -17,6 +19,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Table,
+    func,
     insert,
     select,
     text,
@@ -28,6 +31,8 @@ from ...datatypes import UBigInteger
 from .conftest import EngineFactory
 
 ROWS = Dialect.duckdb_copy_threshold + 1
+# The preserve_rowcount execution option arrived in SQLAlchemy 2.0.28.
+PRESERVES_ROWCOUNT = Version(sqlalchemy.__version__) >= Version("2.0.28")
 UTC = datetime.timezone.utc
 
 
@@ -93,7 +98,11 @@ def test_fast_path_and_ordinary_inserts_store_identical_rows(
         with engine.begin() as conn:
             options = {"duckdb_copy_threshold": threshold, "preserve_rowcount": True}
             result = conn.execution_options(**options).execute(table.insert(), rows)
-            assert result.rowcount == ROWS
+            if PRESERVES_ROWCOUNT:
+                assert result.rowcount == ROWS
+            assert (
+                conn.execute(select(func.count()).select_from(table)).scalar() == ROWS
+            )
     assert register_calls == [True]
 
     with engine.connect() as conn:

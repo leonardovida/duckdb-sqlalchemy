@@ -34,6 +34,15 @@ PostgreSQL-compatible. See `ARCHITECTURE.md` for the module map and invariants.
 - Bulk inserts over `duckdb_copy_threshold` (default 10k rows) register an Arrow table (pandas fallback) and run `INSERT ... SELECT`.
 - MotherDuck tokens are read from `MOTHERDUCK_TOKEN` (or `motherduck_token`) for MotherDuck databases.
 
+## Release Notes and Breaking Changes
+
+Release notes are in `CHANGELOG.md` (and the GitHub releases). Every breaking
+or behavior change is indexed by version in `docs/breaking-changes.md`. Read its
+"Unreleased" section before changing dialect behavior, and add an entry there in
+the same PR when users could notice the change. Testing rules, including the
+preference for end-to-end tests in `duckdb_sqlalchemy/tests/e2e/`, are in
+`AGENTS.md`.
+
 ## Supported Versions
 
 `noxfile.py` is the source of truth. It tests Python 3.10-3.14, SQLAlchemy

@@ -18,6 +18,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Table,
+    event,
     func,
     inspect,
     text,
@@ -247,3 +248,28 @@ def test_alter_operations_on_indexed_tables(
     with engine.connect() as conn:
         row = conn.execute(text("SELECT * FROM users")).mappings().one()
     assert row["id"] == 1 and row.get("n2") == "b"
+
+
+def test_drop_column_without_indexes_stays_a_plain_alter(
+    make_engine: EngineFactory,
+) -> None:
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    engine = make_engine("duckdb:///:memory:")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE t (id INTEGER, gone INTEGER)"))
+        statements: list = []
+        event.listen(conn, "before_cursor_execute", lambda *a: statements.append(a[2]))
+        Operations(MigrationContext.configure(conn)).drop_column("t", "gone")
+    assert any(s.startswith("ALTER TABLE t DROP COLUMN gone") for s in statements)
+    assert not any("_alembic_tmp" in s for s in statements)
+    assert [c["name"] for c in inspect(engine).get_columns("t")] == ["id"]
+
+    # Offline scripts cannot reflect indexes and keep the plain statement.
+    buffer = io.StringIO()
+    context = MigrationContext.configure(
+        dialect_name="duckdb", opts={"as_sql": True, "output_buffer": buffer}
+    )
+    Operations(context).drop_column("t", "gone")
+    assert "ALTER TABLE t DROP COLUMN gone" in buffer.getvalue()

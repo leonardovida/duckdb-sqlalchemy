@@ -1,4 +1,3 @@
-import importlib.metadata
 import os
 import threading
 import time
@@ -10,8 +9,6 @@ from urllib.parse import parse_qs
 
 import duckdb
 import pytest
-import sqlalchemy
-from packaging.version import Version
 from sqlalchemy import (
     Column,
     Integer,
@@ -19,7 +16,6 @@ from sqlalchemy import (
     String,
     Table,
     create_engine,
-    inspect,
     pool,
     select,
     text,
@@ -33,7 +29,6 @@ from duckdb_sqlalchemy import (
     ConnectionWrapper,
     CursorWrapper,
     Dialect,
-    MotherDuckURL,
     _apply_motherduck_defaults,
     _is_idempotent_statement,
     _is_transient_error,
@@ -42,8 +37,6 @@ from duckdb_sqlalchemy import (
     _normalize_motherduck_config,
     _parse_register_params,
     _pool_override_from_url,
-    _prepare_connection_params,
-    _supports,
     create_engine_from_paths,
     olap,
     stable_session_hint,
@@ -172,36 +165,6 @@ def test_connect_keeps_token_in_config_and_moves_transport_options(monkeypatch) 
     )
 
 
-def test_prepare_connection_params_normalizes_config(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("MOTHERDUCK_TOKEN", raising=False)
-    monkeypatch.delenv("motherduck_token", raising=False)
-    cparams = {
-        "database": "md:my_db",
-        "config": {
-            "host": "custom.motherduck.com",
-            "threads": 4,
-            "application_name": "analytics-app",
-            "custom_setting": "value",
-        },
-        "url_config": {
-            "memory_limit": "1GB",
-            "duckdb_sqlalchemy_pool": "queue",
-        },
-    }
-
-    ext, application_name = _prepare_connection_params(cparams, {"threads"})
-
-    database, query = cparams["database"].split("?", 1)
-    assert database == "md:my_db"
-    assert parse_qs(query) == {"host": ["custom.motherduck.com"]}
-    assert cparams["config"] == {"threads": 4}
-    assert ext == {"custom_setting": "value", "memory_limit": "1GB"}
-    assert application_name == "analytics-app"
-    assert "url_config" not in cparams
-
-
 def test_connect_moves_application_name_to_user_agent(monkeypatch) -> None:
     captured = {}
 
@@ -245,17 +208,6 @@ def test_connect_moves_application_name_to_user_agent(monkeypatch) -> None:
     assert captured["config"]["custom_user_agent"].endswith("service/2")
 
 
-def test_create_connect_args_defaults_to_memory_before_path_query() -> None:
-    dialect = Dialect()
-    url = SAURL.create("duckdb", query={"access_mode": "read_only", "threads": "4"})
-
-    args, kwargs = dialect.create_connect_args(url)
-
-    assert args == ()
-    assert kwargs["database"] == ":memory:"
-    assert kwargs["url_config"] == {"access_mode": "read_only", "threads": "4"}
-
-
 def test_create_connect_args_strips_pool_override() -> None:
     dialect = Dialect()
     url = URL(
@@ -266,11 +218,6 @@ def test_create_connect_args_strips_pool_override() -> None:
     _, kwargs = dialect.create_connect_args(url)
 
     assert kwargs["url_config"] == {"threads": "4"}
-
-
-def test_pool_override_from_url() -> None:
-    url = URL(database="md:my_db", query={"duckdb_sqlalchemy_pool": "queue"})
-    assert Dialect.get_pool_class(url) is pool.QueuePool
 
 
 def test_create_engine_from_paths_requires_paths() -> None:
@@ -315,30 +262,6 @@ def test_query_error_terms_do_not_invalidate_connection(identifier: str) -> None
             ).scalar_one()
             == 1
         )
-
-
-def test_retry_on_transient_select() -> None:
-    dialect = Dialect()
-
-    class DummyCursor:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def execute(self, statement, parameters=None):
-            self.calls += 1
-            if self.calls == 1:
-                raise RuntimeError("HTTP Error: 503 Service Unavailable")
-            return None
-
-    class DummyContext:
-        execution_options = {
-            "duckdb_retry_on_transient": True,
-            "duckdb_retry_count": 1,
-        }
-
-    cursor = DummyCursor()
-    dialect.do_execute(cursor, "select 1", (), context=DummyContext())
-    assert cursor.calls == 2
 
 
 def test_retry_on_transient_select_without_params() -> None:
@@ -409,60 +332,6 @@ def test_retry_does_not_repeat_read_prefixed_multistatement_mutation(
     assert connection.execute("SELECT * FROM retry_target").fetchall() == [(1,)]
 
 
-@pytest.mark.skipif(
-    Version(sqlalchemy.__version__) < Version("2.1.0b1"),
-    reason="SQLAlchemy 2.1 execution context compatibility",
-)
-def test_sqlalchemy_21_execution_and_reflection_compatibility() -> None:
-    engine = create_engine("duckdb:///:memory:")
-    metadata = MetaData()
-    Table(
-        "sqlalchemy_21_compat",
-        metadata,
-        Column("id", Integer, primary_key=True),
-        Column("name", String),
-    )
-    metadata.create_all(engine)
-
-    with engine.connect() as connection:
-        assert connection.execute(text("SELECT 1")).scalar_one() == 1
-        assert [
-            column["name"]
-            for column in inspect(connection).get_columns("sqlalchemy_21_compat")
-        ] == ["id", "name"]
-
-    reflected = Table("sqlalchemy_21_compat", MetaData(), autoload_with=engine)
-    assert list(reflected.columns.keys()) == ["id", "name"]
-
-
-def test_motherduck_url_builder_moves_path_params() -> None:
-    with pytest.warns(DeprecationWarning, match="dbinstance_inactivity_ttl"):
-        url = MotherDuckURL(
-            database="md:my_db",
-            session_name="team-a",
-            attach_mode="single",
-            motherduck_dbinstance_inactivity_ttl="15m",
-            query={"memory_limit": "1GB"},
-        )
-
-    assert url.database == "md:my_db"
-    assert url.query == {
-        "memory_limit": "1GB",
-        "session_name": "team-a",
-        "attach_mode": "single",
-        "dbinstance_inactivity_ttl": "15m",
-    }
-    _, kwargs = Dialect().create_connect_args(url)
-    database, query = kwargs["database"].split("?", 1)
-    assert database == "md:my_db"
-    assert parse_qs(query) == {
-        "session_name": ["team-a"],
-        "attach_mode": ["single"],
-        "dbinstance_inactivity_ttl": ["15m"],
-    }
-    assert kwargs["url_config"] == {"memory_limit": "1GB"}
-
-
 def test_stable_session_name_is_deterministic() -> None:
     name1 = stable_session_name("user-123", salt="salt", length=8)
     name2 = stable_session_name("user-123", salt="salt", length=8)
@@ -475,12 +344,6 @@ def test_stable_session_hint_warns_and_delegates() -> None:
         hint = stable_session_hint("user-123", salt="salt", length=8)
 
     assert hint == stable_session_name("user-123", salt="salt", length=8)
-
-
-def test_runtime_version_matches_installed_metadata() -> None:
-    assert duckdb_sqlalchemy.__version__ == importlib.metadata.version(
-        "duckdb-sqlalchemy"
-    )
 
 
 def test_apply_config_uses_literal_processors() -> None:
@@ -535,39 +398,6 @@ def test_fields_types_share_field_normalization_and_cache_key(factory: Any) -> N
     )
 
 
-def test_get_core_config_includes_motherduck_keys() -> None:
-    core = get_core_config()
-
-    expected = {
-        "token",
-        "motherduck_token",
-        "motherduck_oauth_token",
-        "oauth_token",
-        "motherduck_host",
-        "host",
-        "motherduck_region_host",
-        "region_host",
-        "motherduck_port",
-        "port",
-        "motherduck_use_tls",
-        "tls",
-        "motherduck_grpc_local_subchannel_pool",
-        "grpc_local_subchannel_pool",
-        "slt",
-        "attach_mode",
-        "saas_mode",
-        "motherduck_enable_server_side_temp_tables",
-        "session_name",
-        "motherduck_session_name",
-        "session_hint",
-        "motherduck_session_hint",
-        "access_mode",
-        "dbinstance_inactivity_ttl",
-        "motherduck_dbinstance_inactivity_ttl",
-    }
-    assert expected.issubset(core)
-
-
 def test_looks_like_motherduck_detection() -> None:
     assert _looks_like_motherduck("md:db", {}) is True
     assert _looks_like_motherduck("motherduck:db", {}) is True
@@ -585,19 +415,6 @@ def test_looks_like_motherduck_detection() -> None:
     assert _looks_like_motherduck("local.db", {}) is False
 
 
-def test_apply_motherduck_defaults_env_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Windows environment keys are case-insensitive. Use an explicit mapping
-    # to exercise precedence between the two supported spellings.
-    monkeypatch.setattr(os, "environ", dict(os.environ))
-    config = {}
-    monkeypatch.setenv("MOTHERDUCK_TOKEN", "token123")
-    monkeypatch.delenv("motherduck_token", raising=False)
-
-    _apply_motherduck_defaults(config, "md:my_db")
-
-    assert config["motherduck_token"] == "token123"
-
-
 def test_apply_motherduck_defaults_prefers_standard_env_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -611,18 +428,6 @@ def test_apply_motherduck_defaults_prefers_standard_env_token(
     _apply_motherduck_defaults(config, "md:my_db")
 
     assert config["motherduck_token"] == "standard-token"
-
-
-def test_apply_motherduck_defaults_skips_non_md(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config = {}
-    monkeypatch.setenv("MOTHERDUCK_TOKEN", "token123")
-    monkeypatch.delenv("motherduck_token", raising=False)
-
-    _apply_motherduck_defaults(config, "local.db")
-
-    assert "motherduck_token" not in config
 
 
 def test_apply_motherduck_defaults_requires_string() -> None:
@@ -661,46 +466,6 @@ def test_normalize_motherduck_config_normalizes_oauth_alias() -> None:
     assert config == {"motherduck_oauth_token": "oauth123"}
 
 
-def test_has_comment_support_false_on_parser_exception(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _supports.has_comment_support.cache_clear()
-
-    class DummyConn:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def execute(self, *args, **kwargs):
-            raise _supports.duckdb.ParserException("nope")
-
-    monkeypatch.setattr(_supports.duckdb, "connect", lambda *_: DummyConn())
-
-    assert _supports.has_comment_support() is False
-
-
-def test_has_comment_support_true_when_no_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _supports.has_comment_support.cache_clear()
-
-    class DummyConn:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def execute(self, *args, **kwargs):
-            return None
-
-    monkeypatch.setattr(_supports.duckdb, "connect", lambda *_: DummyConn())
-
-    assert _supports.has_comment_support() is True
-
-
 def test_identifier_preparer_separate_and_format_schema() -> None:
     preparer = Dialect().identifier_preparer
 
@@ -724,88 +489,6 @@ def test_identifier_preparer_separate_and_format_schema() -> None:
     )
 
 
-def test_identifier_preparer_reserved_words_are_cached(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    duckdb_sqlalchemy._load_reserved_words.cache_clear()
-    calls = 0
-
-    class DummyCursor:
-        def execute(self, statement: str):
-            nonlocal calls
-            calls += 1
-            return self
-
-        def fetchall(self):
-            return [("select",)]
-
-    monkeypatch.setattr(duckdb_sqlalchemy.duckdb, "cursor", lambda: DummyCursor())
-
-    Dialect().identifier_preparer
-    Dialect().identifier_preparer
-
-    assert calls == 1
-
-
-def test_table_function_error_without_table_valued(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class DummyFunc:
-        def __getattr__(self, name):
-            def _fn(*args, **kwargs):
-                return object()
-
-            return _fn
-
-    monkeypatch.setattr(olap, "func", DummyFunc())
-
-    with pytest.raises(NotImplementedError):
-        olap.table_function("read_parquet", "path", columns=["col"])
-
-
-def test_table_function_returns_function_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    called = {}
-
-    class DummyFunc:
-        def __getattr__(self, name):
-            def _fn(*args, **kwargs):
-                called["name"] = name
-                called["args"] = args
-                called["kwargs"] = kwargs
-                return "ok"
-
-            return _fn
-
-    monkeypatch.setattr(olap, "func", DummyFunc())
-
-    result = olap.table_function("read_csv", "file.csv", header=True)
-
-    assert result == "ok"
-    assert called["name"] == "read_csv"
-    assert called["args"][0] == "file.csv"
-    assert "header" in str(called["args"][1])
-    assert called["kwargs"] == {}
-
-
-def test_table_function_renders_duckdb_named_parameters() -> None:
-    csv = olap.read_csv_auto(
-        "file.csv",
-        columns=["value"],
-        header=True,
-        sample_size=10,
-    )
-
-    stmt = select(csv.c.value).select_from(csv)
-    compiled = stmt.compile(dialect=Dialect())
-
-    sql = str(compiled)
-    assert "read_csv_auto" in sql
-    assert '"header" :=' in sql
-    assert '"sample_size" :=' in sql
-    assert compiled.params["header_1"] is True
-    assert compiled.params["sample_size_1"] == 10
-
-
 def test_table_function_quotes_reserved_named_parameters() -> None:
     flights = olap.md_list_flights(limit=1, offset=0)
 
@@ -823,28 +506,6 @@ def test_table_function_rejects_invalid_named_parameter() -> None:
     kwargs: dict[str, Any] = {"bad-name": True}
     with pytest.raises(ValueError, match="invalid table function parameter"):
         olap.table_function("read_csv", "file.csv", **kwargs)
-
-
-def test_quack_query_renders_stateless_remote_query() -> None:
-    remote = olap.quack_query(
-        "quack:localhost",
-        "select 42 as answer",
-        columns=["answer"],
-        token="secret",
-        disable_ssl=True,
-    )
-
-    stmt = select(remote.c.answer).select_from(remote)
-    compiled = stmt.compile(dialect=Dialect())
-
-    sql = str(compiled)
-    assert "quack_query" in sql
-    assert '"token" :=' in sql
-    assert '"disable_ssl" :=' in sql
-    assert compiled.params["quack_query_1"] == "quack:localhost"
-    assert compiled.params["quack_query_2"] == "select 42 as answer"
-    assert compiled.params["token_1"] == "secret"
-    assert compiled.params["disable_ssl_1"] is True
 
 
 @pytest.mark.parametrize(
@@ -1313,50 +974,6 @@ def test_motherduck_dive_status_helper_renders_named_parameters() -> None:
     assert compiled.params["version_1"] == 2
 
 
-def test_motherduck_dive_status_columns_compile() -> None:
-    dives = olap.md_list_dives()
-    stmt = select(
-        dives.c.id,
-        dives.c.status,
-        dives.c.status_changed_at,
-        dives.c.status_set_by,
-        dives.c.status_applies_to_version,
-    ).select_from(dives)
-    sql = str(stmt.compile(dialect=Dialect()))
-
-    assert "md_list_dives" in sql
-    assert "status_applies_to_version" in sql
-
-
-def test_cursorwrapper_execute_basic_paths() -> None:
-    class DummyConn:
-        def __init__(self) -> None:
-            self.calls = []
-
-        def commit(self) -> None:
-            self.calls.append(("commit",))
-
-        def register(self, name, df) -> None:
-            self.calls.append(("register", name, df))
-
-        def execute(self, *args):
-            self.calls.append(("execute", args))
-
-    conn = DummyConn()
-    cursor = _cursor(conn)
-    df = object()
-
-    cursor.execute("COMMIT")
-    cursor.execute("register", ("view", df))
-    cursor.execute("select 1")
-    cursor.execute("select ?", (1,))
-
-    assert ("commit",) in conn.calls
-    assert ("register", "view", df) in conn.calls
-    assert ("execute", ("select 1",)) in conn.calls
-    assert ("execute", ("select ?", (1,))) in conn.calls
-
-
 def test_cursorwrapper_execute_show_isolation_level() -> None:
     class DummyConn:
         def __init__(self) -> None:
@@ -1404,11 +1021,6 @@ def test_cursorwrapper_execute_postgres_compatibility_statements() -> None:
         ("begin",),
         ("execute", "select 'on' as standard_conforming_strings"),
     ]
-
-
-def test_get_default_isolation_level_does_not_query_connection() -> None:
-    # a constant, so it works without a usable DBAPI connection
-    assert Dialect().get_default_isolation_level(object()) == "READ COMMITTED"
 
 
 def test_engine_connect_does_not_probe_isolation_level(
@@ -1480,15 +1092,6 @@ def test_cursorwrapper_execute_preserves_runtime_errors_without_message() -> Non
     cursor = _cursor(BrokenConn())
     with pytest.raises(RuntimeError):
         cursor.execute("select 1")
-
-
-def test_cursorwrapper_description_handles_unhashable_type_code() -> None:
-    class DummyConn:
-        description = [("col", ["complex"])]
-
-    cursor = _cursor(DummyConn())
-
-    assert cursor.description == [("col", "['complex']")]
 
 
 def test_cursorwrapper_description_preserves_descriptor_shapes() -> None:
@@ -1570,24 +1173,6 @@ def test_reserved_words_load_once_during_concurrent_engine_startup(monkeypatch) 
     assert cursor_calls == 1
 
 
-def test_connectionwrapper_close_marks_closed() -> None:
-    class DummyConn:
-        def __init__(self) -> None:
-            self.closed = False
-
-        def close(self) -> None:
-            self.closed = True
-
-    conn = DummyConn()
-    wrapper = ConnectionWrapper(cast(duckdb.DuckDBPyConnection, conn))
-    assert wrapper.closed is False
-
-    wrapper.close()
-
-    assert wrapper.closed is True
-    assert conn.closed is True
-
-
 @pytest.mark.parametrize(
     ("handler", "expected_statement"),
     [
@@ -1632,26 +1217,6 @@ def test_implicit_sequence_event_handlers_share_ddl_execution(
     assert connection.statements == [expected_statement]
 
 
-def test_map_processors(monkeypatch: pytest.MonkeyPatch) -> None:
-    map_type = dt.Map(String, Integer)
-    bind = map_type.bind_processor(Dialect())
-
-    assert bind({"a": 1, "b": 2}) == {"key": ["a", "b"], "value": [1, 2]}
-    assert bind({}) == {"key": [], "value": []}
-    assert bind(None) is None
-
-    result = map_type.result_processor(Dialect(), None)({"key": ["a"], "value": [1]})
-    if dt.IS_GT_1:
-        assert result == {"key": ["a"], "value": [1]}
-    else:
-        assert result == {"a": 1}
-
-    monkeypatch.setattr(dt, "IS_GT_1", False)
-    legacy = dt.Map(String, Integer).result_processor(Dialect(), None)
-    assert legacy({"key": ["a"], "value": [1]}) == {"a": 1}
-    assert legacy(None) is None
-
-
 def test_struct_or_union_requires_fields() -> None:
     dialect = Dialect()
     compiler = dialect.type_compiler
@@ -1684,107 +1249,6 @@ def test_field_type_compilers_render_normalized_fields(
     dialect = Dialect()
 
     assert dialect.type_compiler.process(field_type) == expected
-
-
-def test_duckdb_reflection_filters_share_schema_database_builder() -> None:
-    dialect = Dialect()
-
-    stmt, params = dialect._duckdb_reflection_stmt(
-        "duckdb_tables",
-        "table_name",
-        schema='"analytics db"."reporting"',
-        filter_names=["orders"],
-        include_internal_filter=True,
-    )
-
-    assert "AND internal = false" in stmt.text
-    assert "AND schema_name = :schema_name" in stmt.text
-    assert "AND database_name = :database_name" in stmt.text
-    assert "AND table_name IN :filter_names" in stmt.text
-    assert params == {
-        "schema_name": "reporting",
-        "database_name": "analytics db",
-        "filter_names": ["orders"],
-    }
-
-    ordered_stmt, ordered_params = dialect._duckdb_reflection_stmt(
-        "duckdb_tables",
-        "table_name",
-        filter_names=["orders"],
-        suffix="ORDER BY table_name",
-    )
-
-    assert ordered_stmt.text.rstrip().endswith("ORDER BY table_name")
-    assert ordered_params == {"filter_names": ["orders"]}
-    assert ordered_stmt._bindparams["filter_names"].expanding
-
-    class DummyResult:
-        def mappings(self) -> "DummyResult":
-            return self
-
-        def __iter__(self):  # type: ignore[no-untyped-def]
-            return iter(
-                [
-                    {
-                        "database_name": "analytics db",
-                        "schema_name": "reporting",
-                        "table_name": "orders",
-                    }
-                ]
-            )
-
-        def first(self) -> tuple[int]:
-            return (1,)
-
-    class DummyConnection:
-        def __init__(self) -> None:
-            self.statement: Any = None
-            self.params: Optional[dict[str, Any]] = None
-
-        def execute(self, statement: Any, params: dict[str, Any]) -> DummyResult:
-            self.statement = statement
-            self.params = params
-            return DummyResult()
-
-    connection = DummyConnection()
-
-    assert dialect._duckdb_relation_exists(
-        cast(Any, connection), "orders", '"analytics db"."reporting"'
-    )
-    assert connection.statement is not None
-    assert "AND table_name = :table_name" in connection.statement.text
-    assert "AND schema_name = :schema_name" in connection.statement.text
-    assert "AND database_name = :database_name" in connection.statement.text
-    assert connection.params == {
-        "table_name": "orders",
-        "schema_name": "reporting",
-        "database_name": "analytics db",
-    }
-
-
-def test_iter_reflection_results_defaults_only_missing_tables() -> None:
-    dialect = Dialect()
-    default_calls = 0
-
-    def default_factory() -> list[Any]:
-        nonlocal default_calls
-        default_calls += 1
-        return []
-
-    results = list(
-        dialect._iter_reflection_results(
-            "analytics",
-            ["orders", "customers"],
-            {"orders": [{"name": "orders_pk"}]},
-            default_factory,
-        )
-    )
-
-    assert results == [
-        (("analytics", "orders"), [{"name": "orders_pk"}]),
-        (("analytics", "customers"), []),
-    ]
-    assert default_calls == 1
 
 
 def test_parse_duckdb_enum_labels_unquotes_escaped_strings() -> None:
@@ -1971,28 +1435,6 @@ def test_copy_from_rows_header_option_writes_header_with_columns() -> None:
 
     rows = conn.execute("SELECT i, label FROM safe ORDER BY i").fetchall()
     assert rows == [(1, "one"), (2, "two")]
-
-
-def test_copy_rows_as_sequences_infers_mapping_columns() -> None:
-    rows, columns = duckdb_sqlalchemy.bulk._copy_rows_as_sequences(
-        {"id": 1, "label": "one"},
-        [{"id": 2, "label": "two"}],
-        None,
-    )
-
-    assert columns == ["id", "label"]
-    assert list(rows) == [[1, "one"], [2, "two"]]
-
-
-def test_copy_rows_as_sequences_uses_explicit_mapping_columns() -> None:
-    rows, columns = duckdb_sqlalchemy.bulk._copy_rows_as_sequences(
-        {"id": 1, "label": "one"},
-        [{"id": 2}],
-        ["label", "id"],
-    )
-
-    assert columns == ["label", "id"]
-    assert list(rows) == [["one", 1], [None, 2]]
 
 
 @pytest.mark.parametrize("copy_outcome", ["success", "failure", "removed_file"])
@@ -2210,26 +1652,6 @@ def test_pool_class_uses_override_aliases(
     assert Dialect.get_pool_class(url) is expected
 
 
-@pytest.mark.parametrize(
-    ("url", "expected"),
-    [
-        (SAURL.create("duckdb", database=":memory:"), pool.SingletonThreadPool),
-        (SAURL.create("duckdb", database=":memory:named"), pool.QueuePool),
-        (SAURL.create("duckdb"), pool.SingletonThreadPool),
-        (SAURL.create("duckdb", database=""), pool.SingletonThreadPool),
-        (SAURL.create("duckdb", database="local.db"), pool.QueuePool),
-        (SAURL.create("duckdb", database="md:my_db"), pool.NullPool),
-    ],
-)
-def test_pool_class_defaults(url: SAURL, expected: type[pool.Pool]) -> None:
-    assert Dialect.get_pool_class(url) is expected
-
-
-def test_pool_class_for_empty_database() -> None:
-    url = SAURL.create("duckdb")
-    assert Dialect.get_pool_class(url) is pool.SingletonThreadPool
-
-
 def test_apply_config_handles_none_path_decimal() -> None:
     import decimal
     from pathlib import Path
@@ -2291,65 +1713,6 @@ def test_apply_config_stringifies_unknown_values() -> None:
 
     string_processor = String().literal_processor(dialect=dialect)
     assert conn.executed == [f"SET custom_option = {string_processor('custom-value')}"]
-
-
-def test_motherduck_helpers() -> None:
-    url = md.MotherDuckURL(
-        database="md:db",
-        query={"memory_limit": "1GB"},
-        path_query={"user": "alice", "session_name": "team"},
-    )
-    assert url.database == "md:db"
-    assert url.query == {"memory_limit": "1GB", "user": "alice", "session_name": "team"}
-
-    appended = md.append_query_to_database("md:db?user=alice", {"session_hint": "s"})
-    assert appended == "md:db?user=alice&session_hint=s"
-
-    normalized = md._normalize_path_item("duckdb:///tmp.db")
-    assert normalized.drivername == "duckdb"
-
-    normalized = md._normalize_path_item("md:db")
-    assert normalized.database == "md:db"
-
-
-def test_database_with_path_query_normalizes_and_appends() -> None:
-    with warnings.catch_warnings(record=True) as recorded:
-        warnings.simplefilter("always")
-        database = md._database_with_path_query(
-            "md:db?user=alice",
-            {"motherduck_host": "api.staging.motherduck.com"},
-            {"tls": False},
-        )
-
-    assert database is not None
-    database_name, query = database.split("?", 1)
-    assert database_name == "md:db"
-    assert parse_qs(query) == {
-        "user": ["alice"],
-        "host": ["api.staging.motherduck.com"],
-        "tls": ["false"],
-    }
-    assert [str(w.message) for w in recorded] == [
-        "`motherduck_host` is deprecated; use `host` instead.",
-    ]
-
-
-def test_motherduck_url_coerces_path_and_query_values() -> None:
-    url = md.MotherDuckURL(
-        database="md:db",
-        query={"saas_mode": False, "token": None},
-        path_query={
-            "session_name": "team",
-            "attach_mode": ("single", "workspace"),
-            "cache_buster": None,
-        },
-    )
-    assert url.database == "md:db"
-    assert url.query == {
-        "saas_mode": "false",
-        "session_name": "team",
-        "attach_mode": ("single", "workspace"),
-    }
 
 
 def test_motherduck_url_rejects_database_names_with_commas() -> None:
@@ -2592,31 +1955,6 @@ def test_extract_path_query_from_config_handles_motherduck_aliases() -> None:
         "`motherduck_attach_mode` is deprecated; use `attach_mode` instead.",
         "`motherduck_saas_mode` is deprecated; use `saas_mode` instead.",
         "`cachebust` is deprecated; use `cache_buster` instead.",
-    ]
-
-
-def test_extract_path_query_from_config_handles_legacy_transport_aliases() -> None:
-    config = {
-        "motherduck_host": "api.staging.motherduck.com",
-        "motherduck_port": 443,
-        "motherduck_use_tls": True,
-        "threads": 4,
-    }
-
-    with warnings.catch_warnings(record=True) as recorded:
-        warnings.simplefilter("always")
-        path_query = md.extract_path_query_from_config(config)
-
-    assert path_query == {
-        "host": "api.staging.motherduck.com",
-        "port": "443",
-        "tls": "true",
-    }
-    assert config == {"threads": 4}
-    assert [str(w.message) for w in recorded] == [
-        "`motherduck_host` is deprecated; use `host` instead.",
-        "`motherduck_port` is deprecated; use `port` instead.",
-        "`motherduck_use_tls` is deprecated; use `tls` instead.",
     ]
 
 

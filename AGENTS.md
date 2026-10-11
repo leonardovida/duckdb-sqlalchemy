@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 - `duckdb_sqlalchemy/` contains the dialect implementation and helpers (for example `datatypes.py`, `url.py`, `olap.py`, `config.py`).
-- `duckdb_sqlalchemy/tests/` holds pytest suites; snapshot fixtures live in `duckdb_sqlalchemy/tests/snapshots/`.
+- `duckdb_sqlalchemy/tests/` holds pytest suites. End-to-end tests against real databases live in `duckdb_sqlalchemy/tests/e2e/`.
 - `examples/` provides runnable examples such as `examples/sqlalchemy_example.py`.
 - Tooling and metadata are in `pyproject.toml`, `noxfile.py`, and `.pre-commit-config.yaml`.
 
@@ -20,9 +20,25 @@
 - Type hints are expected in new code; `ty` is the canonical checker.
 
 ## Testing Guidelines
-- Tests use `pytest` with plugins including `pytest-cov`, `pytest-remotedata`, and `pytest-snapshot`.
+- Tests use `pytest` with plugins including `pytest-cov` and `pytest-remotedata`.
 - Name tests `test_*.py` and keep them under `duckdb_sqlalchemy/tests/`.
-- Snapshot assertions are stored under `duckdb_sqlalchemy/tests/snapshots/` and should be updated intentionally.
+- Prefer end-to-end tests in `duckdb_sqlalchemy/tests/e2e/`: real engines on real
+  files, real SQL round trips, asserting stored rows and reflected schema. Use the
+  `make_engine` and `db_path` fixtures there, which dispose engines for you.
+- Add a unit test only for pure logic with many edge cases, MotherDuck paths that
+  need credentials, or fault injection that a real engine cannot reproduce. Do not
+  add tests that assert nothing, test the `duckdb` package alone, or pin mock calls
+  or compiled SQL text when the statement can be executed instead.
+
+## Release Notes and Breaking Changes
+- Release notes live in `CHANGELOG.md` and the GitHub releases. `docs/releasing.md`
+  describes the release process.
+- `docs/breaking-changes.md` lists every breaking or behavior change by version,
+  with who is affected and what to do. Read its "Unreleased" section and the
+  entries for the area you are changing before you start.
+- Any change users can notice (generated SQL, reflection output, defaults, return
+  values, errors, supported versions) must add an entry under "Unreleased" in
+  `docs/breaking-changes.md` and in `CHANGELOG.md` in the same PR.
 
 ## Commit & Pull Request Guidelines
 - Recent history favors short, imperative subjects and occasionally uses Conventional Commit prefixes (for example `chore:`, `build:`).

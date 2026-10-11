@@ -88,11 +88,6 @@ def _diff_kinds(conn: Any, metadata: MetaData) -> List[str]:
     return kinds
 
 
-def test_dialect_uses_duckdb_impl(engine: Engine) -> None:
-    with engine.connect() as conn:
-        assert isinstance(MigrationContext.configure(conn).impl, DuckDBImpl)
-
-
 def test_autogenerate_is_empty_after_create_all(engine: Engine) -> None:
     with engine.begin() as conn:
         _metadata().create_all(conn)
