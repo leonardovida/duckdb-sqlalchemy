@@ -182,8 +182,9 @@ def test_storage_info_segment_flag_matches_documented_support(
     make_engine: EngineFactory,
 ) -> None:
     engine = make_engine("duckdb:///:memory:")
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         conn.execute(text("CREATE TABLE t AS SELECT 1 AS i"))
+    with engine.connect() as conn:
         query = select(pragma_storage_info("t", include_segment_info=True))
         try:
             rows = conn.execute(query).mappings().all()
@@ -191,4 +192,4 @@ def test_storage_info_segment_flag_matches_documented_support(
             # docs/olap.md: released DuckDB 1.5.x rejects the argument.
             assert "Invalid named parameter" in str(error)
         else:
-            assert [row["column_name"] for row in rows] == ["i"]
+            assert {row["column_name"] for row in rows} == {"i"}

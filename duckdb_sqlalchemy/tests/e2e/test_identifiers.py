@@ -10,7 +10,10 @@ def _keywords(*categories: str) -> list:
     rows = duckdb.sql(
         "SELECT keyword_name, keyword_category FROM duckdb_keywords() ORDER BY 1"
     ).fetchall()
-    return [name for name, category in rows if not categories or category in categories]
+    names = [
+        name for name, category in rows if not categories or category in categories
+    ]
+    return list(dict.fromkeys(names))  # some DuckDB builds list a keyword twice
 
 
 def test_every_keyword_as_a_column_name(make_engine: EngineFactory) -> None:

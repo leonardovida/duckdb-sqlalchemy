@@ -22,6 +22,7 @@ preserved from the upstream project for historical context.
 - Reflected ENUM columns and unnamed `Enum` types compile to inline `ENUM(...)`. Before, recreating a reflected table with an ENUM column raised "ENUM type requires a name".
 - Reflect 4-byte `FLOAT` and `REAL` columns as `REAL`. Before, a reflected table created again widened them to `DOUBLE`.
 - Alembic autogenerate no longer reports `Float(24)`, `REAL` or named `Enum` columns as changed when they match the database.
+- `pragma_storage_info()` no longer names the `segment_info` column on DuckDB 2.0 prereleases unless `include_segment_info=True`. Before, the query failed there with a binder error.
 
 ### Compatibility
 
