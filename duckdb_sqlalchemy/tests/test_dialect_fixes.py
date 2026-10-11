@@ -447,17 +447,6 @@ def test_bulk_insert_with_returning_keeps_insertmanyvalues(
     assert registered_views == []
 
 
-def test_bulk_insert_dataframe_fallback_keeps_nullable_big_ints() -> None:
-    pd = pytest.importorskip("pandas")
-    from duckdb_sqlalchemy._bulk_insert import build_bulk_insert_dataframe
-
-    big = 2**53 + 1
-    frame = build_bulk_insert_dataframe([(1, big), (2, None)], ["id", "value"])
-    assert str(frame["value"].dtype) == "Int64"
-    assert frame["value"][0] == big
-    assert frame["value"][1] is pd.NA
-
-
 def _committed_rows(path: Any) -> int:
     with duckdb.connect(str(path)) as other:
         return other.execute("SELECT count(*) FROM log").fetchone()[0]

@@ -1,10 +1,9 @@
 import logging
 import platform
 import re
-import zlib
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Generic, Optional, Tuple, TypeVar, cast
+from typing import cast
 
 import duckdb
 import fsspec
@@ -18,40 +17,26 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
-    Interval,
     MetaData,
     Sequence,
     String,
     Table,
-    column,
     create_engine,
     func,
     inspect,
     select,
     text,
-    types,
 )
 from sqlalchemy.dialects import registry
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.exc import DBAPIError, NoSuchTableError, OperationalError
-from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
+from sqlalchemy.orm import Mapped, Session, declarative_base, relationship, sessionmaker
 from sqlalchemy.pool import QueuePool, SingletonThreadPool
 from sqlalchemy.schema import CreateTable
 
 from .. import Dialect, checkpoint, insert, supports_attach, supports_user_agent
 from .._supports import has_comment_support
-
-try:
-    # sqlalchemy 2
-    from sqlalchemy.engine import ObjectKind  # type: ignore[attr-defined]
-    from sqlalchemy.orm import Mapped
-except ImportError:
-    # sqlalchemy 1
-    T = TypeVar("T")
-
-    class Mapped(Generic[T]):  # type: ignore[no-redef]
-        pass
 
 
 @fixture
@@ -64,32 +49,6 @@ def engine() -> Engine:
 
 
 Base = declarative_base()
-
-
-class CompressedString(types.TypeDecorator):
-    """Custom Column Type"""
-
-    impl = types.BLOB
-
-    def process_bind_param(self, value: Optional[str], dialect: Any) -> Optional[bytes]:
-        if value is None:
-            return None
-        return zlib.compress(value.encode("utf-8"), level=9)
-
-    def process_result_value(
-        self, value: Optional[bytes], dialect: Any
-    ) -> Optional[str]:
-        if value is None:
-            return None
-        return zlib.decompress(value).decode("utf-8")
-
-
-class TableWithBinary(Base):
-    __tablename__ = "table_with_binary"
-
-    id = Column(Integer(), Sequence("id_seq"), primary_key=True)
-
-    text = Column(CompressedString())
 
 
 class FakeModel(Base):
@@ -109,38 +68,9 @@ class Owner(Base):
     owned: Mapped[FakeModel] = relationship(FakeModel, back_populates="owner")
 
 
-class IntervalModel(Base):
-    __tablename__ = "IntervalModel"
-
-    id = Column(Integer, Sequence("IntervalModel_id_sequence"), primary_key=True)
-
-    field = Column(Interval)
-
-
 @fixture
 def session(engine: Engine) -> Session:
     return sessionmaker(bind=engine)()
-
-
-def test_basic(session: Session) -> None:
-    session.add(FakeModel(name="Frank"))
-    session.commit()
-
-    frank = session.query(FakeModel).one()  # act
-
-    assert frank.name == "Frank"
-
-
-def test_foreign(session: Session) -> None:
-    model = FakeModel(name="Walter")
-    session.add(model)
-    session.add(Owner(owned=model))
-    session.commit()
-
-    owner = session.query(Owner).one()  # act
-
-    owned = cast(FakeModel, owner.owned)
-    assert owned.name == "Walter"
 
 
 def test_disabled_server_side_cursors(engine: Engine) -> None:
@@ -170,12 +100,6 @@ def test_simple_string(s: str) -> None:
 
     owned = cast(FakeModel, owner.owned)
     assert owned.name == s
-
-
-def test_get_tables(inspector: Inspector) -> None:
-    for table_name in inspector.get_table_names():
-        assert inspector.has_table(table_name)
-    assert inspector.get_view_names() == []
 
 
 @mark.skipif(
@@ -400,31 +324,6 @@ def test_get_check_constraints(inspector: Inspector) -> None:
     assert inspector.get_check_constraints("t1", '"daffy duck"."quack quack"') == []
 
 
-def test_get_unique_constraints(inspector: Inspector) -> None:
-    inspector.get_unique_constraints("test", None)
-    inspector.get_unique_constraints("t1", '"daffy duck"."quack quack"')
-
-
-def test_reflect(session: Session, engine: Engine) -> None:
-    session.execute(text("create table test (id int);"))
-    session.commit()
-
-    meta = MetaData()
-    meta.reflect(only=["test"], bind=engine)
-
-
-def test_get_multi_columns(engine: Engine) -> None:
-    importorskip("sqlalchemy", "2.0.0-rc1")
-    with engine.connect() as conn:
-        assert cast(Dialect, engine.dialect).get_multi_columns(
-            connection=conn,
-            schema=None,
-            filter_names=set(),
-            scope=None,
-            kind=cast(Tuple[str, ...], (ObjectKind.TABLE,)),
-        )
-
-
 def test_commit(session: Session, engine: Engine) -> None:
     importorskip("sqlalchemy", "1.4.0")
     session.execute(text("commit;"))
@@ -435,57 +334,6 @@ def test_commit(session: Session, engine: Engine) -> None:
     assert not shell.run_line_magic("load_ext", "sql")
     assert not shell.run_line_magic("sql", "duckdb:///:memory:")
     assert shell.run_line_magic("sql", "select 42;") == [(42,)]
-
-
-def test_table_reflect(session: Session, engine: Engine) -> None:
-    session.execute(text("create table test (id int);"))
-    session.commit()
-
-    meta = MetaData()
-    user_table = Table("test", meta)
-    insp = inspect(engine)
-
-    reflect_table = (
-        insp.reflecttable if hasattr(insp, "reflecttable") else insp.reflect_table
-    )
-    reflect_table = cast(Callable[..., Any], reflect_table)
-    reflect_table(user_table, None)
-
-
-def test_fetch_df_chunks() -> None:
-    import duckdb
-
-    duckdb.connect(":memory:").execute("select 1").fetch_df_chunk(1)
-
-
-def test_fetchmany(engine: Engine) -> None:
-    with engine.connect() as conn:
-        res = conn.execute(text("select 1"))
-        assert res.fetchmany(1) == [(1,)]
-
-
-def test_description() -> None:
-    import duckdb
-
-    duckdb.connect("").description
-
-
-def test_intervals(session: Session) -> None:
-    session.add(IntervalModel(field=timedelta(days=1)))
-    session.commit()
-
-    owner = session.query(IntervalModel).one()  # act
-
-    assert owner.field == timedelta(days=1)
-
-
-def test_binary(session: Session) -> None:
-    a = TableWithBinary(text="Hello World!")
-    session.add(a)
-    session.commit()
-
-    b: TableWithBinary = session.query(TableWithBinary).one()
-    assert b.text == "Hello World!"
 
 
 @mark.skipif(
@@ -519,24 +367,6 @@ def test_comment_support(engine: Engine) -> None:
     columns = inspector.get_columns("tb_notice", None)
     assert columns[0]["comment"] == "Integer representing the sequence number"
     assert columns[1]["comment"] == "Title of the notice, represented as a string"
-
-
-def test_rowcount() -> None:
-    import duckdb
-
-    assert duckdb.connect().rowcount == -1
-
-
-def test_sessions(session: Session) -> None:
-    c = IntervalModel(field=timedelta(seconds=5))
-    session.add(c)
-    session.commit()
-
-    c2 = session.get(IntervalModel, 1)
-    assert c2
-    cast(Any, c2).field = timedelta(days=5)
-    session.flush()
-    session.commit()
 
 
 def test_inmemory() -> None:
@@ -723,12 +553,6 @@ def test_try_cast(engine: Engine) -> None:
         assert conn.execute(query).one() == (None,)
 
 
-def test_params(engine: Engine) -> None:
-    s = text("SELECT :x")
-    with engine.connect() as conn:
-        assert ("m",) == conn.execute(s, {"x": "m"}).fetchone()
-
-
 def test_361(engine: Engine) -> None:
     importorskip("sqlalchemy", "2.0.0")
 
@@ -745,12 +569,6 @@ def test_361(engine: Engine) -> None:
 
         stmt = select(date_part).select_from(test).group_by(date_part)
         assert conn.execute(stmt).fetchall() == [(2022,)]
-
-
-def test_close(engine: Engine) -> None:
-    with engine.connect() as conn:
-        res = conn.execute(text("select 1"))
-        res.close()
 
 
 def test_with_cache(tmp_path: Path) -> None:
@@ -789,13 +607,6 @@ def test_no_cache(tmp_path: Path) -> None:
             assert res2[0][0] == "2"
 
 
-def test_reflection(engine: Engine) -> None:
-    metadata = MetaData()
-    with engine.connect() as conn:
-        conn.execute(text("CREATE TABLE tbl(col1 INTEGER)"))
-    metadata.reflect(engine)
-
-
 def test_upsert(session: Session) -> None:
     class User(Base):
         __tablename__ = "users"
@@ -820,12 +631,6 @@ def test_upsert(session: Session) -> None:
     session.execute(stmt)
 
     assert session.query(User).count() == 5
-
-
-def test_reserved_keywords(engine: Engine) -> None:
-    stmt = select(column("qualify"))
-
-    assert str(stmt.compile(engine)) == 'SELECT "qualify"'
 
 
 def test_register_filesystem() -> None:

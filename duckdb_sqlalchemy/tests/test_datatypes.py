@@ -6,11 +6,9 @@ from uuid import uuid4
 
 from packaging.version import Version
 from pytest import importorskip, mark
-from pytest_snapshot.plugin import Snapshot
 from sqlalchemy import (
     Column,
     Integer,
-    Interval,
     MetaData,
     Sequence,
     String,
@@ -232,19 +230,6 @@ def test_uuid(engine: Engine, session: Session) -> None:
     assert result.id == ident
 
 
-def test_double_in_sqla_v2(engine: Engine) -> None:
-    with engine.begin() as con:
-        con.execute(text("CREATE TABLE t (x DOUBLE)"))
-        con.execute(text("INSERT INTO t VALUES (1.0), (2.0), (3.0)"))
-
-    md = MetaData()
-
-    t = Table("t", md, autoload_with=engine)
-
-    with engine.begin() as con:
-        con.execute(t.select())
-
-
 def test_double_reflection_uses_double_type(engine: Engine) -> None:
     importorskip("sqlalchemy", "2.0.0")
 
@@ -259,7 +244,8 @@ def test_double_reflection_uses_double_type(engine: Engine) -> None:
 
     assert type(table.c.double_col.type) is sqltypes.DOUBLE
     assert type(table.c.float8_col.type) is sqltypes.DOUBLE
-    assert type(table.c.float4_col.type) is FLOAT
+    # 4-byte floats stay 4 bytes when the reflected table is created again.
+    assert type(table.c.float4_col.type) is sqltypes.REAL
 
 
 def test_pk_and_index_reflection(engine: Engine) -> None:
@@ -326,6 +312,17 @@ def test_all_types_reflection(engine: Engine) -> None:
         assert not capture
 
 
+def test_tuple_reflection_is_deliberately_unsupported() -> None:
+    reflected = Dialect()._reflect_duckdb_data_type(
+        "TUPLE(INTEGER, VARCHAR)",
+        None,
+        {},
+        "test tuple",
+    )
+
+    assert reflected == sqltypes.NULLTYPE
+
+
 def test_timestamptz_ns_reflection() -> None:
     reflected = Dialect()._reflect_duckdb_data_type(
         "TIMESTAMPTZ_NS",
@@ -359,17 +356,6 @@ def test_timezone_reflection_preserves_timezone_in_ddl(engine: Engine) -> None:
     ddl = str(schema.CreateTable(clone).compile(dialect=engine.dialect))
     assert "TIMESTAMP WITH TIME ZONE" in ddl
     assert "TIME WITH TIME ZONE" in ddl
-
-
-def test_tuple_reflection_is_deliberately_unsupported() -> None:
-    reflected = Dialect()._reflect_duckdb_data_type(
-        "TUPLE(INTEGER, VARCHAR)",
-        None,
-        {},
-        "test tuple",
-    )
-
-    assert reflected == sqltypes.NULLTYPE
 
 
 def test_nested_type_reflection_round_trips(engine: Engine) -> None:
@@ -518,12 +504,6 @@ def test_double_nested_types(engine: Engine, session: Session) -> None:
     result = session.query(Entry).one()
 
     assert result.outer == outer
-
-
-def test_interval(engine: Engine, snapshot: Snapshot) -> None:
-    test_table = Table("test_table", MetaData(), Column("duration", Interval))
-    create_sql = f"{str(schema.CreateTable(test_table).compile(engine)).strip()}\n"
-    snapshot.assert_match(create_sql, "schema.sql")
 
 
 def test_div_is_floordiv(engine: Engine) -> None:

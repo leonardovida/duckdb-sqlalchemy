@@ -308,7 +308,11 @@ ISCHEMA_NAMES: Dict[str, Any] = {
     "int2": SmallInteger,
     "timetz": sqltypes.TIME,
     "timestamptz": sqltypes.TIMESTAMP,
-    "float4": sqltypes.FLOAT,
+    # DuckDB reports 4-byte floats as FLOAT. REAL keeps them 4 bytes when a
+    # reflected table is created again (generic FLOAT compiles to DOUBLE).
+    "float": sqltypes.REAL,
+    "float4": sqltypes.REAL,
+    "real": sqltypes.REAL,
     "float8": SQLA_DOUBLE or sqltypes.FLOAT,
     "double": SQLA_DOUBLE or sqltypes.FLOAT,
     "usmallint": USmallInteger,

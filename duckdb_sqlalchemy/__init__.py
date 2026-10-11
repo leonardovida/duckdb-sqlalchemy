@@ -34,7 +34,7 @@ from packaging.version import Version
 from sqlalchemy import event, pool, text, util
 from sqlalchemy import schema as sa_schema
 from sqlalchemy import types as sqltypes
-from sqlalchemy.dialects.postgresql import UUID, insert
+from sqlalchemy.dialects.postgresql import ENUM, UUID, insert
 from sqlalchemy.dialects.postgresql.base import (
     PGCompiler,
     PGDDLCompiler,
@@ -855,7 +855,10 @@ def _load_reserved_words() -> frozenset[str]:
         keyword_name
         for (keyword_name,) in duckdb.cursor()
         .execute(
-            "select keyword_name from duckdb_keywords() where keyword_category == 'reserved'"
+            # type_function keywords (at, by, semi, ...) are not valid bare
+            # column or table names either.
+            "select keyword_name from duckdb_keywords()"
+            " where keyword_category in ('reserved', 'type_function')"
         )
         .fetchall()
     )
@@ -1209,7 +1212,29 @@ class DuckDBDDLCompiler(PGDDLCompiler):
         return colspec
 
 
+class DuckDBENUM(ENUM):
+    """ENUM that renders inline as ``ENUM('a', ...)`` when it has no name.
+
+    DuckDB does not report which named type an ENUM column uses, so reflected
+    ENUM columns have no name. Unnamed ENUMs need no CREATE/DROP TYPE.
+    """
+
+    def create(self, bind: Any, checkfirst: bool = True) -> None:
+        if self.name:
+            super().create(bind, checkfirst=checkfirst)
+
+    def drop(self, bind: Any, checkfirst: bool = True) -> None:
+        if self.name:
+            super().drop(bind, checkfirst=checkfirst)
+
+
 class DuckDBTypeCompiler(PGTypeCompiler):
+    def visit_ENUM(self, type_: Any, identifier_preparer: Any = None, **kw: Any) -> str:
+        if not type_.name:
+            render = sqltypes.String().literal_processor(self.dialect)
+            return "ENUM(%s)" % ", ".join(render(label) for label in type_.enums)
+        return super().visit_ENUM(type_, identifier_preparer=identifier_preparer, **kw)
+
     def visit_FLOAT(self, type_: Any, **kw: Any) -> str:
         # Generic Float(None) must preserve Python's 64-bit float precision.
         return (
@@ -1381,6 +1406,7 @@ class Dialect(PGDialect_psycopg2):
             # postgres type_codes (such as 701 for float) that duckdb doesn't have
             sqltypes.Numeric: DuckDBNumeric,
             sqltypes.Float: DuckDBFloat,
+            sqltypes.Enum: DuckDBENUM,
             sqltypes.JSON: sqltypes.JSON,
             sqltypes.JSON.JSONIndexType: DuckDBJSONIndex,
             sqltypes.JSON.JSONIntIndexType: DuckDBJSONIndex,

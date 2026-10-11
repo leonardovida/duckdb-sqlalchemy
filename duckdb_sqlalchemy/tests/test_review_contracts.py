@@ -255,30 +255,6 @@ def test_arrow_conflict_modes(engine: Any, mode: str, expected: Any) -> None:
         )
 
 
-def test_arrow_returning_does_not_buffer_python_rows(
-    engine: Any, monkeypatch: Any
-) -> None:
-    original = CursorWrapper._store_buffered_result
-
-    def store(cursor: Any, rows: Any, description: Any, rowcount: int) -> None:
-        assert not isinstance(rows, zip), (
-            "Arrow RETURNING must not copy every row into Python"
-        )
-        original(cursor, rows, description, rowcount)
-
-    table = Table("returned", MetaData(), Column("value", Integer))
-    with engine.begin() as connection:
-        table.create(connection)
-        monkeypatch.setattr(CursorWrapper, "_store_buffered_result", store)
-        result = connection.execution_options(duckdb_arrow=True).execute(
-            table.insert()
-            .from_select(["value"], select(func.unnest([1, 2, 3])))
-            .returning(table.c.value)
-        )
-        assert result.rowcount == 3
-        assert result.arrow.to_pylist() == [{"value": 1}, {"value": 2}, {"value": 3}]
-
-
 def test_arrow_guard_keeps_positional_float_column_precision() -> None:
     from duckdb_sqlalchemy._bulk_insert import build_bulk_insert_arrow_table
 

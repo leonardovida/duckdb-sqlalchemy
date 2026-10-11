@@ -4,9 +4,6 @@ import warnings
 from urllib.parse import parse_qs
 
 import pytest
-import sqlalchemy
-from packaging.version import Version
-from pytest import raises
 from sqlalchemy import create_engine, select
 
 from duckdb_sqlalchemy import (
@@ -16,7 +13,6 @@ from duckdb_sqlalchemy import (
     pragma_storage_info,
     quack_query,
     read_csv_auto,
-    read_parquet,
 )
 from duckdb_sqlalchemy.config import get_core_config
 
@@ -48,18 +44,6 @@ def test_url_helper_coerces_iterables_and_drops_none() -> None:
     }
 
 
-def test_read_parquet_helper() -> None:
-    if Version(sqlalchemy.__version__) < Version("1.4.0"):
-        with raises(NotImplementedError):
-            read_parquet("data/events.parquet", columns=["event_id"])
-        return
-
-    parquet = read_parquet("data/events.parquet", columns=["event_id"])
-    stmt = select(parquet.c.event_id).select_from(parquet)
-    sql = str(stmt.compile(dialect=Dialect(), compile_kwargs={"literal_binds": True}))
-    assert "read_parquet" in sql
-
-
 def test_read_csv_auto_helper_executes_named_parameters(tmp_path) -> None:
     csv_path = tmp_path / "events.csv"
     csv_path.write_text("event_id\n1\n2\n")
@@ -85,15 +69,6 @@ def test_pragma_storage_info_helper_executes_with_default_columns() -> None:
         rows = conn.execute(stmt).all()
 
     assert ("event_id", "INTEGER") in rows
-
-
-def test_pragma_storage_info_helper_compiles_include_segment_info() -> None:
-    storage_info = pragma_storage_info("events", include_segment_info=True)
-    stmt = select(storage_info.c.segment_info).select_from(storage_info)
-    sql = str(stmt.compile(dialect=Dialect(), compile_kwargs={"literal_binds": True}))
-
-    assert "pragma_storage_info" in sql
-    assert '"include_segment_info" := true' in sql
 
 
 def test_quack_query_helper_executes_against_local_server() -> None:

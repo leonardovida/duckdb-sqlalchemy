@@ -340,9 +340,18 @@ def pragma_storage_info(
     return table_function(
         "pragma_storage_info",
         table_name,
-        columns=PRAGMA_STORAGE_INFO_COLUMNS if columns is None else columns,
+        columns=_storage_info_columns(include_segment_info)
+        if columns is None
+        else columns,
         **kwargs,
     )
+
+
+def _storage_info_columns(include_segment_info: Optional[bool]) -> Tuple[str, ...]:
+    # DuckDB 2.0 returns segment_info only when include_segment_info is set.
+    if include_segment_info or Version(duckdb_version) < Version("2.0.0.dev0"):
+        return PRAGMA_STORAGE_INFO_COLUMNS
+    return tuple(name for name in PRAGMA_STORAGE_INFO_COLUMNS if name != "segment_info")
 
 
 def quack_query(

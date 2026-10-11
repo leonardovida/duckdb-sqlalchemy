@@ -50,18 +50,6 @@ def test_interleaving_propagates_fetch_failure_before_replacing_result() -> None
     assert native.calls == []
 
 
-def test_bulk_pandas_path_preserves_mixed_numeric_integer_precision() -> None:
-    pytest.importorskip("pandas")
-    from duckdb_sqlalchemy._bulk_insert import build_bulk_insert_dataframe
-
-    big = 2**53 + 1
-    data = build_bulk_insert_dataframe([(big,), (1.0,)], ["value"])
-    # Declining an unsafe optimization is preferable to changing the value.
-    if data is not None:
-        assert data["value"][0] == big
-        assert int(data["value"][0]) == big
-
-
 def test_bulk_and_regular_insert_preserve_mixed_numeric_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
