@@ -160,13 +160,29 @@ def test_map_with_list_keys_keeps_duckdb_key_value_shape(engine: Engine) -> None
         }
 
 
+def _supports_time_ns() -> bool:
+    try:
+        duckdb.sql("SELECT CAST(NULL AS TIME_NS)")
+    except duckdb.Error:
+        return False
+    return True
+
+
 def test_reflected_bignum_and_nanosecond_types_recreate_exactly(engine: Engine) -> None:
+    # TIME_NS arrived after DuckDB 1.3.
+    time_ns = _supports_time_ns()
     with engine.begin() as conn:
-        conn.execute(text("CREATE TABLE src(b VARINT, ts TIMESTAMP_NS, t TIME_NS)"))
+        conn.execute(
+            text(
+                "CREATE TABLE src(b VARINT, ts TIMESTAMP_NS"
+                + (", t TIME_NS)" if time_ns else ")")
+            )
+        )
         columns = {c["name"]: c["type"] for c in inspect(conn).get_columns("src")}
         assert isinstance(columns["b"], VarInt)
         assert isinstance(columns["ts"], TimestampNs)
-        assert isinstance(columns["t"], TimeNs)
+        if time_ns:
+            assert isinstance(columns["t"], TimeNs)
 
         reflected = Table("src", MetaData(), autoload_with=conn)
         copy = reflected.to_metadata(MetaData(), name="copy")
