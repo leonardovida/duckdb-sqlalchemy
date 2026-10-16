@@ -17,7 +17,7 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
-- None yet.
+- **DuckDB 2.0 cursors no longer export Arrow** - On DuckDB 2.0, `cursor.to_arrow_table()`, `to_arrow_reader()`, `fetch_arrow_table()` and `fetch_record_batch()` exist only when the statement ran with `execution_options(duckdb_arrow=True)`, which runs SELECTs as DuckDB relations. Without the option they raise an `AttributeError` that names it. `result.arrow` and `result.batches()` need the same option they always did. A raw Arrow reader is closed by the next statement, commit or rollback on its connection. DuckDB 1.x is unaffected. [#205](https://github.com/leonardovida/duckdb-sqlalchemy/pull/205)
 
 ## [1.5.6.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4) (2026-10-16)
 
