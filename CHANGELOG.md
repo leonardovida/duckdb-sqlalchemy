@@ -8,6 +8,10 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+### Bug Fixes
+
+- MAP keys and values now run their declared SQLAlchemy bind and result processors, including nested MAP/LIST members. Previously type decorators were silently skipped and Python Enum members could fail to insert. Empty maps and SQL NULL remain distinct.
+
 ## [1.5.6.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6...v1.5.6.1) (2026-10-11)
 
 ### Highlights
