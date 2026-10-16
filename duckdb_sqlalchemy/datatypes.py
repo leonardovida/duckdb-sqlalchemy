@@ -202,32 +202,55 @@ class Map(TypeEngine):
 
     __visit_name__ = "map"
     cache_ok = True
-    key_type: TV
-    value_type: TV
+    key_type: TypeEngine
+    value_type: TypeEngine
 
     def __init__(self, key_type: TV, value_type: TV):
         self.key_type = type_api.to_instance(key_type)
         self.value_type = type_api.to_instance(value_type)
 
     def bind_processor(self, dialect: Dialect) -> Any:
+        key_processor = self.key_type.dialect_impl(dialect).bind_processor(dialect)
+        value_processor = self.value_type.dialect_impl(dialect).bind_processor(dialect)
+
         def _bind(value: Any) -> Any:
             if value is None:
                 return None
-            return {"key": list(value), "value": list(value.values())}
+            return {
+                "key": [
+                    key_processor(key) if key_processor is not None else key
+                    for key in value
+                ],
+                "value": [
+                    value_processor(item) if value_processor is not None else item
+                    for item in value.values()
+                ],
+            }
 
         return _bind
 
     def result_processor(self, dialect: Dialect, coltype: object) -> Any:
-        if IS_GT_1:
-            return lambda value: value
-        else:
+        key_processor = self.key_type.dialect_impl(dialect).result_processor(
+            dialect, None
+        )
+        value_processor = self.value_type.dialect_impl(dialect).result_processor(
+            dialect, None
+        )
+        if IS_GT_1 and key_processor is None and value_processor is None:
+            return None
 
-            def _convert(value: Any) -> Optional[Dict[Any, Any]]:
-                if value is None:
-                    return None
-                return dict(zip(value["key"], value["value"]))
+        def _convert(value: Any) -> Optional[Dict[Any, Any]]:
+            if value is None:
+                return None
+            items = value.items() if IS_GT_1 else zip(value["key"], value["value"])
+            return {
+                (key_processor(key) if key_processor is not None else key): (
+                    value_processor(item) if value_processor is not None else item
+                )
+                for key, item in items
+            }
 
-            return _convert
+        return _convert
 
 
 class FixedArray(sqltypes.Indexable, TypeEngine):

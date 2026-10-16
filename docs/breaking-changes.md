@@ -17,7 +17,7 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
-- None yet.
+- **MAP member conversion** - MAP keys and values now run their declared SQLAlchemy bind and result processors, including nested MAP/LIST members. Users of member `TypeDecorator`, `Enum`, JSON or Numeric conversion now get the declared conversion instead of raw values or insertion errors. Existing rows are not rewritten. Review stored values if an application previously compensated for skipped processors.
 
 ## [1.5.6.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6...v1.5.6.1) (2026-10-11)
 

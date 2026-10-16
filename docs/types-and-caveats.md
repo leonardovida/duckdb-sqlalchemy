@@ -162,6 +162,10 @@ A nested type reflects as `NullType` when one of its members is an ENUM, because
 DuckDB does not report the enum's type name inside a nested type, or when a
 member type is not recognized. Declare those columns in your models.
 
+MAP keys and values honor their declared SQLAlchemy Python bind and result
+processors, including `TypeDecorator` and nested MAP/LIST members. SQL NULL,
+empty maps and NULL values inside a map remain distinct.
+
 ### Enums
 
 `inspector.get_enums()` lists the ENUM types created with `CREATE TYPE` in the
