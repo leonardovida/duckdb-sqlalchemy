@@ -8,9 +8,29 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+## [1.5.6.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.1...v1.5.6.2) (2026-10-16)
+
+### Highlights
+
+- MAP keys and values honor their declared SQLAlchemy conversions, preventing skipped decorators, Enum insertion errors and incorrect Decimal storage. [#198](https://github.com/leonardovida/duckdb-sqlalchemy/pull/198)
+
 ### Bug Fixes
 
-- MAP keys and values now run their declared SQLAlchemy bind and result processors, including nested MAP/LIST members. Previously type decorators were silently skipped and Python Enum members could fail to insert. Empty maps and SQL NULL remain distinct.
+- Apply member bind and result processors to MAP keys and values, including nested MAP/LIST members, JSON and Numeric conversions. A positive-exponent Decimal such as `1E+5` now stores `100000.00` instead of `1.00`. SQL NULL and empty maps remain distinct. [#198](https://github.com/leonardovida/duckdb-sqlalchemy/pull/198)
+
+### Tooling and Release
+
+- Publish the next maintenance version on the 1.5.6 line using the repository's checked build and PyPI workflow. [Release diff](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.1...v1.5.6.2)
+
+### Compatibility
+
+- MAP columns with member `TypeDecorator`, `Enum`, JSON or Numeric conversion now run their declared Python conversion hooks. Existing rows are not rewritten. Review stored data if your application compensated for previously skipped conversion. Dependency floors and ordinary versus registered insert routing are unchanged. [#198](https://github.com/leonardovida/duckdb-sqlalchemy/pull/198)
+
+### Verification
+
+- Six new real-file execution cases fail before the fix and pass afterward. The full locked suite passed 620 tests, with minimum-version and SQLAlchemy 2.1 checks, lint, types, strict distribution checks and fresh wheel smoke coverage. All hosted stable, platform and distribution gates passed. [#198](https://github.com/leonardovida/duckdb-sqlalchemy/pull/198)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.1...v1.5.6.2
 
 ## [1.5.6.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6...v1.5.6.1) (2026-10-11)
 

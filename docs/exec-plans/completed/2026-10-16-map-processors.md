@@ -46,8 +46,14 @@ optional dependencies, or version floors.
 - Remote datatype suite: 49 passed. Credentialed MotherDuck not relevant/not run.
 - All-file pre-commit, canonical ty, uv lock and diff checks pass. Formatting
   rerun only. Wheel/sdist strict Twine and fresh wheel smoke pass without pandas
-  or Arrow. Full local nox matrix not run, hosted gates pending.
+  or Arrow. Full local nox matrix not run. All hosted stable/platform/distribution gates passed.
 
 ## Outcomes & Retrospective
-Implementation and real database coverage prepared. Hosted review/checks,
-merge and justified maintenance release remain pending.
+PR198 merged as 068be9f20d874196ef6a5ec83b766fc2b679a266 after all
+required stable gates and automated review passed. Tested and merged trees match.
+The informational DuckDB2.0.0.dev2610151406 job has 12 Arrow/retry failures,
+all reproduced on unchanged baseline (602 passed), with all six MAP cases passing
+in the hosted head. No retry or weakened checks. Maintenance release1.5.6.2 is
+prepared through a separate checked PR and the automatic registry/hash/smoke
+workflow. The automation continuity record tracks its terminal publication state.
+No performance claim or unrelated feature changes.
