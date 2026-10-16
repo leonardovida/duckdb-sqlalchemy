@@ -8,9 +8,31 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+- None yet.
+
+## [1.5.6.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4) (2026-10-16)
+
+### Highlights
+
+- STRUCT floating-array fields accept integer ndarrays again while retaining declared field conversion hooks. [#203](https://github.com/leonardovida/duckdb-sqlalchemy/pull/203)
+
 ### Bug Fixes
 
 - Preserve integer ndarray inputs for STRUCT fields declared as floating LIST or fixed ARRAY, including multidimensional LISTs. The 1.5.6.3 field conversion fix could turn these arrays into unsupported NumPy scalar lists. Field conversion hooks still run. [#203](https://github.com/leonardovida/duckdb-sqlalchemy/pull/203)
+
+### Tooling and Release
+
+- Publish the corrective maintenance version through the checked build, trusted PyPI publication, artifact hash verification and fresh-install workflow. [Release diff](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4)
+
+### Compatibility
+
+- Restores ndarray binding rejected by 1.5.6.3 for floating LIST and fixed ARRAY fields. Standard array hooks receive native Python scalars, while custom array bind overrides retain their input representation. Dependency floors and stored rows are unchanged. [#203](https://github.com/leonardovida/duckdb-sqlalchemy/pull/203)
+
+### Verification
+
+- Six regression cases fail on unchanged 1.5.6.3, while three Arrow controls already pass. All 18 STRUCT cases and 716 full tests pass after the fix, with floor-version, SQLAlchemy 2.1, lint, type and hosted stable gates. A fresh immutable 1.5.6.3 wheel independently reproduces the regression. [#203](https://github.com/leonardovida/duckdb-sqlalchemy/pull/203)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4
 
 ## [1.5.6.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.2...v1.5.6.3) (2026-10-16)
 
