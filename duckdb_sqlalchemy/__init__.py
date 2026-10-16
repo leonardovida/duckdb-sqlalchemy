@@ -376,6 +376,23 @@ _NATIVE_RESULT_FETCH_METHODS = frozenset(
 )
 
 
+# DuckDB 2.0 dropped Arrow export from DB-API results (duckdb-python
+# fea54b2a7): only relations from ``connection.sql()`` export Arrow. Arrow
+# reads then run the statement as a relation instead.
+_DBAPI_EXPORTS_ARROW = hasattr(duckdb.DuckDBPyConnection, "to_arrow_table") or hasattr(
+    duckdb.DuckDBPyConnection, "fetch_arrow_table"
+)
+# Relation methods that replace the DB-API Arrow fetch names.
+_RELATION_FETCH_ALIASES = {
+    "fetch_arrow_table": "to_arrow_table",
+    "fetch_arrow_reader": "to_arrow_reader",
+    "fetch_record_batch": "to_arrow_reader",
+    "arrow": "to_arrow_reader",
+    "fetch_df": "df",
+    "fetchdf": "df",
+}
+
+
 # Tables and views with their comments, as one relation for reflection queries.
 _DUCKDB_RELATION_COMMENTS = """(
     SELECT database_name, schema_name, table_name, comment, internal, temporary,
@@ -431,6 +448,10 @@ class ConnectionWrapper:
         self.__c = c
         self.notices = list()
         self._pending_cursor: Optional["weakref.ReferenceType[CursorWrapper]"] = None
+        # An Arrow reader taken from a relation result. It holds the
+        # connection until closed and can outlive its cursor, so the next
+        # statement, commit or rollback closes it.
+        self._open_reader: Any = None
         # Statements run since begin(); None outside a transaction begun here.
         self._transaction_statements: Optional[int] = None
 
@@ -458,6 +479,13 @@ class ConnectionWrapper:
         if pending is not None and pending is not requester:
             pending._buffer_result()
         self._pending_cursor = None
+        self._close_open_reader()
+
+    def _close_open_reader(self) -> None:
+        reader = self._open_reader
+        if reader is not None:
+            self._open_reader = None
+            reader.close()
 
     def begin(self) -> None:
         if not self.autocommit:
@@ -481,6 +509,7 @@ class ConnectionWrapper:
         try:
             if pending is not None:
                 pending.close()
+            self._close_open_reader()
         finally:
             self._pending_cursor = None
             self._transaction_statements = None
@@ -508,6 +537,7 @@ class ConnectionWrapper:
         try:
             if pending is not None:
                 pending.close()
+            self._close_open_reader()
         finally:
             self._pending_cursor = None
             self.__c.close()
@@ -587,6 +617,11 @@ class CursorWrapper:
         self._rows_fetched = False
         self._native_reader_active = False
         self._native_reader: Any = None
+        # Set by the execution context when Arrow is requested and DB-API
+        # results cannot export it; row-returning statements then run as a
+        # relation held in ``_relation`` until it is read.
+        self._relation_requested = False
+        self._relation: Any = None
 
     def _clear_result(self) -> None:
         self.__c.execute("")
@@ -597,6 +632,7 @@ class CursorWrapper:
                 "Consume or close the Arrow batch reader before executing another statement"
             )
         self.__connection_wrapper._buffer_pending_result(self)
+        self._relation = None
         self._buffered_rows = None
         self._buffered_description = None
         self._dml_rowcount = None
@@ -612,36 +648,7 @@ class CursorWrapper:
         description = getattr(self, "description", None)
         if not description or len(description) != 1 or description[0][0] != "Count":
             return False
-        normalized = _strip_leading_sql_comments(statement)
-        match = re.match(
-            r"\s*(insert|update|delete|merge)\b", normalized, re.IGNORECASE
-        )
-        # Common generated DML has neither RETURNING nor separators. Avoid
-        # scanning every placeholder in a large multi-values INSERT.
-        if (
-            match is not None
-            and ";" not in normalized
-            and "returning" not in normalized.lower()
-            and statement.count("/*") <= 1
-        ):
-            operation = match.group(1).lower()
-        else:
-            words = _top_level_sql_words(statement)
-            if not words:
-                return False
-            operation = words[0]
-            if operation == "with":
-                operation = next(
-                    (
-                        word
-                        for word in words[1:]
-                        if word in (*_DML_ROWCOUNT_PREFIXES, "select")
-                    ),
-                    "",
-                )
-            if "returning" in words:
-                return False
-        if operation not in _DML_ROWCOUNT_PREFIXES:
+        if _dml_count_operation(statement) is None:
             return False
         rows = self.__c.fetchall()
         if len(rows) == 1 and isinstance(rows[0][0], int):
@@ -650,8 +657,24 @@ class CursorWrapper:
         self._is_dml_count = True
         return True
 
+    def _execute_relation(self, statement: str, parameters: Any) -> None:
+        # A relation cannot run while a DB-API result is open on the connection.
+        self._clear_result()
+        self._relation = self.__c.sql(statement, params=parameters or None)
+
+    def _materialize_relation(self) -> None:
+        relation = self._relation
+        self._relation = None
+        self._rows_fetched = True
+        self._store_buffered_result(relation.fetchall(), relation.description, -1)
+        # The rows now live in this cursor, so the connection has no open result.
+        self._result_consumed()
+
     def _after_execute(self) -> None:
-        if getattr(self.__c, "description", None) is not None:
+        if (
+            self._relation is not None
+            or getattr(self.__c, "description", None) is not None
+        ):
             self.__connection_wrapper._set_pending_cursor(self)
 
     def _buffer_result(self) -> None:
@@ -660,10 +683,24 @@ class CursorWrapper:
             raise InvalidRequestError(
                 "Consume or close the Arrow batch reader before executing another statement"
             )
+        if self._relation is not None:
+            self._materialize_relation()
+            return
         description = self.description
         rowcount = self.__c.rowcount
         rows = self.__c.fetchall()
         self._store_buffered_result(rows, description, rowcount)
+
+    def _attach_native_reader(self, raw: Any, reader: Any) -> None:
+        """Let a managed Arrow batch reader own this cursor's result."""
+        self._native_reader_active = True
+        self._native_reader = reader
+        connection = self.__connection_wrapper
+        if connection._open_reader is raw:
+            # The managed reader closes itself, and the cursor stays pending
+            # so another statement is refused until it does.
+            connection._open_reader = None
+            connection._set_pending_cursor(self)
 
     def _store_buffered_result(
         self, rows: Iterable[Tuple[Any, ...]], description: Any, rowcount: int
@@ -726,11 +763,13 @@ class CursorWrapper:
             self.__c.execute("select 'read committed' as transaction_isolation")
         elif norm == "show standard_conforming_strings":
             self.__c.execute("select 'on' as standard_conforming_strings")
+        elif self._relation_requested and _dml_count_operation(norm) is None:
+            self._execute_relation(statement, parameters)
         elif parameters is None:
             self.__c.execute(statement)
         else:
             self.__c.execute(statement, parameters)
-        if self._capture_dml_rowcount(norm):
+        if self._relation is None and self._capture_dml_rowcount(norm):
             return
         self._after_execute()
 
@@ -741,6 +780,7 @@ class CursorWrapper:
     def close(self) -> None:
         if self._native_reader is not None:
             self._native_reader.close()
+        self._relation = None
         # Preserve an exhausted result so an old cursor cannot read a new query.
         self._store_buffered_result([], self.description, self.rowcount)
         self._result_consumed()
@@ -749,7 +789,8 @@ class CursorWrapper:
     def description(self) -> Any:
         if self._buffered_rows is not None:
             return self._buffered_description
-        desc = self.__c.description
+        source = self._relation if self._relation is not None else self.__c
+        desc = source.description
         if desc is None:
             return None
         fixed = []
@@ -769,6 +810,8 @@ class CursorWrapper:
             return self._dml_rowcount
         if self._buffered_rows is not None:
             return self._buffered_rowcount
+        if self._relation is not None:
+            return -1
         return self.__c.rowcount
 
     def __getattr__(self, name: str) -> Any:
@@ -778,9 +821,19 @@ class CursorWrapper:
                 "before the result was consumed, so its remaining rows were "
                 "buffered as Python tuples"
             )
-        method = getattr(self.__c, name)
         if name not in _NATIVE_RESULT_FETCH_METHODS:
-            return method
+            return getattr(self.__c, name)
+        if self._relation is not None:
+            method = getattr(self._relation, _RELATION_FETCH_ALIASES.get(name, name))
+        elif _DBAPI_EXPORTS_ARROW or not hasattr(duckdb.DuckDBPyRelation, name):
+            method = getattr(self.__c, name)
+        else:
+            # An AttributeError keeps hasattr()/getattr(..., None) working.
+            raise AttributeError(
+                f"{name}() is unavailable: DuckDB {duckdb.__version__} results do "
+                "not export Arrow. Execute with "
+                "execution_options(duckdb_arrow=True) to read Arrow"
+            )
 
         def fetch_native(*args: Any, **kwargs: Any) -> Any:
             if self._buffered_rows is not None:
@@ -794,9 +847,17 @@ class CursorWrapper:
             value = method(*args, **kwargs)
             self._rows_fetched = True
             if hasattr(value, "read_next_batch"):
+                if self._relation is not None:
+                    # Reading the relation again would re-run the query, so
+                    # the reader owns the result until something closes it.
+                    self._store_buffered_result([], self.description, -1)
+                    self._relation = None
+                    self._result_consumed()
+                    self.__connection_wrapper._open_reader = value
                 return value
             if name != "fetch_df_chunk":
                 self._store_buffered_result([], self.description, self.rowcount)
+                self._relation = None
                 self._result_consumed()
             return value
 
@@ -805,6 +866,8 @@ class CursorWrapper:
     def fetchone(self) -> Optional[Tuple[Any, ...]]:
         if self._native_reader_active:
             raise InvalidRequestError("An Arrow batch reader already owns this result")
+        if self._relation is not None:
+            self._materialize_relation()
         if self._buffered_rows is not None:
             return self._buffered_rows.popleft() if self._buffered_rows else None
         self._rows_fetched = True
@@ -817,6 +880,8 @@ class CursorWrapper:
     def fetchall(self) -> List:
         if self._native_reader_active:
             raise InvalidRequestError("An Arrow batch reader already owns this result")
+        if self._relation is not None:
+            self._materialize_relation()
         if self._buffered_rows is not None:
             rows = list(self._buffered_rows)
             self._buffered_rows.clear()
@@ -831,6 +896,8 @@ class CursorWrapper:
         if self._native_reader_active:
             raise InvalidRequestError("An Arrow batch reader already owns this result")
         count = self.arraysize if size is None else size
+        if self._relation is not None:
+            self._materialize_relation()
         if self._buffered_rows is not None:
             buffered = self._buffered_rows
             return [buffered.popleft() for _ in range(min(count, len(buffered)))]
@@ -840,6 +907,35 @@ class CursorWrapper:
             self._store_buffered_result([], self.description, self.__c.rowcount)
             self._result_consumed()
         return rows
+
+
+def _dml_count_operation(statement: str) -> Optional[str]:
+    """Return the DML operation whose result is DuckDB's "Count" row, if any.
+
+    INSERT/UPDATE/DELETE/MERGE without RETURNING (including after a WITH)
+    report the affected rows as a single "Count" result.
+    """
+    normalized = _strip_leading_sql_comments(statement)
+    match = re.match(r"\s*(insert|update|delete|merge)\b", normalized, re.IGNORECASE)
+    # Common generated DML has neither RETURNING nor separators. Avoid
+    # scanning every placeholder in a large multi-values INSERT.
+    if (
+        match is not None
+        and ";" not in normalized
+        and "returning" not in normalized.lower()
+        and statement.count("/*") <= 1
+    ):
+        return match.group(1).lower()
+    words = _top_level_sql_words(statement)
+    if not words or "returning" in words:
+        return None
+    operation = words[0]
+    if operation == "with":
+        operation = next(
+            (word for word in words[1:] if word in (*_DML_ROWCOUNT_PREFIXES, "select")),
+            "",
+        )
+    return operation if operation in _DML_ROWCOUNT_PREFIXES else None
 
 
 def _is_ignored_postgres_config_set(statement: str) -> bool:
@@ -895,6 +991,14 @@ def _normalize_execution_options(execution_options: Dict[str, Any]) -> Dict[str,
 
 
 class DuckDBExecutionContext(_PGExecutionContext):
+    def pre_exec(self) -> None:
+        super().pre_exec()
+        cursor = getattr(self, "cursor", None)
+        if isinstance(cursor, CursorWrapper):
+            cursor._relation_requested = not _DBAPI_EXPORTS_ARROW and bool(
+                self.execution_options.get("duckdb_arrow")
+            )
+
     @classmethod
     def _init_compiled(
         cls,

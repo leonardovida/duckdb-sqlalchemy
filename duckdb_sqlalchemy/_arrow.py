@@ -123,9 +123,9 @@ class DuckDBArrowResult:
             raise NotImplementedError(
                 "Arrow batch reads are not available on this cursor"
             )
-        reader = DuckDBArrowBatchReader(fetch_reader(batch_size), cursor)
-        cursor._native_reader_active = True
-        cursor._native_reader = reader
+        raw = fetch_reader(batch_size)
+        reader = DuckDBArrowBatchReader(raw, cursor)
+        cursor._attach_native_reader(raw, reader)
         reader._result = self._result
         return reader
 

@@ -77,6 +77,14 @@ with engine.connect().execution_options(
 Arrow results consume the cursor; fetch rows or Arrow, not both. Reading
 `.arrow` after fetching rows raises `InvalidRequestError`.
 
+DuckDB 2.0 results no longer export Arrow from the DB-API cursor. With
+`duckdb_arrow=True` the dialect runs SELECTs as DuckDB relations, so
+`result.arrow`, `result.batches()` and the raw cursor's `to_arrow_table()` /
+`to_arrow_reader()` keep working. Without the option those cursor methods are
+absent on DuckDB 2.0 and the `AttributeError` names the option to set. A raw
+reader taken from the cursor is closed by the next statement, commit or
+rollback on the connection.
+
 ## Interleaved statements
 
 All cursors of a SQLAlchemy connection share one DuckDB connection. If you run
