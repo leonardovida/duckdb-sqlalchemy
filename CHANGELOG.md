@@ -15,6 +15,7 @@ preserved from the upstream project for historical context.
 
 ### Bug Fixes
 
+- Apply declared SQLAlchemy bind and result processors to STRUCT fields, including nested STRUCT, LIST, fixed ARRAY and MAP members. Field decorators, Enum and JSON conversion now run, and positive-exponent Decimal values retain their magnitude in ordinary and pandas-fallback inserts. Existing rows are not rewritten. [#201](https://github.com/leonardovida/duckdb-sqlalchemy/pull/201)
 - `motherduck_enable_server_side_temp_tables=True` now enables server-side temporary tables. Before, the dialect put it in the `md:` database string, which the MotherDuck extension ignores, so temporary tables stayed local. The dialect now runs `SET motherduck_enable_server_side_temp_tables` on each new connection. [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
 - The MotherDuck table-function helpers select only the columns that the extension for your DuckDB version returns. Before, several default queries failed with a binder error: [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
   - `md_list_flight_versions()` and `md_job_versions()` on DuckDB 1.5.5 and newer, which no longer return `source_code` and `requirements_txt`.
