@@ -35,6 +35,7 @@ engine = create_engine("duckdb:///analytics.db?threads=4&memory_limit=1GB")
 ```
 
 If you supply a setting in both the URL and `connect_args["config"]`, the URL value wins.
+This includes MotherDuck routing parameters such as `session_name` and `attach_mode`.
 
 `read_only` is a top-level connect argument (not a `SET` option), so pass it in
 `connect_args`:

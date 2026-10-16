@@ -93,7 +93,7 @@ from .bulk import (
     insert_from_arrow,
 )
 from .capabilities import get_capabilities
-from .config import apply_config, get_core_config
+from .config import apply_config, get_core_config, get_native_config
 from .datatypes import (
     ISCHEMA_NAMES,
     DuckDBInteger,
@@ -1046,6 +1046,10 @@ def _prepare_connection_params(
     cparams["database"] = move_path_query_to_database(cparams.get("database"), config)
     _normalize_motherduck_config(config)
     application_name = _pop_application_name(config)
+    if not _looks_like_motherduck(cparams["database"]):
+        # Without the motherduck extension loaded, connect() rejects its
+        # settings. SET them after preload_extensions instead.
+        core_keys = get_native_config()
     ext = {k: config.pop(k) for k in list(config) if k not in core_keys}
     return ext, application_name
 

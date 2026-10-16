@@ -44,9 +44,13 @@ MUTATING_STATEMENT_PATTERN = re.compile(
 # A comment after the name is enough to decline a retry conservatively.
 # Do not scan across it: repeated candidate names in a long line comment
 # would otherwise repeatedly scan the remaining comment text.
+# DuckLake functions and the *_execute functions of attached databases
+# write as well.
 SIDE_EFFECT_FUNCTION_PATTERN = re.compile(
-    r"\b(?:nextval|setval|md_\w*|query|quack_query|postgres_query|mysql_query|sqlite_query)\"?\s*(?:\(|/\*|--)"
+    r"\b(?:nextval|setval|md_\w*|ducklake_\w*|\w*_execute|query|quack_query|postgres_query|mysql_query|sqlite_query)\"?\s*(?:\(|/\*|--)"
 )
+# DuckDB dollar-quote tags follow identifier rules, non-ASCII letters included.
+DOLLAR_QUOTE_PATTERN = re.compile(r"\$(?:[^\W\d]\w*)?\$")
 
 
 def _strip_leading_sql_comments(statement: str) -> str:
@@ -110,8 +114,9 @@ def _is_idempotent_statement(statement: str) -> bool:
     # Fail closed for lexical forms this lightweight scanner does not parse.
     # Dollar strings, escape strings, and nested comments can conceal a
     # statement separator from the ordinary quote/comment handling below.
+    # Any "$" other than a $1 placeholder may open a dollar string.
     if (
-        re.search(r"\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$", statement)
+        re.search(r"\$(?!\d)", statement)
         or "\\" in statement
         or statement.count("/*") > 1
     ):
@@ -120,8 +125,8 @@ def _is_idempotent_statement(statement: str) -> bool:
     if not normalized or _has_additional_sql_statement(normalized):
         return False
     normalized = normalized.lower()
-    # ANALYZE executes its argument, including INSERT/UPDATE/DELETE.
-    if normalized.startswith("explain") and re.search(r"\banalyze\b", normalized):
+    # ANALYZE (or ANALYSE) executes its argument, including INSERT/UPDATE/DELETE.
+    if normalized.startswith("explain") and re.search(r"\banaly[sz]e\b", normalized):
         return False
     if SIDE_EFFECT_FUNCTION_PATTERN.search(normalized):
         return False
@@ -186,7 +191,7 @@ def _top_level_sql_words(statement: str) -> list[str]:
                     break
                 index += 1
         elif statement[index] == "$":
-            match = re.match(r"\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$", statement[index:])
+            match = DOLLAR_QUOTE_PATTERN.match(statement, index)
             if match:
                 delimiter = match.group()
                 end = statement.find(delimiter, index + len(delimiter))
