@@ -1,4 +1,5 @@
 import csv
+import datetime
 import math
 import tempfile
 import uuid
@@ -110,12 +111,15 @@ def _format_table(connection: Any, table: TableLike) -> str:
 def _format_columns(connection: Any, columns: Optional[Sequence[str]]) -> str:
     if not columns:
         return ""
-    validated_columns = validate_identifier_list(columns, kind="column identifier")
     preparer = _get_identifier_preparer(connection)
     if preparer is None:
-        cols = ", ".join(validated_columns)
+        cols = ", ".join(validate_identifier_list(columns, kind="column identifier"))
     else:
-        cols = ", ".join(preparer.quote_identifier(col) for col in validated_columns)
+        # Quoted names are safe, so any non-empty name works here.
+        for col in columns:
+            if not isinstance(col, str) or not col:
+                raise ValueError(f"invalid column identifier: {col!r}")
+        cols = ", ".join(preparer.quote_identifier(col) for col in columns)
     return f" ({cols})"
 
 
@@ -225,6 +229,9 @@ def _report_unlink_error(
 
 
 _BINARY_TYPES = (bytes, bytearray, memoryview)
+# CSV has no syntax for these: str() writes Python reprs ("None" inside a list)
+# and DuckDB cannot parse an interval written as "1 day, 0:00:00".
+_NON_CSV_TYPES = (list, tuple, set, frozenset, Mapping, datetime.timedelta)
 _NULL_STRING_OPTIONS = ("nullstr", "null")
 
 
@@ -272,6 +279,13 @@ def _csv_value(value: Any, null_marker: str) -> Any:
             "copy_from_rows cannot write binary values "
             f"({type(value).__name__}) to CSV; use copy_from_parquet or a "
             "regular INSERT for binary data"
+        )
+    if isinstance(value, _NON_CSV_TYPES) or getattr(value, "ndim", 0) > 0:
+        raise TypeError(
+            "copy_from_rows cannot write nested or interval values "
+            f"({type(value).__name__}) to CSV; use insert_from_arrow, "
+            "copy_from_parquet or a regular INSERT for LIST, STRUCT, MAP and "
+            "INTERVAL columns"
         )
     return value
 

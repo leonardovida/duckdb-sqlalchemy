@@ -133,5 +133,8 @@ with engine.connect() as conn:
 ```
 
 `checkpoint(conn)` commits the current transaction before and after the
-checkpoint so the connection does not remain in an aborted state. It also
-works with raw DuckDB connections.
+checkpoint so the connection does not remain in an aborted state. Because it
+commits, do not call it inside an `engine.begin()` or `connection.begin()`
+block: the block's later statements would run outside the transaction you
+opened. Pass `commit=False` to run only the checkpoint. It also accepts an ORM
+`Session` and raw DuckDB connections.

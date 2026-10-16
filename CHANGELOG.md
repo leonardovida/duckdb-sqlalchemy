@@ -8,7 +8,13 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
-- None yet.
+### Bug Fixes
+
+- Large `executemany` INSERTs no longer change values on the register fast path. Tz-aware TIME offsets, intervals, naive datetimes mixed with aware ones, STRUCT keys that differ only in case, and ints mixed with floats in text columns now fall back to the ordinary path and are stored as given. UNION columns, decimals wider than 38 digits and integers beyond HUGEINT no longer fail once a batch reaches 10,000 rows. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- `copy_from_rows` raises `TypeError` for list, dict and interval values instead of writing Python reprs such as `'None'`. `copy_from_csv` and `copy_from_parquet` accept column names that need quoting. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- MAP columns with LIST or STRUCT keys can be fetched again and return DuckDB's key/value shape. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- Reflected `VARINT`/`BIGNUM`, `TIMESTAMP_NS` and `TIME_NS` columns recreate with the same type. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- `checkpoint()` accepts an ORM `Session`. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
 
 ## [1.5.6.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4) (2026-10-16)
 

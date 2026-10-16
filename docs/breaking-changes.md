@@ -17,7 +17,11 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
-- None yet.
+- **Large INSERTs fall back for values the fast path would change** - An `executemany` INSERT that reaches `duckdb_copy_threshold` now uses the ordinary path when its values include tz-aware `time`, `timedelta`, naive and aware datetimes in one column, STRUCT keys that differ only in case, UNION columns, decimals wider than 38 digits, integers beyond HUGEINT, or ints mixed with floats in a non-numeric column. Those rows were stored with changed values, or failed, before. Batches of these values insert more slowly than other large batches. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- **`copy_from_rows` rejects nested and interval values** - Lists, tuples, dicts and `timedelta` values now raise `TypeError` instead of being written as Python reprs. Use `insert_from_arrow`, `copy_from_parquet` or a regular INSERT for LIST, STRUCT, MAP and INTERVAL columns. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- **COPY helpers quote any column name** - `copy_from_csv` and `copy_from_parquet` on a SQLAlchemy connection accept names such as `"event type"` instead of raising `ValueError`. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- **MAP with LIST or STRUCT keys returns the key/value shape** - Such columns now fetch as `{"key": [...], "value": [...]}` with declared processors applied, instead of raising `TypeError`. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- **Reflected `VARINT`, `TIMESTAMP_NS` and `TIME_NS` types** - These columns now reflect as `VarInt`, `TimestampNs` and `TimeNs` instead of `Numeric`, `TIMESTAMP` and `TIME`. Update `isinstance` checks or Alembic comparisons that expected the old types. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
 
 ## [1.5.6.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4) (2026-10-16)
 
