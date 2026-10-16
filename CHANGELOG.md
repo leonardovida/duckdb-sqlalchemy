@@ -8,7 +8,13 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
-- None yet.
+### Bug Fixes
+
+- Relational calls on the raw driver connection, such as `table()`, `from_query()` and `values()`, no longer truncate an open SQLAlchemy result, and their writes stop a transient-error retry from rolling the transaction back. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
+- Reflection matches table names case-insensitively, as DuckDB does, so `has_table`, `create_all` and autoload find `CREATE TABLE Users` under `users`. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
+- Reflected index expressions recreate correctly, including string literals with commas and quoted column names. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
+- `get_view_definition` and `has_type` resolve `db.schema`, temp and attached-database names, so ENUM types in `db.schema` are dropped and recreated by `drop_all`/`create_all`. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
+- Creating a DuckDB engine no longer changes the reserved words of the PostgreSQL dialect, and `quoted_name("my.schema", quote=True)` stays one schema identifier. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
 
 ## [1.5.6.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4) (2026-10-16)
 
