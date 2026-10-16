@@ -167,7 +167,7 @@ engine = create_motherduck_engine(
 
 ### MotherDuck URL builder
 
-Use `MotherDuckURL` to validate routing/instance-cache parameters; the dialect moves them into the database string when it connects:
+Use `MotherDuckURL` to validate routing/instance-cache parameters. The dialect moves them into the database string when it connects:
 
 ```python
 from duckdb_sqlalchemy import MotherDuckURL
@@ -181,6 +181,11 @@ url = MotherDuckURL(
 )
 ```
 
+A token passed to `MotherDuckURL` stays in `URL.query`, so `str(url)` shows
+it. `create_motherduck_engine` and `create_engine_from_paths` move tokens into
+`connect_args["config"]` instead, so the engine URL and its `repr` do not
+contain them. Prefer those helpers, or the `MOTHERDUCK_TOKEN` environment
+variable, whenever the URL may be logged.
 ### Database string helpers
 
 `append_query_to_database` adds routing params to an `md:` database string.
@@ -271,7 +276,9 @@ service is temporarily unavailable or rate limited. Retries only happen for
 idempotent statements, and only when no earlier statement in the current transaction would be lost: either outside a
 transaction, or when the failed statement was the first one in it (the dialect
 rolls back and begins again). Otherwise the original error is raised. Queries
-that call `md_*` table functions, `nextval`, or `setval` are never retried. Only errors raised while the statement executes are retried; an error raised later while
+that call `md_*` or `ducklake_*` functions, `*_execute` functions such as
+`postgres_execute`, `nextval`, or `setval` are never retried, and neither are
+`EXPLAIN ANALYZE` statements. Only errors raised while the statement executes are retried; an error raised later while
 rows are fetched from a streaming result is not.
 
 Calls made through the raw driver connection count as earlier transaction work

@@ -285,9 +285,9 @@ def test_motherduck_url_connect_args_match_previous_database_string() -> None:
 
     _, kwargs = Dialect().create_connect_args(url)
 
-    # Same database string the builder used to embed in ``URL.database``.
+    # Path params are sorted so equal params give one instance cache key.
     assert (
-        kwargs["database"] == "md:my_db?user=alice&session_name=team&attach_mode=single"
+        kwargs["database"] == "md:my_db?attach_mode=single&session_name=team&user=alice"
     )
     assert kwargs["url_config"] == {"memory_limit": "1GB"}
 
@@ -320,7 +320,8 @@ def test_connect_path_keys_do_not_duplicate_url_path_keys(
         config={"attach_mode": "workspace"},
     )
 
-    assert _query(captured_connect["database"]) == {"attach_mode": ["workspace"]}
+    # The URL value wins over connect_args["config"], as for other settings.
+    assert _query(captured_connect["database"]) == {"attach_mode": ["single"]}
 
 
 @pytest.mark.parametrize("database", ["MD:a,b", "MotherDuck:a,b", "md:a,b?x=1"])
@@ -423,7 +424,8 @@ def test_example_multi_instance_pool_builds_offline(
 
     assert isinstance(engine.pool, pool.QueuePool)
     assert engine.pool.size() == 5
-    assert engine.url.database == "md:my_db?attach_mode=single&user=1"
+    assert engine.url.database == "md:my_db"
+    assert dict(engine.url.query) == {"attach_mode": "single", "user": "1"}
 
 
 @requires_examples
