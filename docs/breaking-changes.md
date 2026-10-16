@@ -17,6 +17,10 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
+- None yet.
+
+## [1.5.6.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.2...v1.5.6.3) (2026-10-16)
+
 - **STRUCT field conversion** - Fields now run their declared SQLAlchemy bind and result processors, including nested containers. Users of field `TypeDecorator`, `Enum`, JSON or Numeric conversion now get the declared conversion instead of raw values, insertion errors or incorrect Decimal storage. Existing rows are not rewritten. Review stored values if your application compensated for skipped processors. [#201](https://github.com/leonardovida/duckdb-sqlalchemy/pull/201)
 
 - **`connection_timeout` is a MotherDuck startup parameter** - For `md:` and `motherduck:` databases, `connection_timeout` and `motherduck_connection_timeout` (URL query, `connect_args["config"]` or `create_motherduck_engine` keyword) now move into the `md:` database string as `connection_timeout` instead of reaching DuckDB as config. Connections that set it used to fail with an unrecognized configuration option and now connect with the timeout applied, and the value is part of the client instance cache key. Use a DuckDB interval string such as `30s` or a `datetime.timedelta`. It needs the MotherDuck extension for DuckDB 1.5.6, and older extensions ignore it. Local databases keep the key as ordinary DuckDB config. [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
