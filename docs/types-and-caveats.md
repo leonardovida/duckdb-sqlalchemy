@@ -95,7 +95,11 @@ See [performance guidance](performance) for streaming and direct Arrow ingestion
 `result.rowcount` reports the rows changed by an INSERT, UPDATE, DELETE, or
 MERGE. It is `-1` for statements with a RETURNING clause and when several
 parameter sets run through DuckDB's `executemany()` (batched UPDATE and
-DELETE; multi-row INSERTs are counted). `column.regexp_match(pattern)` compiles to
+DELETE, and `text()` INSERTs). A Core `insert()` with several parameter sets is
+counted in full when it fits in one `insertmanyvalues_page_size` page (1000
+rows by default) or uses the register fast path (`duckdb_copy_threshold`, 10,000
+rows by default). Between those sizes it runs in pages and `rowcount` reports
+the last page only. `column.regexp_match(pattern)` compiles to
 `regexp_matches()`, which matches anywhere in the string; `flags` are passed as
 DuckDB regex options (for example `flags="i"`).
 

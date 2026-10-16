@@ -1322,7 +1322,7 @@ def test_reflect_duckdb_index_expressions_parses_columns_and_expressions() -> No
         "['name', '\"display name\"', 'lower(name)']"
     )
 
-    assert expressions == ["'name'", "'\"display name\"'", "'lower(name)'"]
+    assert expressions == ["name", '"display name"', "lower(name)"]
     assert column_names == ["name", "display name", None]
 
 
