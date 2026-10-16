@@ -759,6 +759,7 @@ def test_deprecated_flight_helpers_compile_to_released_functions(
     assert sql_function in str(compiled)
 
 
+@pytest.mark.usefixtures("latest_motherduck_client")
 def test_deprecated_flight_logs_aliases_tabular_line_column() -> None:
     with pytest.warns(DeprecationWarning, match="md_get_flight_logs"):
         logs = olap.md_flight_logs()
@@ -977,6 +978,7 @@ def test_motherduck_dive_helpers_render_named_parameters() -> None:
     ]
 
 
+@pytest.mark.usefixtures("latest_motherduck_client")
 def test_motherduck_dive_status_helper_renders_named_parameters() -> None:
     updated_status = olap.md_update_dive_status(
         id="00000000-0000-0000-0000-000000000000",
