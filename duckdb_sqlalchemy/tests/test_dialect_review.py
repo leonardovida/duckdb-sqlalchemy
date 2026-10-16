@@ -14,6 +14,7 @@ from sqlalchemy import (
     create_engine,
     func,
     inspect,
+    literal,
     select,
     text,
 )
@@ -141,3 +142,12 @@ def test_quoted_schema_name_with_a_dot_stays_one_identifier(engine: Engine) -> N
         conn.execute(text('CREATE SCHEMA "my.schema"'))
         table.create(conn)
         assert inspect(conn).has_table("t", schema=quoted_name("my.schema", True))
+
+
+def test_integer_floor_division_keeps_floor_semantics(engine: Engine) -> None:
+    table = Table("t", MetaData(), Column("a", Integer), Column("b", Integer))
+    compiled = str(select(table.c.a // table.c.b).compile(dialect=engine.dialect))
+    assert "FLOOR(t.a / t.b)" in compiled
+    with engine.connect() as conn:
+        assert conn.execute(select(literal(-5) // literal(2))).scalar() == -3
+        assert conn.execute(select(literal(-5).op("//")(literal(2)))).scalar() == -2

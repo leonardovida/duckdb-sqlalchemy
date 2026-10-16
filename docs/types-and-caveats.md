@@ -232,6 +232,19 @@ division uses 128-bit integer division and is much slower than `DOUBLE`. On 10
 million `DECIMAL(18, 6)` rows it took about 2.5 seconds instead of 30
 milliseconds, so turn it on where exact results matter more than speed.
 
+### Floor division
+
+`a // b` compiles to `FLOOR(a / b)`, including for two integer columns. DuckDB
+computes `a / b` in `DOUBLE`, so the result is a `DOUBLE`, and it is inexact once
+an operand or the quotient is larger than 2**53 (9,007,199,254,740,992). For
+example `9007199254740993 // 1` returns `9007199254740992.0`. The result rounds
+toward negative infinity like Python, so `-5 // 2` is `-3`.
+
+For exact integer results on large values, use DuckDB's integer division
+operator, which truncates toward zero (`-5 // 2` is `-2` there), through
+`a.op("//")(b)`, or cast the operands to `Numeric` with
+`exact_decimal_division=True`.
+
 ## Auto-increment columns
 
 DuckDB does not support PostgreSQL `SERIAL`. For an integer primary key that

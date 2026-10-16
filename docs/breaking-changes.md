@@ -17,7 +17,10 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
-- None yet.
+- **Raw driver calls count as transaction work** - Every call on `connection.driver_connection` that can run SQL, such as `table()`, `from_query()`, `values()` or `read_parquet()`, now buffers an open SQLAlchemy result and counts as a statement in the current transaction. A later transient-error retry in that transaction is declined and raises the original error instead of rolling back the raw call's writes. Type constructors, fetches, `cursor()` and filesystem registration are unaffected. No migration is needed. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
+- **Reflection matches names case-insensitively** - `has_table`, `get_columns`, `get_indexes` and the other reflection methods now find `CREATE TABLE Users` when asked for `users`, as DuckDB itself does, and report it under the requested spelling. Code that relied on a differently-cased name being reported missing now sees the table. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
+- **Index expressions are unquoted** - Reflected `expressions` entries are now SQL text such as `(lower("name"))` instead of quoted literals such as `'(lower(name))'`, so reflected indexes recreate. Update code that stripped the quotes itself. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
+- **`get_view_definition` and `has_type` use DuckDB catalogs** - Both now resolve `db.schema`, temp and attached-database names. `get_view_definition("v")` returns a temp view's definition when one shadows `v`, and `has_type` sees ENUM types in `db.schema`. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
 
 ## [1.5.6.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4) (2026-10-16)
 
