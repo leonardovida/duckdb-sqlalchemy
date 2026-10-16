@@ -8,7 +8,17 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
-- None yet.
+### Bug Fixes
+
+- `create_motherduck_engine` and `create_engine_from_paths` no longer put MotherDuck tokens in the engine URL, so `repr(engine)` and logs do not show them. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
+- Transient-error retries no longer replay statements that hide a second statement behind a non-ASCII dollar-quote tag, or that call `EXPLAIN ANALYSE`, `ducklake_*` or `*_execute` functions. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
+- Alembic table recreates for `drop_column` and `alter_column` keep the table comment. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
+- `create_engine_from_paths` parses the query string of bare paths instead of using it as part of the file name. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
+- MotherDuck settings such as `motherduck_token` on a local database with `preload_extensions=["motherduck"]` are applied after the extension loads. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
+
+### Compatibility
+
+- URL path parameters such as `session_name` now win over the same keys in `connect_args["config"]`, as documented for other settings. Path parameters are sorted in the database string, so equal parameters share one DuckDB instance. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
 
 ## [1.5.6.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4) (2026-10-16)
 
