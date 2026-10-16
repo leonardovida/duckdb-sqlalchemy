@@ -17,7 +17,7 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
-- None yet.
+- **STRUCT ndarray binding restored** - Integer ndarrays in floating LIST and fixed ARRAY fields work again after the 1.5.6.3 regression. Standard array hooks receive native Python lists, including for multidimensional input. Custom array bind hooks retain their input representation. No migration is needed.
 
 ## [1.5.6.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.2...v1.5.6.3) (2026-10-16)
 

@@ -8,7 +8,9 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
-- None yet.
+### Bug Fixes
+
+- Preserve integer ndarray inputs for STRUCT fields declared as floating LIST or fixed ARRAY, including multidimensional LISTs. The 1.5.6.3 field conversion fix could turn these arrays into unsupported NumPy scalar lists. Field conversion hooks still run.
 
 ## [1.5.6.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.2...v1.5.6.3) (2026-10-16)
 
