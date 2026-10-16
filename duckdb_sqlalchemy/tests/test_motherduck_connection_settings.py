@@ -68,7 +68,7 @@ def test_format_interval_round_trips_through_duckdb() -> None:
 
     for value in (timedelta(seconds=30), timedelta(milliseconds=1500)):
         rendered = format_interval(value)
-        (parsed,) = duckdb.sql(f"SELECT '{rendered}'::INTERVAL").fetchone()  # type: ignore[misc]
+        [(parsed,)] = duckdb.sql(f"SELECT '{rendered}'::INTERVAL").fetchall()
         assert parsed == value
 
 
