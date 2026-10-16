@@ -10,11 +10,25 @@ preserved from the upstream project for historical context.
 
 ### Bug Fixes
 
+- Large `executemany` INSERTs no longer change values on the register fast path. Tz-aware TIME offsets, intervals, naive datetimes mixed with aware ones, STRUCT keys that differ only in case, and ints mixed with floats in text columns now fall back to the ordinary path and are stored as given. UNION columns, decimals wider than 38 digits and integers beyond HUGEINT no longer fail once a batch reaches 10,000 rows. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- `copy_from_rows` raises `TypeError` for list, dict and interval values instead of writing Python reprs such as `'None'`. `copy_from_csv` and `copy_from_parquet` accept column names that need quoting. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- MAP columns with LIST or STRUCT keys can be fetched again and return DuckDB's key/value shape. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- Reflected `VARINT`/`BIGNUM`, `TIMESTAMP_NS` and `TIME_NS` columns recreate with the same type. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- `checkpoint()` accepts an ORM `Session`. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- `create_motherduck_engine` and `create_engine_from_paths` no longer put MotherDuck tokens in the engine URL, so `repr(engine)` and logs do not show them. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
+- Transient-error retries no longer replay statements that hide a second statement behind a non-ASCII dollar-quote tag, or that call `EXPLAIN ANALYSE`, `ducklake_*` or `*_execute` functions. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
+- Alembic table recreates for `drop_column` and `alter_column` keep the table comment. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
+- `create_engine_from_paths` parses the query string of bare paths instead of using it as part of the file name. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
+- MotherDuck settings such as `motherduck_token` on a local database with `preload_extensions=["motherduck"]` are applied after the extension loads. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
 - Relational calls on the raw driver connection, such as `table()`, `from_query()` and `values()`, no longer truncate an open SQLAlchemy result, and their writes stop a transient-error retry from rolling the transaction back. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
 - Reflection matches table names case-insensitively, as DuckDB does, so `has_table`, `create_all` and autoload find `CREATE TABLE Users` under `users`. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
 - Reflected index expressions recreate correctly, including string literals with commas and quoted column names. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
 - `get_view_definition` and `has_type` resolve `db.schema`, temp and attached-database names, so ENUM types in `db.schema` are dropped and recreated by `drop_all`/`create_all`. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
 - Creating a DuckDB engine no longer changes the reserved words of the PostgreSQL dialect, and `quoted_name("my.schema", quote=True)` stays one schema identifier. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
+
+### Compatibility
+
+- URL path parameters such as `session_name` now win over the same keys in `connect_args["config"]`, as documented for other settings. Path parameters are sorted in the database string, so equal parameters share one DuckDB instance. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
 
 ## [1.5.6.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4) (2026-10-16)
 

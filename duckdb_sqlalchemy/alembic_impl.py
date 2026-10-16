@@ -47,6 +47,16 @@ class DuckDBImpl(DefaultImpl):
 
     def prep_table_for_batch(self, batch_impl: Any, table: Any) -> None:
         new_table = batch_impl.new_table
+        # Alembic builds the new table without the table comment.
+        if new_table.comment is None:
+            comment = table.comment
+            if comment is None and not self.as_sql:
+                inspector = inspect(self.connection)
+                assert inspector is not None
+                comment = inspector.get_table_comment(
+                    table.name, schema=table.schema
+                ).get("text")
+            new_table.comment = comment
         implicit = [
             column
             for column in new_table.columns

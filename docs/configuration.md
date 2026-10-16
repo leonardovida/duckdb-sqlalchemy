@@ -35,6 +35,7 @@ engine = create_engine("duckdb:///analytics.db?threads=4&memory_limit=1GB")
 ```
 
 If you supply a setting in both the URL and `connect_args["config"]`, the URL value wins.
+This includes MotherDuck routing parameters such as `session_name` and `attach_mode`.
 
 `read_only` is a top-level connect argument (not a `SET` option), so pass it in
 `connect_args`:
@@ -133,5 +134,8 @@ with engine.connect() as conn:
 ```
 
 `checkpoint(conn)` commits the current transaction before and after the
-checkpoint so the connection does not remain in an aborted state. It also
-works with raw DuckDB connections.
+checkpoint so the connection does not remain in an aborted state. Because it
+commits, do not call it inside an `engine.begin()` or `connection.begin()`
+block: the block's later statements would run outside the transaction you
+opened. Pass `commit=False` to run only the checkpoint. It also accepts an ORM
+`Session` and raw DuckDB connections.

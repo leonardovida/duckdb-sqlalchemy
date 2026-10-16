@@ -24,6 +24,7 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
+    Set,
     Tuple,
     cast,
 )
@@ -92,7 +93,7 @@ from .bulk import (
     insert_from_arrow,
 )
 from .capabilities import get_capabilities
-from .config import apply_config, get_core_config
+from .config import apply_config, get_core_config, get_native_config
 from .datatypes import (
     ISCHEMA_NAMES,
     DuckDBInteger,
@@ -1070,6 +1071,10 @@ def _prepare_connection_params(
     cparams["database"] = move_path_query_to_database(cparams.get("database"), config)
     _normalize_motherduck_config(config)
     application_name = _pop_application_name(config)
+    if not _looks_like_motherduck(cparams["database"]):
+        # Without the motherduck extension loaded, connect() rejects its
+        # settings. SET them after preload_extensions instead.
+        core_keys = get_native_config()
     ext = {k: config.pop(k) for k in list(config) if k not in core_keys}
     return ext, application_name
 
@@ -3149,19 +3154,44 @@ class Dialect(PGDialect_psycopg2):
             pending = [table.c[name].type.dialect_impl(self)]
             while pending:
                 type_impl = pending.pop()
-                if type_impl._has_bind_expression or isinstance(type_impl, Map):
-                    # Processed MAP key/value dictionaries infer as STRUCT.
+                if type_impl._has_bind_expression or isinstance(
+                    type_impl, (Map, UnionType)
+                ):
+                    # Processed MAP key/value dictionaries infer as STRUCT,
+                    # and a registered value cannot be cast to a UNION.
                     return None
                 if isinstance(type_impl, sqltypes.TypeDecorator):
                     pending.append(type_impl.impl)
                 elif isinstance(type_impl, (sqltypes.ARRAY, FixedArray)):
                     pending.append(type_impl.item_type.dialect_impl(self))
-                elif isinstance(type_impl, (Struct, UnionType)):
+                elif isinstance(type_impl, Struct):
                     pending.extend(
                         member.dialect_impl(self)
                         for _, member in type_impl._fields or ()
                     )
         return column_names
+
+    def _bulk_insert_numeric_columns(
+        self, context: Any, column_names: Sequence[str]
+    ) -> Set[str]:
+        table = context.compiled.statement.table
+        numeric = set()
+        for name in column_names:
+            type_impl = table.c[name].type.dialect_impl(self)
+            while isinstance(type_impl, sqltypes.TypeDecorator):
+                type_impl = type_impl.impl.dialect_impl(self)
+            if isinstance(type_impl, (sqltypes.Integer, sqltypes.Numeric)):
+                numeric.add(name)
+        return numeric
+
+    def _build_bulk_insert_data(
+        self, context: Any, parameters: Sequence[Any], column_names: List[str]
+    ) -> Any:
+        return _build_bulk_insert_data(
+            parameters,
+            column_names,
+            self._bulk_insert_numeric_columns(context, column_names),
+        )
 
     def _reaches_copy_threshold(self, context: Any, parameters: Sequence[Any]) -> bool:
         options = self._get_execution_options(context)
@@ -3186,7 +3216,7 @@ class Dialect(PGDialect_psycopg2):
         columns = self._bulk_insert_register_columns(context, parameters)
         if columns is None:
             return False
-        data = _build_bulk_insert_data(parameters, columns)
+        data = self._build_bulk_insert_data(context, parameters, columns)
         if data is None:
             return False
         # Reuse the conversion in do_executemany; if conversion is unsafe,
@@ -3206,7 +3236,7 @@ class Dialect(PGDialect_psycopg2):
         table = context.compiled.statement.table
         data = getattr(context, "_duckdb_bulk_data", None)
         if data is None:
-            data = _build_bulk_insert_data(parameters, column_names)
+            data = self._build_bulk_insert_data(context, parameters, column_names)
         else:
             del context._duckdb_bulk_data
         if data is None:

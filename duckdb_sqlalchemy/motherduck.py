@@ -322,10 +322,27 @@ def append_query_to_database(
 
 
 def _database_with_path_query(
-    database: Optional[str], *mappings: Optional[Mapping[str, Any]]
+    database: Optional[str],
+    *mappings: Optional[Mapping[str, Any]],
+    keep_existing: bool = False,
 ) -> Optional[str]:
     validate_motherduck_database_name(database)
-    return append_query_to_database(database, _normalize_path_query_mapping(*mappings))
+    path_query = _normalize_path_query_mapping(*mappings)
+    if keep_existing:
+        existing = _database_query_keys(database)
+        path_query = {
+            key: value for key, value in path_query.items() if key not in existing
+        }
+    database = append_query_to_database(database, path_query)
+    if database is None or "?" not in database:
+        return database
+    # The database string is DuckDB's instance cache key, so equal parameters
+    # must give an equal string whatever order they were passed in.
+    base, _, query_string = database.partition("?")
+    pairs = sorted(
+        parse_qsl(query_string, keep_blank_values=True), key=lambda pair: pair[0]
+    )
+    return f"{base}?{urlencode(pairs)}"
 
 
 def split_database_and_url_config(
@@ -351,11 +368,15 @@ def split_database_and_url_config(
 def move_path_query_to_database(
     database: Optional[str], config: Dict[str, Any]
 ) -> Optional[str]:
-    """Move MotherDuck path params from ``config`` into an ``md:`` database."""
+    """Move MotherDuck path params from ``config`` into an ``md:`` database.
+
+    Params already in the database string came from the URL, which wins
+    over ``connect_args["config"]`` as it does for other settings.
+    """
     if not is_motherduck_database(database):
         return database
     path_query = extract_path_query_from_config(config)
-    return _database_with_path_query(database, path_query)
+    return _database_with_path_query(database, path_query, keep_existing=True)
 
 
 def validate_motherduck_database_name(database: Optional[str]) -> None:
@@ -466,6 +487,10 @@ def create_motherduck_engine(
         if key in CREATE_ENGINE_KWARGS
     }
     url = MotherDuckURL(database=database, query=query, **path_params)
+    # Credentials go to DuckDB config so str(engine.url), logs and
+    # tracebacks do not show them.
+    connect_args = _move_credentials_to_config(url, connect_args)
+    url = url.difference_update_query(MOTHERDUCK_CREDENTIAL_KEYS)
 
     if poolclass is not None:
         engine_kwargs["poolclass"] = poolclass
@@ -480,7 +505,22 @@ def create_motherduck_engine(
         engine_kwargs.setdefault("pool_recycle", 23 * 3600)
     _default_to_queue_pool(engine_kwargs)
 
-    return create_engine(url, connect_args=dict(connect_args or {}), **engine_kwargs)
+    return create_engine(url, connect_args=connect_args, **engine_kwargs)
+
+
+def _move_credentials_to_config(
+    url: SAURL, connect_args: Optional[Mapping[str, Any]]
+) -> Dict[str, Any]:
+    params = _copy_connect_params(connect_args or {})
+    credentials = {
+        key: value
+        for key, value in url.query.items()
+        if key in MOTHERDUCK_CREDENTIAL_KEYS
+    }
+    if credentials:
+        # As with any URL setting, the URL value wins over connect_args.
+        params["config"] = {**params.get("config", {}), **credentials}
+    return params
 
 
 def _normalize_path_item(path: Union[str, SAURL]) -> SAURL:
@@ -488,7 +528,14 @@ def _normalize_path_item(path: Union[str, SAURL]) -> SAURL:
         return path
     if path.startswith("duckdb://"):
         return sa_make_url(path)
-    return SAURL.create("duckdb", database=path)
+    database, separator, query_string = path.partition("?")
+    if not separator:
+        return SAURL.create("duckdb", database=path)
+    query: Dict[str, Any] = {
+        key: values[0] if len(values) == 1 else tuple(values)
+        for key, values in parse_qs(query_string, keep_blank_values=True).items()
+    }
+    return SAURL.create("duckdb", database=database, query=query)
 
 
 def _merge_connect_args(
@@ -544,4 +591,7 @@ def create_engine_from_paths(
         return dialect.connect(**params)
 
     _default_to_queue_pool(engine_kwargs)
-    return create_engine(urls[0], creator=creator, **engine_kwargs)
+    # The creator connects, so the engine URL only labels the engine. Keep
+    # credentials out of it.
+    label = urls[0].difference_update_query(MOTHERDUCK_CREDENTIAL_KEYS)
+    return create_engine(label, creator=creator, **engine_kwargs)

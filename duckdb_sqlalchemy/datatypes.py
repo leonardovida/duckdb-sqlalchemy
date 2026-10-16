@@ -316,14 +316,31 @@ class Map(TypeEngine):
         return _bind
 
     def result_processor(self, dialect: Dialect, coltype: object) -> Any:
-        key_processor = self.key_type.dialect_impl(dialect).result_processor(
-            dialect, None
-        )
+        key_impl = self.key_type.dialect_impl(dialect)
+        key_processor = key_impl.result_processor(dialect, None)
         value_processor = self.value_type.dialect_impl(dialect).result_processor(
             dialect, None
         )
         if IS_GT_1 and key_processor is None and value_processor is None:
             return None
+        if isinstance(key_impl, (sqltypes.ARRAY, FixedArray, _FieldsType, Map)):
+            # Python dicts cannot have LIST, STRUCT or MAP keys, so DuckDB
+            # returns {"key": [...], "value": [...]}. Keep that shape.
+            def _convert_pairs(value: Any) -> Optional[Dict[str, Any]]:
+                if value is None:
+                    return None
+                return {
+                    "key": [
+                        key_processor(key) if key_processor is not None else key
+                        for key in value["key"]
+                    ],
+                    "value": [
+                        value_processor(item) if value_processor is not None else item
+                        for item in value["value"]
+                    ],
+                }
+
+            return _convert_pairs
 
         def _convert(value: Any) -> Optional[Dict[Any, Any]]:
             if value is None:
@@ -392,6 +409,18 @@ class Union(_FieldsType):
         super().__init__(fields)
 
 
+class TimestampNs(sqltypes.TIMESTAMP):
+    """DuckDB TIMESTAMP_NS. Python datetimes hold microseconds at most."""
+
+    cache_ok = True
+
+
+class TimeNs(sqltypes.TIME):
+    """DuckDB TIME_NS. Python times hold microseconds at most."""
+
+    cache_ok = True
+
+
 class Variant(TypeEngine):
     """Represents the DuckDB VARIANT type."""
 
@@ -407,7 +436,7 @@ class Geometry(TypeEngine):
 
 
 ISCHEMA_NAMES: Dict[str, Any] = {
-    "bignum": sqltypes.Numeric,
+    "bignum": VarInt if IS_GT_1 else sqltypes.Numeric,
     "hugeint": HugeInteger,
     "uhugeint": UHugeInteger,
     "tinyint": TinyInteger,
@@ -429,8 +458,8 @@ ISCHEMA_NAMES: Dict[str, Any] = {
     "ubigint": UBigInteger,
     "timestamp_s": sqltypes.TIMESTAMP,
     "timestamp_ms": sqltypes.TIMESTAMP,
-    "timestamp_ns": sqltypes.TIMESTAMP,
-    "time_ns": sqltypes.TIME,
+    "timestamp_ns": TimestampNs,
+    "time_ns": TimeNs,
     "enum": sqltypes.Enum,
     "bool": sqltypes.BOOLEAN,
     "variant": Variant,
@@ -462,6 +491,18 @@ def visit_union(
     **kw: Any,
 ) -> str:
     return "UNION" + struct_or_union(instance, compiler, **kw)
+
+
+@compiles(TimestampNs, "duckdb")  # type: ignore[misc]
+def visit_timestamp_ns(
+    instance: TimestampNs, compiler: PGTypeCompiler, **kw: Any
+) -> str:
+    return "TIMESTAMP_NS"
+
+
+@compiles(TimeNs, "duckdb")  # type: ignore[misc]
+def visit_time_ns(instance: TimeNs, compiler: PGTypeCompiler, **kw: Any) -> str:
+    return "TIME_NS"
 
 
 @compiles(Variant, "duckdb")  # type: ignore[misc]

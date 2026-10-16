@@ -24,10 +24,17 @@ ConfigValue = Union[str, int, bool, float, os.PathLike[Any], Decimal, timedelta,
 
 
 @lru_cache()
-def get_core_config() -> Set[str]:
+def get_native_config() -> Set[str]:
+    """Settings ``duckdb.connect(config=...)`` accepts without extensions."""
     with duckdb.connect(":memory:") as conn:
         rows = conn.execute("SELECT name FROM duckdb_settings()").fetchall()
-    return {name for (name,) in rows} | MOTHERDUCK_CONFIG_KEYS
+    return {name for (name,) in rows}
+
+
+@lru_cache()
+def get_core_config() -> Set[str]:
+    """Settings passed to ``duckdb.connect`` for a MotherDuck database."""
+    return get_native_config() | MOTHERDUCK_CONFIG_KEYS
 
 
 def apply_config(

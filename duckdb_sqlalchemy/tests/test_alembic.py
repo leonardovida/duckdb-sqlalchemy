@@ -387,3 +387,23 @@ def test_rename_table_respects_schema_translation(
         assert translated.execute(select(renamed.c.value)).scalars().all() == [42]
         assert connection.exec_driver_sql('SELECT * FROM "old.table"').all() == [(99,)]
         assert not inspect(connection).has_table(table.name, schema="odd schema")
+
+
+@pytest.mark.parametrize("operation", ["drop_column", "alter_column"])
+def test_implicit_recreate_keeps_table_comment(engine: Engine, operation: str) -> None:
+    table = Table(
+        "commented",
+        MetaData(),
+        Column("id", Integer, primary_key=True),
+        Column("a", Integer, index=True),
+        Column("b", Integer),
+        comment="keep me",
+    )
+    with engine.connect() as connection:
+        table.create(connection)
+        operations = Operations(MigrationContext.configure(connection))
+        if operation == "drop_column":
+            operations.drop_column("commented", "b")
+        else:
+            operations.alter_column("commented", "b", nullable=False)
+        assert inspect(connection).get_table_comment("commented") == {"text": "keep me"}

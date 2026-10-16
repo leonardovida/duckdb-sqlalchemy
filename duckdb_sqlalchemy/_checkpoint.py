@@ -10,6 +10,10 @@ def checkpoint(connection: Any, *, force: bool = False, commit: bool = True) -> 
     ``CHECKPOINT`` inside that transaction can leave the connection in an
     aborted state after local writes. This helper mirrors the raw DuckDB
     workflow by committing before and after the checkpoint when requested.
+
+    Committing ends the caller's transaction, so with ``commit=True`` do not
+    call it inside an ``engine.begin()`` or ``connection.begin()`` block. An
+    ORM ``Session`` is accepted and committed the same way.
     """
 
     statement = "FORCE CHECKPOINT" if force else "CHECKPOINT"
@@ -23,6 +27,15 @@ def checkpoint(connection: Any, *, force: bool = False, commit: bool = True) -> 
             connection.commit()
         connection.exec_driver_sql(statement)
         if commit and connection.in_transaction():
+            connection.commit()
+        return
+
+    if hasattr(connection, "get_bind") and hasattr(connection, "connection"):
+        # An ORM Session: run on its connection and commit through it.
+        if commit:
+            connection.commit()
+        connection.connection().exec_driver_sql(statement)
+        if commit:
             connection.commit()
         return
 
