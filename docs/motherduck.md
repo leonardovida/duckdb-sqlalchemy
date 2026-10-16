@@ -73,7 +73,7 @@ Parameters that are treated as part of the database string:
 - `dbinstance_inactivity_ttl` (preferred; `motherduck_dbinstance_inactivity_ttl`
   remains supported but is deprecated)
 - `connection_timeout` (bounds how long opening the MotherDuck connection may
-  take; `motherduck_connection_timeout` is accepted too)
+  take. `motherduck_connection_timeout` is accepted too)
 - `saas_mode` (`pgendpoint` is supported when you need PG endpoint-compatible routing)
 - `cache_buster`
 

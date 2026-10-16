@@ -17,7 +17,8 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
-- None yet.
+- **MotherDuck helper columns follow the DuckDB version** - `md_*` table-function helpers name only the columns that the MotherDuck extension for the installed DuckDB version returns. On DuckDB 1.5.5 and newer `md_list_flight_versions()` and `md_job_versions()` no longer expose `source_code` and `requirements_txt`, and `md_update_dive_metadata()`, `md_update_dive_status()`, `md_create_dive()` and `md_get_dive()` no longer expose `required_resources`. Those queries failed to bind before, so only code that built them without running them notices: `.c.<column>` now raises `AttributeError`. Use `md_get_flight_version()` for source columns, or pass `columns=`.
+- **Server-side temporary tables are a session `SET`** - `motherduck_enable_server_side_temp_tables` now runs as `SET` on each new connection instead of joining the `md:` database string, where MotherDuck ignored it. Temporary tables created through such an engine now live on the server. Drop the option if you relied on local temporary tables.
 
 ## [1.5.6.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.1...v1.5.6.2) (2026-10-16)
 
