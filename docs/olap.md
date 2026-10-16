@@ -428,11 +428,12 @@ with engine.begin() as conn:
     copy_from_csv(conn, "events", "data/events.csv", header=True)
 ```
 
-For safety, string table names, column names, and COPY option keys must be
-identifiers. Dotted paths like `schema.events` are supported, but SQL
-fragments are rejected.
+For safety, string table names and COPY option keys must be identifiers.
+Dotted paths like `schema.events` are supported, but SQL fragments are
+rejected. Column names are quoted on a SQLAlchemy connection, so names such as
+`"event type"` work.
 
-If you need quoted or mixed-case identifiers, pass a SQLAlchemy `Table` object
+If you need quoted or mixed-case table names, pass a SQLAlchemy `Table` object
 instead of a plain string so SQLAlchemy handles quoting.
 
 For row iterables, you can stream to a temporary CSV in chunks:
@@ -444,6 +445,11 @@ rows = ({"id": i, "name": f"user-{i}"} for i in range(1_000_000))
 with engine.begin() as conn:
     copy_from_rows(conn, "users", rows, columns=["id", "name"], chunk_size=100_000)
 ```
+
+`copy_from_rows` writes plain scalar values. It raises `TypeError` for
+bytes, lists, tuples, dicts and `timedelta` values, because CSV cannot
+represent them faithfully. Use `insert_from_arrow`, `copy_from_parquet` or a
+regular INSERT for BLOB, LIST, STRUCT, MAP and INTERVAL columns.
 
 Missing mapping keys become NULL by default, preserving sparse-row behavior.
 Use `strict=True` to require every selected key in every mapping row. A missing
