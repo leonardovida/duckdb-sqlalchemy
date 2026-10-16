@@ -18,6 +18,12 @@ Most SQLAlchemy core types map directly to DuckDB. DuckDB-specific helpers live 
 | `Map` | MAP | Key/value mapping |
 | `Union` | UNION | Union types via dict of SQLAlchemy types |
 
+`Struct` fields and `Map` keys and values run their declared SQLAlchemy Python
+bind and result processors, recursively through nested containers. This includes
+`TypeDecorator`, non-native `Enum`, JSON and Numeric conversion. A whole SQL NULL
+container remains `None`. STRUCT input dictionaries retain their keys and are
+matched to declared fields using DuckDB's ASCII case-insensitive naming rules.
+
 ### DuckDB-specific type examples
 
 ```python

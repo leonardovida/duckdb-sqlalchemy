@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional, Tuple, Type
 import duckdb
 from packaging.version import Version
 from sqlalchemy import exc, util
+from sqlalchemy.dialects.postgresql import ARRAY as PGARRAY
 from sqlalchemy.dialects.postgresql.base import PGTypeCompiler
 from sqlalchemy.engine import Dialect
 from sqlalchemy.ext.compiler import compiles
@@ -118,6 +119,7 @@ FieldCollection = typing.Union[
     typing.Iterable[Tuple[str, TV]],
 ]
 NormalizedFields = Optional[Tuple[Tuple[str, TypeEngine], ...]]
+_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 
 
 def _normalize_fields(
@@ -183,6 +185,71 @@ class Struct(_FieldsType):
     """
 
     __visit_name__ = "struct"
+
+    def bind_processor(self, dialect: Dialect) -> Any:
+        processors = {}
+        for name, member in self._fields or ():
+            implementation = member.dialect_impl(dialect)
+            if (
+                isinstance(implementation, sqltypes.ARRAY)
+                and type(implementation).bind_processor is PGARRAY.bind_processor
+                and implementation.item_type.dialect_impl(dialect).bind_processor(
+                    dialect
+                )
+                is None
+            ):
+                # ARRAY's no-op item conversion still turns ndarrays into
+                # lists of NumPy scalars the native binder cannot accept.
+                # Keep DuckDB's ndarray binding when no item hook is needed.
+                continue
+            processor = implementation.bind_processor(dialect)
+            if processor is not None:
+                processors[name.translate(_ASCII_LOWER)] = processor
+        if not processors:
+            return None
+
+        def process(value: Any) -> Any:
+            if not isinstance(value, typing.Mapping):
+                return value
+            # DuckDB matches STRUCT fields case-insensitively for ASCII only.
+            # Keep input names and unprocessed fields for the native binder.
+            return {
+                name: (
+                    processor(item)
+                    if (processor := processors.get(str(name).translate(_ASCII_LOWER)))
+                    is not None
+                    else item
+                )
+                for name, item in value.items()
+            }
+
+        return process
+
+    def result_processor(self, dialect: Dialect, coltype: object) -> Any:
+        processors = {
+            name: processor
+            for name, member in self._fields or ()
+            if (
+                processor := member.dialect_impl(dialect).result_processor(
+                    dialect, None
+                )
+            )
+            is not None
+        }
+        if not processors:
+            return None
+
+        def process(value: Any) -> Any:
+            if value is None:
+                return None
+            return {
+                name: processor(item)
+                if (processor := processors.get(name)) is not None
+                else item
+                for name, item in value.items()
+            }
+
+        return process
 
 
 class Map(TypeEngine):
