@@ -8,7 +8,9 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
-- None yet.
+### Compatibility
+
+- Support DuckDB 2.0, whose DB-API results no longer export Arrow. With `duckdb_arrow=True`, SELECTs run as DuckDB relations, so `result.arrow`, `result.batches()` and the raw cursor Arrow methods keep working. Without the option, those cursor methods raise an `AttributeError` that names it. A raw Arrow reader no longer blocks the next statement or commit. DuckDB 1.x behavior is unchanged.
 
 ## [1.5.6.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4) (2026-10-16)
 

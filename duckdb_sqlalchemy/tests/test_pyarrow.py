@@ -1,8 +1,16 @@
 from typing import Any, Optional, cast
 
+import pytest
 from pyarrow import RecordBatch, RecordBatchReader
 from pyarrow import Table as ArrowTable
 from sqlalchemy import MetaData, Table, create_engine, text
+
+import duckdb_sqlalchemy
+
+# DuckDB 2.0 results export Arrow only when the statement runs with duckdb_arrow.
+_ARROW_CURSOR_OPTIONS = (
+    {} if duckdb_sqlalchemy._DBAPI_EXPORTS_ARROW else {"duckdb_arrow": True}
+)
 
 
 def _to_arrow_table(cursor: Any) -> Any:
@@ -44,7 +52,9 @@ def test_fetch_arrow() -> None:
 
     # arrow table
     with engine.begin() as con:
-        res = _to_arrow_table(con.execute(stmt).cursor)
+        res = _to_arrow_table(
+            con.execution_options(**_ARROW_CURSOR_OPTIONS).execute(stmt).cursor
+        )
         assert isinstance(res, ArrowTable)
         assert res == ArrowTable.from_pydict(
             {"label": ["xx", "yy", "zz"], "value": [-1.0, 2.5, 6.0]}
@@ -52,18 +62,35 @@ def test_fetch_arrow() -> None:
 
     # arrow batches
     with engine.begin() as con:
-        res = _to_arrow_reader(con.execute(stmt).cursor)
+        res = _to_arrow_reader(
+            con.execution_options(**_ARROW_CURSOR_OPTIONS).execute(stmt).cursor
+        )
         assert isinstance(res, RecordBatchReader)
         assert res.read_all() == ArrowTable.from_pydict(
             {"label": ["xx", "yy", "zz"], "value": [-1.0, 2.5, 6.0]}
         )
-        res = _to_arrow_reader(con.execute(stmt).cursor, batch_size=2)
+        res = _to_arrow_reader(
+            con.execution_options(**_ARROW_CURSOR_OPTIONS).execute(stmt).cursor,
+            batch_size=2,
+        )
         assert res.read_next_batch() == RecordBatch.from_pydict(
             {"label": ["xx", "yy"], "value": [-1.0, 2.5]}
         )
         assert res.read_next_batch() == RecordBatch.from_pydict(
             {"label": ["zz"], "value": [6.0]}
         )
+
+
+@pytest.mark.skipif(
+    duckdb_sqlalchemy._DBAPI_EXPORTS_ARROW, reason="DB-API results export Arrow"
+)
+def test_plain_cursor_arrow_points_to_the_execution_option() -> None:
+    engine = create_engine("duckdb:///:memory:")
+    with engine.connect() as con:
+        cursor = con.exec_driver_sql("SELECT 1 AS a").cursor
+        assert not hasattr(cursor, "to_arrow_table")
+        with pytest.raises(AttributeError, match="duckdb_arrow=True"):
+            cursor.to_arrow_table()
 
 
 def test_arrow_execution_option() -> None:
