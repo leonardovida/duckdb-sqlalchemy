@@ -95,7 +95,11 @@ See [performance guidance](performance) for streaming and direct Arrow ingestion
 `result.rowcount` reports the rows changed by an INSERT, UPDATE, DELETE, or
 MERGE. It is `-1` for statements with a RETURNING clause and when several
 parameter sets run through DuckDB's `executemany()` (batched UPDATE and
-DELETE; multi-row INSERTs are counted). `column.regexp_match(pattern)` compiles to
+DELETE, and `text()` INSERTs). A Core `insert()` with several parameter sets is
+counted in full when it fits in one `insertmanyvalues_page_size` page (1000
+rows by default) or uses the register fast path (`duckdb_copy_threshold`, 10,000
+rows by default). Between those sizes it runs in pages and `rowcount` reports
+the last page only. `column.regexp_match(pattern)` compiles to
 `regexp_matches()`, which matches anywhere in the string; `flags` are passed as
 DuckDB regex options (for example `flags="i"`).
 
@@ -227,6 +231,19 @@ type is unknown, and quotients that could need more than 22 integer digits
 division uses 128-bit integer division and is much slower than `DOUBLE`. On 10
 million `DECIMAL(18, 6)` rows it took about 2.5 seconds instead of 30
 milliseconds, so turn it on where exact results matter more than speed.
+
+### Floor division
+
+`a // b` compiles to `FLOOR(a / b)`, including for two integer columns. DuckDB
+computes `a / b` in `DOUBLE`, so the result is a `DOUBLE`, and it is inexact once
+an operand or the quotient is larger than 2**53 (9,007,199,254,740,992). For
+example `9007199254740993 // 1` returns `9007199254740992.0`. The result rounds
+toward negative infinity like Python, so `-5 // 2` is `-3`.
+
+For exact integer results on large values, use DuckDB's integer division
+operator, which truncates toward zero (`-5 // 2` is `-2` there), through
+`a.op("//")(b)`, or cast the operands to `Numeric` with
+`exact_decimal_division=True`.
 
 ## Auto-increment columns
 

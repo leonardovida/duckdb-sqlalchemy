@@ -20,6 +20,11 @@ preserved from the upstream project for historical context.
 - Alembic table recreates for `drop_column` and `alter_column` keep the table comment. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
 - `create_engine_from_paths` parses the query string of bare paths instead of using it as part of the file name. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
 - MotherDuck settings such as `motherduck_token` on a local database with `preload_extensions=["motherduck"]` are applied after the extension loads. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
+- Relational calls on the raw driver connection, such as `table()`, `from_query()` and `values()`, no longer truncate an open SQLAlchemy result, and their writes stop a transient-error retry from rolling the transaction back. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
+- Reflection matches table names case-insensitively, as DuckDB does, so `has_table`, `create_all` and autoload find `CREATE TABLE Users` under `users`. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
+- Reflected index expressions recreate correctly, including string literals with commas and quoted column names. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
+- `get_view_definition` and `has_type` resolve `db.schema`, temp and attached-database names, so ENUM types in `db.schema` are dropped and recreated by `drop_all`/`create_all`. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
+- Creating a DuckDB engine no longer changes the reserved words of the PostgreSQL dialect, and `quoted_name("my.schema", quote=True)` stays one schema identifier. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
 
 ### Compatibility
 

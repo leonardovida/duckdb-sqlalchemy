@@ -341,19 +341,40 @@ class DuckDBInspector(PGInspector):
             raise NotImplementedError() from e
 
 
-# DuckDBPyConnection calls that replace or discard the connection's open result.
-_RESULT_DISCARDING_CONNECTION_METHODS = frozenset(
+# DuckDBPyConnection calls that neither run SQL nor replace the open result.
+# Every other call (execute, sql, table, from_query, read_parquet, values,
+# ...) can run a statement or later run one through the relation it returns,
+# so the wrapper buffers the pending result and counts it as transaction work.
+_RESULT_PRESERVING_CONNECTION_METHODS = frozenset(
     {
-        "append",
-        "checkpoint",
-        "execute",
-        "executemany",
-        "install_extension",
-        "load_extension",
-        "query",
-        "register",
-        "sql",
-        "unregister",
+        "array_type",
+        "close",
+        "cursor",
+        "decimal_type",
+        "disable_profiling",
+        "dtype",
+        "duplicate",
+        "enable_profiling",
+        "enum_type",
+        "extract_statements",
+        "fetchall",
+        "fetchmany",
+        "fetchone",
+        "filesystem_is_registered",
+        "get_profiling_information",
+        "interrupt",
+        "list_filesystems",
+        "list_type",
+        "map_type",
+        "query_progress",
+        "register_filesystem",
+        "row_type",
+        "sqltype",
+        "string_type",
+        "struct_type",
+        "type",
+        "union_type",
+        "unregister_filesystem",
     }
 )
 # Cursor calls that read the open result in a form other than Python rows.
@@ -492,17 +513,21 @@ class ConnectionWrapper:
             self._transaction_statements += 1
 
     def __getattr__(self, name: str) -> Any:
-        if name in _RESULT_DISCARDING_CONNECTION_METHODS:
+        attribute = getattr(self.__c, name)
+        if (
+            name in _RESULT_PRESERVING_CONNECTION_METHODS
+            or name in _NATIVE_RESULT_FETCH_METHODS
+            or not callable(attribute)
+        ):
+            return attribute
+        self._buffer_pending_result()
+
+        def call_native(*args: Any, **kwargs: Any) -> Any:
             self._buffer_pending_result()
-            method = getattr(self.__c, name)
+            self._count_statement()
+            return attribute(*args, **kwargs)
 
-            def call_native(*args: Any, **kwargs: Any) -> Any:
-                self._buffer_pending_result()
-                self._count_statement()
-                return method(*args, **kwargs)
-
-            return call_native
-        return getattr(self.__c, name)
+        return call_native
 
     def close(self) -> None:
         pending = self._pending_cursor() if self._pending_cursor is not None else None
@@ -1057,7 +1082,8 @@ def _prepare_connection_params(
 class DuckDBIdentifierPreparer(PGIdentifierPreparer):
     def __init__(self, dialect: "Dialect", **kwargs: Any) -> None:
         super().__init__(dialect, **kwargs)
-        self.reserved_words.update(_get_reserved_words())
+        # A new set: updating the inherited one would change PostgreSQL's.
+        self.reserved_words = set(self.reserved_words) | _get_reserved_words()
 
     def _separate(self, name: Optional[str]) -> Tuple[Optional[Any], Optional[str]]:
         """
@@ -1068,6 +1094,9 @@ class DuckDBIdentifierPreparer(PGIdentifierPreparer):
         """
         if name is None:
             return None, None
+        if getattr(name, "quote", None) is True:
+            # quoted_name(..., quote=True) is one identifier, dots included.
+            return None, name
         identifiers = self.unformat_identifiers(name)
         if len(identifiers) == 1:
             return None, identifiers[0]
@@ -1675,6 +1704,59 @@ class Dialect(PGDialect_psycopg2):
         return [view for (view,) in rs]
 
     @cache  # type: ignore[call-arg]
+    def get_view_definition(
+        self,
+        connection: "Connection",
+        view_name: str,
+        schema: Optional[str] = None,
+        **kw: Any,
+    ) -> str:
+        """Return the view's ``CREATE VIEW`` statement.
+
+        ``schema`` may be ``<db name>.<schema name>``. Without it the name
+        resolves like an unqualified name in a query: temp views first.
+        """
+        sql = """
+            SELECT database_name, schema_name, view_name AS table_name, sql
+            FROM duckdb_views()
+            WHERE internal = false
+            """
+        where_sql, params = self._build_query_where(
+            table_name=view_name, schema_name=schema
+        )
+        rows = self._execute_visible_duckdb_relation_rows(
+            connection, text(sql + where_sql), params, schema
+        )
+        if not rows:
+            raise NoSuchTableError(f"{schema}.{view_name}" if schema else view_name)
+        return rows[0]["sql"]
+
+    @cache  # type: ignore[call-arg]
+    def has_type(
+        self,
+        connection: "Connection",
+        type_name: str,
+        schema: Optional[str] = None,
+        **kw: Any,
+    ) -> bool:
+        """Whether a user-defined type exists, in ``schema`` or ``db.schema``."""
+        sql = """
+            SELECT 1
+            FROM (
+                SELECT database_name, schema_name, type_name AS table_name, internal
+                FROM duckdb_types()
+            )
+            WHERE internal = false
+            """
+        where_sql, params = self._build_query_where(
+            table_name=type_name, schema_name=schema, default_to_current_schema=True
+        )
+        return (
+            connection.execute(text(sql + where_sql + "LIMIT 1"), params).first()
+            is not None
+        )
+
+    @cache  # type: ignore[call-arg]
     def get_schema_names(self, connection: "Connection", **kw: "Any"):  # type: ignore[no-untyped-def]
         """
         Return unquoted database_name.schema_name unless either contains spaces or double quotes.
@@ -1765,7 +1847,8 @@ class Dialect(PGDialect_psycopg2):
             database_name, schema_name = self.identifier_preparer._separate(schema_name)
 
         if table_name is not None:
-            sql += "AND table_name = :table_name\n"
+            # DuckDB resolves names case-insensitively, quoted or not.
+            sql += "AND lower(table_name) = lower(:table_name)\n"
             params.update({"table_name": table_name})
 
         if schema_name is not None:
@@ -1897,12 +1980,24 @@ class Dialect(PGDialect_psycopg2):
         include_internal_filter: bool = False,
         suffix: str = "",
     ) -> Tuple[Any, Dict[str, Any]]:
+        params: Dict[str, Any] = {}
+        names = None if filter_names is None else list(filter_names)
+        if names:
+            # DuckDB resolves names case-insensitively, quoted or not. Report
+            # matches under the requested spelling, which SQLAlchemy uses as
+            # the result key.
+            relation = (
+                "(SELECT reflected.* REPLACE (requested.name AS table_name) "
+                f"FROM {relation} AS reflected "
+                "JOIN (SELECT unnest(CAST(:filter_names AS VARCHAR[])) AS name) "
+                "AS requested ON lower(reflected.table_name) = lower(requested.name))"
+            )
+            params["filter_names"] = names
         sql = f"""
             SELECT {columns}
             FROM {relation}
             WHERE schema_name NOT LIKE 'pg\\_%' ESCAPE '\\'
             """
-        params: Dict[str, Any] = {}
         if include_internal_filter:
             sql += "AND internal = false\n"
         # Listing without a schema covers the current schema only; looking up
@@ -1913,19 +2008,11 @@ class Dialect(PGDialect_psycopg2):
         )
         sql += where_sql
         params.update(where_params)
-        if filter_names is not None:
-            names = list(filter_names)
-            if not names:
-                sql += "AND 1 = 0\n"
-            else:
-                sql += "AND table_name IN :filter_names\n"
-                params["filter_names"] = names
+        if names is not None and not names:
+            sql += "AND 1 = 0\n"
         if suffix:
             sql += suffix
-        stmt = text(sql)
-        if params.get("filter_names"):
-            stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
-        return stmt, params
+        return text(sql), params
 
     def _visible_duckdb_relation_rows(
         self,
@@ -2093,8 +2180,6 @@ class Dialect(PGDialect_psycopg2):
             kinds.append("'view'")
         sql += "\nAND relation_kind IN (" + ", ".join(kinds or ["NULL"]) + ")"
         stmt = text(sql)
-        if params.get("filter_names"):
-            stmt = stmt.bindparams(bindparam("filter_names", expanding=True))
         return self._execute_visible_duckdb_relation_rows(
             connection, stmt, params, schema
         )
@@ -2327,12 +2412,18 @@ class Dialect(PGDialect_psycopg2):
         self,
         raw_expressions: Any,
     ) -> Tuple[List[str], List[Optional[str]]]:
-        raw = str(raw_expressions or "").strip()
-        inner = raw[1:-1] if raw.startswith("[") and raw.endswith("]") else raw
-        expressions = self._split_duckdb_list(inner)
+        if isinstance(raw_expressions, (list, tuple)):
+            # CAST(expressions AS VARCHAR[]) decodes DuckDB's quoting.
+            expressions = [str(expression) for expression in raw_expressions]
+        else:
+            raw = str(raw_expressions or "").strip()
+            inner = raw[1:-1] if raw.startswith("[") and raw.endswith("]") else raw
+            expressions = [
+                self._unquote_duckdb_string(expression)
+                for expression in self._split_duckdb_list(inner)
+            ]
         column_names: List[Optional[str]] = []
-        for expression in expressions:
-            candidate = self._unquote_duckdb_string(expression)
+        for candidate in expressions:
             identifier = self._unquote_duckdb_identifier(candidate)
             if identifier is not None:
                 column_names.append(identifier)
@@ -2845,7 +2936,7 @@ class Dialect(PGDialect_psycopg2):
             "duckdb_indexes()",
             (
                 "database_name, schema_name, table_name, index_name, "
-                "expressions, is_unique"
+                "CAST(expressions AS VARCHAR[]) AS expressions, is_unique"
             ),
             schema=None,
             filter_names=list(tables),
