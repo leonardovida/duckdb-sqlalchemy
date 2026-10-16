@@ -8,6 +8,15 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+- None yet.
+
+## [1.5.6.3](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.2...v1.5.6.3) (2026-10-16)
+
+### Highlights
+
+- STRUCT fields honor declared SQLAlchemy conversions, preventing skipped decorators, Enum insertion errors and incorrect Decimal storage. [#201](https://github.com/leonardovida/duckdb-sqlalchemy/pull/201)
+- MotherDuck settings and helper columns follow the installed extension's supported behavior, fixing ignored server-side temporary-table settings and binder errors. [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
+
 ### Features
 
 - Set a MotherDuck connect timeout with `connection_timeout`, for example `duckdb:///md:analytics?connection_timeout=30s` or `create_motherduck_engine(..., connection_timeout=timedelta(seconds=30))`. It moves into the `md:` database string, where the MotherDuck extension for DuckDB 1.5.6 reads it. Before, the key reached DuckDB as an unknown config option. `motherduck_connection_timeout` is accepted too. See [Connection timeout](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/motherduck.md#connection-timeout). [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
@@ -24,10 +33,22 @@ preserved from the upstream project for historical context.
   - Flight version helpers on DuckDB 1.5.3 (no `max_runtime_sec`), `md_get_flight_logs()` on DuckDB 1.5.3 and 1.5.4 (a single `logs` column), and Dive helpers before DuckDB 1.5.4 (no status columns).
 - The helpers also return the newer columns: `owner_name` from the Flight summary helpers on DuckDB 1.5.5 and newer, and `instance_type` from the Flight version helpers on DuckDB 1.5.6. See [Columns by DuckDB version](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/olap.md#columns-by-duckdb-version). [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
 
+### Tooling and Release
+
+- Publish the next maintenance version on the 1.5.6 line through the checked build, PyPI hash-verification and fresh-install workflow. [Release diff](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.2...v1.5.6.3)
+
 ### Compatibility
 
 - Accessing a column that the installed extension does not return, for example `md_list_flight_versions().c.source_code` on DuckDB 1.5.5, now raises `AttributeError` when you build the statement instead of a binder error when it runs. Read source columns with `md_get_flight_version()`, or pass `columns=` to name columns yourself. [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
 - `motherduck_enable_server_side_temp_tables` is no longer part of the `md:` database string, so it no longer changes the client instance cache key. [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
+- STRUCT field `TypeDecorator`, Enum, JSON and Numeric Python hooks now run recursively. Existing rows are not rewritten, so review stored values if your application compensated for skipped conversion. Dependency floors and cache identity are unchanged. [#201](https://github.com/leonardovida/duckdb-sqlalchemy/pull/201)
+
+### Verification
+
+- Nine new STRUCT execution cases pass, including eight regressions demonstrated on unchanged main. The locked full suite passed 707 tests, with minimum-version and SQLAlchemy 2.1 checks, remote datatype tests, lint, types, strict distributions and fresh wheel smokes. Hosted stable, optional-floor, platform and distribution gates passed. [#201](https://github.com/leonardovida/duckdb-sqlalchemy/pull/201)
+- MotherDuck settings readback and helper binding across client versions are documented with the included compatibility fixes. [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.2...v1.5.6.3
 
 ## [1.5.6.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.1...v1.5.6.2) (2026-10-16)
 

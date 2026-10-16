@@ -56,5 +56,18 @@ No UNION conversion, native ENUM DDL registration, retries or new features.
   formatting only. Wheel/sdist strict Twine checks and a fresh wheel outside
   the source tree pass the original repro and distribution smoke without
   pandas or Arrow. Full local nox and credentialed MotherDuck are not run.
-- Hosted checks, merge and publication pending. The automation continuity
-  record retains terminal delivery state and detailed baseline logs.
+- All hosted stable, floor, platform, optional-dependency, upstream and
+  distribution gates passed. Independent review reproduced the ASCII result
+  casing issue, verified its fix and found no remaining issue.
+
+## Outcomes
+
+[PR201](https://github.com/leonardovida/duckdb-sqlalchemy/pull/201) merged as
+`21e518b6c70f6cc0e4fe285626dd8906ef7ac3a7` after required checks and review.
+The tested and merged trees match. The informational DuckDB nightly
+`2.0.0.dev2610151406` has the same 12 Arrow/retry failures on the unchanged
+baseline and the final patch, with all nine new cases passing. No retry or
+unsupported upstream compatibility patch. A separate maintenance release PR
+prepares 1.5.6.3 through the established exact-commit checks, PyPI artifact hash
+verification and fresh install workflow. The automation continuity record
+tracks its terminal publication state and retains detailed baseline logs.
