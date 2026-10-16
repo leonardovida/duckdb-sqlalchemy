@@ -116,7 +116,13 @@ def test_enum_types_in_attached_schemas_drop_and_recreate() -> None:
         conn.exec_driver_sql("ATTACH ':memory:' AS db2")
         conn.exec_driver_sql("CREATE SCHEMA db2.s")
     metadata = MetaData()
-    Table("t", metadata, Column("e", Enum("x", "y", name="myenum", schema="db2.s")))
+    # DuckDB 1.3 cannot use a type from another catalog, so keep both in db2.s.
+    Table(
+        "t",
+        metadata,
+        Column("e", Enum("x", "y", name="myenum", schema="db2.s")),
+        schema="db2.s",
+    )
     metadata.create_all(engine)
     with engine.connect() as conn:
         assert engine.dialect.has_type(conn, "myenum", schema="db2.s")
