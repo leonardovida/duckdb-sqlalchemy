@@ -72,9 +72,13 @@ Parameters that are treated as part of the database string:
 - `access_mode` (`read_only` for read-scaling tokens)
 - `dbinstance_inactivity_ttl` (preferred; `motherduck_dbinstance_inactivity_ttl`
   remains supported but is deprecated)
+- `connection_timeout` (bounds how long opening the MotherDuck connection may
+  take. `motherduck_connection_timeout` is accepted too)
 - `saas_mode` (`pgendpoint` is supported when you need PG endpoint-compatible routing)
-- `motherduck_enable_server_side_temp_tables`
 - `cache_buster`
+
+Interval parameters (`connection_timeout`, `dbinstance_inactivity_ttl`) accept
+DuckDB interval strings such as `30s` or `15m`, or a `datetime.timedelta`.
 
 For backward compatibility the dialect also accepts `session_hint`,
 `motherduck_session_hint`, `motherduck_session_name`,
@@ -110,6 +114,47 @@ Example with a MotherDuck host override / PG endpoint-style routing:
 ```python
 engine = create_engine(
     "duckdb:///md:my_db?host=custom.motherduck.com&port=443&tls=true&saas_mode=pgendpoint"
+)
+```
+
+### Connection timeout
+
+By default the MotherDuck extension waits for as long as the service asks it
+to, for example while a dedicated Duckling is still starting. Set
+`connection_timeout` to fail fast instead:
+
+```python
+from datetime import timedelta
+
+from duckdb_sqlalchemy import create_motherduck_engine
+
+engine = create_motherduck_engine(
+    database="md:analytics",
+    connection_timeout=timedelta(seconds=30),
+)
+```
+
+The timeout covers the token exchange and the initial attach. It is a soft
+bound, so a connection can still succeed shortly after the deadline. When it
+expires, connecting raises `sqlalchemy.exc.ProgrammingError` wrapping a DuckDB
+`InvalidInputException` whose message says `Timed out connecting to
+MotherDuck`. The setting needs a MotherDuck extension that supports it (the one
+for DuckDB 1.5.6 does), and older extensions ignore it. The
+`MOTHERDUCK_CONNECTION_TIMEOUT` environment variable sets the same timeout
+without changing the URL.
+
+### Server-side temporary tables
+
+`motherduck_enable_server_side_temp_tables` is a per-connection MotherDuck
+setting, not a startup parameter. The dialect runs
+`SET motherduck_enable_server_side_temp_tables = 'true'` on every new pooled
+connection when you pass it as a URL parameter, in `connect_args["config"]`,
+or to `create_motherduck_engine`:
+
+```python
+engine = create_motherduck_engine(
+    database="md:analytics",
+    motherduck_enable_server_side_temp_tables=True,
 )
 ```
 

@@ -1,5 +1,6 @@
 import os
 import warnings
+from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Union
 
 from duckdb import __version__ as duckdb_version
@@ -16,7 +17,7 @@ MOTHERDUCK_USER_INFO_COLUMNS = (
     "org_type",
 )
 MOTHERDUCK_USER_INFO_REGION_COLUMNS = (*MOTHERDUCK_USER_INFO_COLUMNS, "region")
-MOTHERDUCK_LIST_DIVES_COLUMNS = (
+_DIVE_SUMMARY_BASE_COLUMNS = (
     "id",
     "title",
     "description",
@@ -25,10 +26,45 @@ MOTHERDUCK_LIST_DIVES_COLUMNS = (
     "created_at",
     "updated_at",
     "owner_name",
+)
+_DIVE_STATUS_COLUMNS = (  # DuckDB 1.5.4+
     "status",
     "status_changed_at",
     "status_set_by",
     "status_applies_to_version",
+)
+_DIVE_VERSION_DETAIL_COLUMNS = (
+    "version_id",
+    "version_storage_url",
+    "version_description",
+    "version_created_at",
+    "version_api_version",
+    "version_required_resources",
+)
+_FLIGHT_VERSION_BASE_COLUMNS = (
+    "version_id",
+    "flight_id",
+    "flight_version",
+    "created_at",
+    "access_token_name",
+    "flight_secret_names",
+    "config",
+)
+_JOB_VERSION_BASE_COLUMNS = (
+    "version_id",
+    "job_id",
+    "version",
+    "created_at",
+    "md_token_name",
+    "md_secret_names",
+    "config",
+)
+# md_list_flight_versions stops returning these in DuckDB 1.5.5;
+# md_get_flight_version keeps them.
+_FLIGHT_SOURCE_COLUMNS = ("source_code", "requirements_txt")
+MOTHERDUCK_LIST_DIVES_COLUMNS = (
+    *_DIVE_SUMMARY_BASE_COLUMNS,
+    *_DIVE_STATUS_COLUMNS,
     "required_resources",
 )
 MOTHERDUCK_ACCESS_TOKENS_COLUMNS = (
@@ -81,17 +117,7 @@ MOTHERDUCK_JOB_SUMMARY_COLUMNS = (
     "created_at",
     "updated_at",
 )
-MOTHERDUCK_JOB_VERSION_COLUMNS = (
-    "version_id",
-    "job_id",
-    "version",
-    "created_at",
-    "md_token_name",
-    "md_secret_names",
-    "config",
-    "source_code",
-    "requirements_txt",
-)
+MOTHERDUCK_JOB_VERSION_COLUMNS = (*_JOB_VERSION_BASE_COLUMNS, *_FLIGHT_SOURCE_COLUMNS)
 MOTHERDUCK_JOB_RUN_COLUMNS = (
     "run_id",
     "job_id",
@@ -122,15 +148,8 @@ MOTHERDUCK_FLIGHT_SUMMARY_COLUMNS = (
     "updated_at",
 )
 MOTHERDUCK_FLIGHT_VERSION_COLUMNS = (
-    "version_id",
-    "flight_id",
-    "flight_version",
-    "created_at",
-    "access_token_name",
-    "flight_secret_names",
-    "config",
-    "source_code",
-    "requirements_txt",
+    *_FLIGHT_VERSION_BASE_COLUMNS,
+    *_FLIGHT_SOURCE_COLUMNS,
     "max_runtime_sec",
 )
 MOTHERDUCK_FLIGHT_RUN_COLUMNS = (
@@ -162,13 +181,9 @@ MOTHERDUCK_DIVE_VERSION_COLUMNS = (
     "required_resources",
 )
 MOTHERDUCK_CREATE_DIVE_COLUMNS = (
-    *MOTHERDUCK_LIST_DIVES_COLUMNS,
-    "version_id",
-    "version_storage_url",
-    "version_description",
-    "version_created_at",
-    "version_api_version",
-    "version_required_resources",
+    *_DIVE_SUMMARY_BASE_COLUMNS,
+    *_DIVE_STATUS_COLUMNS,
+    *_DIVE_VERSION_DETAIL_COLUMNS,
 )
 MOTHERDUCK_GET_DIVE_COLUMNS = (*MOTHERDUCK_CREATE_DIVE_COLUMNS, "content")
 MOTHERDUCK_GET_DIVE_VERSION_COLUMNS = (*MOTHERDUCK_DIVE_VERSION_COLUMNS, "content")
@@ -191,6 +206,76 @@ PRAGMA_STORAGE_INFO_COLUMNS = (
     "segment_info",
     "additional_block_ids",
 )
+
+
+# The MotherDuck extension shipped with each DuckDB release returns a different
+# set of columns from these table functions, and naming a column the installed
+# extension does not return fails to bind. The default columns therefore follow
+# the shape each DuckDB release binds to. Pass ``columns=`` to override them.
+@lru_cache(maxsize=None)
+def _release(version: str) -> Tuple[int, ...]:
+    return Version(version).release
+
+
+def _client_at_least(version: str) -> bool:
+    # Compare release numbers only: a 1.5.5 prerelease or nightly ships the
+    # 1.5.5 extension shape, but sorts before 1.5.5 as a PEP 440 version.
+    return _release(duckdb_version) >= _release(version)
+
+
+def _dive_summary_columns(*, include_required_resources: bool) -> Tuple[str, ...]:
+    # Only md_list_dives returns required_resources (DuckDB 1.5.2+); the dive
+    # update functions return the summary without it.
+    columns = _DIVE_SUMMARY_BASE_COLUMNS
+    if _client_at_least("1.5.4"):
+        columns += _DIVE_STATUS_COLUMNS
+    if include_required_resources and _client_at_least("1.5.2"):
+        columns += ("required_resources",)
+    return columns
+
+
+def _dive_detail_columns() -> Tuple[str, ...]:
+    return (
+        _dive_summary_columns(include_required_resources=False)
+        + _DIVE_VERSION_DETAIL_COLUMNS
+    )
+
+
+def _flight_summary_columns() -> Tuple[str, ...]:
+    if _client_at_least("1.5.5"):
+        return (*MOTHERDUCK_FLIGHT_SUMMARY_COLUMNS, "owner_name")
+    return MOTHERDUCK_FLIGHT_SUMMARY_COLUMNS
+
+
+def _flight_version_columns(*, include_source: bool) -> Tuple[str, ...]:
+    columns = _FLIGHT_VERSION_BASE_COLUMNS
+    if include_source or not _client_at_least("1.5.5"):
+        columns += _FLIGHT_SOURCE_COLUMNS
+    if _client_at_least("1.5.4"):
+        columns += ("max_runtime_sec",)
+    if _client_at_least("1.5.6"):
+        columns += ("instance_type",)
+    return columns
+
+
+def _job_version_columns(*, include_source: bool) -> Tuple[str, ...]:
+    if include_source or not _client_at_least("1.5.5"):
+        return _JOB_VERSION_BASE_COLUMNS + _FLIGHT_SOURCE_COLUMNS
+    return _JOB_VERSION_BASE_COLUMNS
+
+
+def _flight_log_columns() -> Tuple[str, ...]:
+    # Before DuckDB 1.5.5 the logs are a single text column named ``logs``.
+    if _client_at_least("1.5.5"):
+        return MOTHERDUCK_FLIGHT_LOG_COLUMNS
+    return MOTHERDUCK_JOB_RUN_LOG_COLUMNS
+
+
+def _legacy_log_column_replacements() -> Mapping[str, str]:
+    if _client_at_least("1.5.5"):
+        return _LEGACY_LOG_COLUMN_REPLACEMENTS
+    return _UNCHANGED_JOB_COLUMNS
+
 
 __all__ = [
     "table_function",
@@ -527,7 +612,7 @@ def _compatibility_subquery(
 def md_user_info(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
     default_columns = (
         MOTHERDUCK_USER_INFO_REGION_COLUMNS
-        if Version(duckdb_version) >= Version("1.5.3")
+        if _client_at_least("1.5.3")
         else MOTHERDUCK_USER_INFO_COLUMNS
     )
     return _motherduck_metadata_function(
@@ -541,7 +626,7 @@ def md_user_info(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> A
 def md_list_dives(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
     return _motherduck_metadata_function(
         "md_list_dives",
-        MOTHERDUCK_LIST_DIVES_COLUMNS,
+        _dive_summary_columns(include_required_resources=True),
         columns=columns,
         **kwargs,
     )
@@ -620,7 +705,7 @@ def md_create_flight(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) 
     _validate_flight_config(kwargs)
     return _motherduck_metadata_function(
         "md_create_flight",
-        MOTHERDUCK_FLIGHT_SUMMARY_COLUMNS,
+        _flight_summary_columns(),
         columns=columns,
         **kwargs,
     )
@@ -629,7 +714,7 @@ def md_create_flight(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) 
 def md_list_flights(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
     return _motherduck_metadata_function(
         "md_list_flights",
-        MOTHERDUCK_FLIGHT_SUMMARY_COLUMNS,
+        _flight_summary_columns(),
         columns=columns,
         **kwargs,
     )
@@ -643,7 +728,7 @@ def md_flights(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any
 def md_get_flight(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
     return _motherduck_metadata_function(
         "md_get_flight",
-        MOTHERDUCK_FLIGHT_SUMMARY_COLUMNS,
+        _flight_summary_columns(),
         columns=columns,
         **kwargs,
     )
@@ -653,7 +738,7 @@ def md_update_flight(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) 
     _validate_flight_config(kwargs)
     return _motherduck_metadata_function(
         "md_update_flight",
-        MOTHERDUCK_FLIGHT_SUMMARY_COLUMNS,
+        _flight_summary_columns(),
         columns=columns,
         **kwargs,
     )
@@ -719,7 +804,7 @@ def md_get_flight_logs(
 ) -> Any:
     return _motherduck_metadata_function(
         "md_get_flight_logs",
-        MOTHERDUCK_FLIGHT_LOG_COLUMNS,
+        _flight_log_columns(),
         columns=columns,
         **kwargs,
     )
@@ -730,7 +815,7 @@ def md_flight_logs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) ->
     return _compatibility_subquery(
         md_get_flight_logs,
         columns=columns,
-        legacy_to_flight=_LEGACY_LOG_COLUMN_REPLACEMENTS,
+        legacy_to_flight=_legacy_log_column_replacements(),
         default_columns=MOTHERDUCK_JOB_RUN_LOG_COLUMNS,
         kwargs=kwargs,
     )
@@ -741,7 +826,7 @@ def md_list_flight_versions(
 ) -> Any:
     return _motherduck_metadata_function(
         "md_list_flight_versions",
-        MOTHERDUCK_FLIGHT_VERSION_COLUMNS,
+        _flight_version_columns(include_source=False),
         columns=columns,
         **kwargs,
     )
@@ -759,7 +844,7 @@ def md_get_flight_version(
 ) -> Any:
     return _motherduck_metadata_function(
         "md_get_flight_version",
-        MOTHERDUCK_FLIGHT_VERSION_COLUMNS,
+        _flight_version_columns(include_source=True),
         columns=columns,
         **kwargs,
     )
@@ -858,7 +943,7 @@ def md_job_run_logs(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -
         "md_job_run_logs",
         md_get_flight_logs,
         columns=columns,
-        legacy_to_flight=_LEGACY_LOG_COLUMN_REPLACEMENTS,
+        legacy_to_flight=_legacy_log_column_replacements(),
         default_columns=MOTHERDUCK_JOB_RUN_LOG_COLUMNS,
         **kwargs,
     )
@@ -870,7 +955,7 @@ def md_job_versions(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -
         md_list_flight_versions,
         columns=columns,
         legacy_to_flight=_JOB_VERSION_COLUMN_REPLACEMENTS,
-        default_columns=MOTHERDUCK_JOB_VERSION_COLUMNS,
+        default_columns=_job_version_columns(include_source=False),
         **kwargs,
     )
 
@@ -883,7 +968,7 @@ def md_get_job_version(
         md_get_flight_version,
         columns=columns,
         legacy_to_flight=_JOB_VERSION_COLUMN_REPLACEMENTS,
-        default_columns=MOTHERDUCK_JOB_VERSION_COLUMNS,
+        default_columns=_job_version_columns(include_source=True),
         **kwargs,
     )
 
@@ -891,7 +976,7 @@ def md_get_job_version(
 def md_create_dive(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
     return _motherduck_metadata_function(
         "md_create_dive",
-        MOTHERDUCK_CREATE_DIVE_COLUMNS,
+        _dive_detail_columns(),
         columns=columns,
         **kwargs,
     )
@@ -902,7 +987,7 @@ def md_update_dive_metadata(
 ) -> Any:
     return _motherduck_metadata_function(
         "md_update_dive_metadata",
-        MOTHERDUCK_LIST_DIVES_COLUMNS,
+        _dive_summary_columns(include_required_resources=False),
         columns=columns,
         **kwargs,
     )
@@ -913,7 +998,7 @@ def md_update_dive_status(
 ) -> Any:
     return _motherduck_metadata_function(
         "md_update_dive_status",
-        MOTHERDUCK_LIST_DIVES_COLUMNS,
+        _dive_summary_columns(include_required_resources=False),
         columns=columns,
         **kwargs,
     )
@@ -933,7 +1018,7 @@ def md_update_dive_content(
 def md_get_dive(*, columns: Optional[Iterable[str]] = None, **kwargs: Any) -> Any:
     return _motherduck_metadata_function(
         "md_get_dive",
-        MOTHERDUCK_GET_DIVE_COLUMNS,
+        (*_dive_detail_columns(), "content"),
         columns=columns,
         **kwargs,
     )

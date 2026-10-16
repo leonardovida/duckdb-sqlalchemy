@@ -291,7 +291,7 @@ versions = md_list_flight_versions(
 )
 versions_stmt = select(
     versions.c.flight_version,
-    versions.c.requirements_txt,
+    versions.c.created_at,
     versions.c.max_runtime_sec,
 )
 ```
@@ -309,13 +309,42 @@ version = md_get_flight_version(
     flight_id="00000000-0000-0000-0000-000000000000",
     version_number=1,
 )
-version_stmt = select(version.c.flight_version, version.c.source_code)
+version_stmt = select(
+    version.c.flight_version,
+    version.c.source_code,
+    version.c.requirements_txt,
+)
 ```
+
+`md_list_flight_versions` does not return `source_code` or
+`requirements_txt` on DuckDB 1.5.5 and newer. Read them with
+`md_get_flight_version`.
+
+### Columns by DuckDB version
+
+The MotherDuck extension for each DuckDB release returns a slightly different
+set of columns, and selecting a column that the installed extension does not
+return fails with a binder error. The `md_*` helpers therefore name the
+columns that the extension for your installed DuckDB version returns:
+
+| Column | Helpers | DuckDB version |
+| --- | --- | --- |
+| `required_resources` | `md_list_dives` | 1.5.2+ |
+| `status`, `status_changed_at`, `status_set_by`, `status_applies_to_version` | Dive summary and detail helpers | 1.5.4+ |
+| `max_runtime_sec` | Flight version helpers | 1.5.4+ |
+| `owner_name` | `md_list_flights`, `md_get_flight`, `md_create_flight`, `md_update_flight` | 1.5.5+ |
+| `line_number`, `reported_at`, `line` | `md_get_flight_logs` (a single `logs` column before 1.5.5) | 1.5.5+ |
+| `instance_type` | `md_list_flight_versions`, `md_get_flight_version` | 1.5.6+ |
+
+Pass `columns=` to name the columns yourself, for example when you run a newer
+MotherDuck extension than your DuckDB version implies.
 
 Mutating Flight functions are available as helpers too:
 `md_create_flight`, `md_update_flight`, `md_delete_flight`, `md_run_flight`,
 and `md_cancel_flight_run`. They only execute when the SQLAlchemy statement is
-run. `md_run_flight` accepts a `config` map to override a Flight's config for
+run. On DuckDB 1.5.6, `md_create_flight` and `md_update_flight` accept
+`instance_type` (for example `instance_type="F8"`) to size the Flight runner.
+MotherDuck validates the value and your plan. `md_run_flight` accepts a `config` map to override a Flight's config for
 that run only; run result helpers expose the effective `config` column. Config
 map keys must be strings, non-empty, and cannot contain `=` or NUL bytes.
 Config values must be strings or `None`, and cannot contain NUL bytes.
@@ -325,8 +354,8 @@ The older noun-style `md_flights`, `md_flight_runs`, `md_flight_logs`, and
 verb-style functions above. The `md_*job*` helper names also remain as
 deprecated compatibility aliases while preserving legacy `job_*` column access
 where possible. The deprecated `md_flight_logs` and `md_job_run_logs` helpers
-also preserve their historical `logs` column as an alias for the current
-line-by-line `line` result.
+also preserve their historical `logs` column, which is the current
+line-by-line `line` result on DuckDB 1.5.5 and newer.
 
 ## Arrow results
 

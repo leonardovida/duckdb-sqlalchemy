@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 from decimal import Decimal
 from functools import lru_cache
 from typing import Any, Dict, Set, Type, Union
@@ -8,6 +9,7 @@ from sqlalchemy import Boolean, Float, Integer, String
 from sqlalchemy.engine import Dialect
 from sqlalchemy.sql.type_api import TypeEngine
 
+from ._query import format_interval
 from ._validation import validate_identifier
 from .motherduck import MOTHERDUCK_CONFIG_KEYS
 
@@ -18,7 +20,7 @@ TYPES: Dict[Type, TypeEngine] = {
     str: String(),
 }
 
-ConfigValue = Union[str, int, bool, float, os.PathLike[Any], Decimal, None]
+ConfigValue = Union[str, int, bool, float, os.PathLike[Any], Decimal, timedelta, None]
 
 
 @lru_cache()
@@ -64,6 +66,8 @@ def _render_config_value(
         return string_processor(path)
     if isinstance(value, Decimal):
         return string_processor(str(value))
+    if isinstance(value, timedelta):
+        return string_processor(format_interval(value))
 
     process = None
     for typ, processor in processors.items():

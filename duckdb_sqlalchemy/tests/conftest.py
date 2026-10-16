@@ -2,7 +2,7 @@ import warnings
 from functools import wraps
 from typing import Any, Callable, Generator, TypeVar
 
-from pytest import fixture, raises
+from pytest import MonkeyPatch, fixture, raises
 from sqlalchemy import create_engine
 from sqlalchemy.dialects import registry
 from sqlalchemy.engine import Dialect, Engine
@@ -40,6 +40,14 @@ def conn(engine: Engine) -> Generator[Connection, None, None]:
 @fixture()
 def dialect(engine: Engine) -> Dialect:
     return engine.dialect
+
+
+@fixture
+def latest_motherduck_client(monkeypatch: MonkeyPatch) -> None:
+    """Resolve MotherDuck table-function columns as the newest DuckDB client does."""
+    from duckdb_sqlalchemy import olap
+
+    monkeypatch.setattr(olap, "duckdb_version", "1.5.6")
 
 
 @fixture

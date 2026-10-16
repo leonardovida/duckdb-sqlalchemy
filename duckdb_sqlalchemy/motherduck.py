@@ -32,6 +32,8 @@ MOTHERDUCK_REGION_HOST_KEY = "motherduck_region_host"
 MOTHERDUCK_PORT_KEY = "motherduck_port"
 MOTHERDUCK_USE_TLS_KEY = "motherduck_use_tls"
 MOTHERDUCK_GRPC_LOCAL_SUBCHANNEL_POOL_KEY = "motherduck_grpc_local_subchannel_pool"
+CONNECTION_TIMEOUT_KEY = "connection_timeout"
+MOTHERDUCK_CONNECTION_TIMEOUT_KEY = "motherduck_connection_timeout"
 HOST_KEY = "host"
 REGION_HOST_KEY = "region_host"
 PORT_KEY = "port"
@@ -43,6 +45,9 @@ SESSION_NAME_KEY = "session_name"
 MOTHERDUCK_SESSION_HINT_KEY = "motherduck_session_hint"
 MOTHERDUCK_SESSION_NAME_KEY = "motherduck_session_name"
 MOTHERDUCK_SAAS_MODE_KEY = "motherduck_saas_mode"
+# A connection-level MotherDuck setting, not a startup parameter: the extension
+# ignores it in the ``md:`` string and rejects it as global DuckDB config, so it
+# stays config and the dialect applies it with ``SET`` on each new connection.
 MOTHERDUCK_ENABLE_SERVER_SIDE_TEMP_TABLES_KEY = (
     "motherduck_enable_server_side_temp_tables"
 )
@@ -64,6 +69,8 @@ MOTHERDUCK_PATH_QUERY_KEYS = {
     TLS_KEY,
     MOTHERDUCK_GRPC_LOCAL_SUBCHANNEL_POOL_KEY,
     GRPC_LOCAL_SUBCHANNEL_POOL_KEY,
+    CONNECTION_TIMEOUT_KEY,
+    MOTHERDUCK_CONNECTION_TIMEOUT_KEY,
     SHORT_LIVED_TOKEN_KEY,
     SESSION_NAME_KEY,
     MOTHERDUCK_SESSION_NAME_KEY,
@@ -76,7 +83,6 @@ MOTHERDUCK_PATH_QUERY_KEYS = {
     MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY,
     "saas_mode",
     MOTHERDUCK_SAAS_MODE_KEY,
-    MOTHERDUCK_ENABLE_SERVER_SIDE_TEMP_TABLES_KEY,
     "cache_buster",
     CACHE_BUST_ALIAS_KEY,
 }
@@ -176,6 +182,7 @@ PATH_QUERY_ALIASES = (
     (MOTHERDUCK_PORT_KEY, PORT_KEY),
     (MOTHERDUCK_USE_TLS_KEY, TLS_KEY),
     (MOTHERDUCK_GRPC_LOCAL_SUBCHANNEL_POOL_KEY, GRPC_LOCAL_SUBCHANNEL_POOL_KEY),
+    (MOTHERDUCK_CONNECTION_TIMEOUT_KEY, CONNECTION_TIMEOUT_KEY),
     (SESSION_HINT_KEY, SESSION_NAME_KEY),
     (MOTHERDUCK_SESSION_HINT_KEY, SESSION_NAME_KEY),
     (MOTHERDUCK_SESSION_NAME_KEY, SESSION_NAME_KEY),
@@ -184,12 +191,18 @@ PATH_QUERY_ALIASES = (
     (CACHE_BUST_ALIAS_KEY, "cache_buster"),
     (MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY, DBINSTANCE_INACTIVITY_TTL_KEY),
 )
+# Prefixed spellings that MotherDuck documents as config names in their own
+# right; they are normalized to the URL spelling without a deprecation warning.
+UNDEPRECATED_PATH_QUERY_ALIASES = frozenset({MOTHERDUCK_CONNECTION_TIMEOUT_KEY})
 
 
 def _normalize_path_query_aliases(path_query: Dict[str, Any]) -> Dict[str, Any]:
     normalized = path_query
     for alias_key, canonical_key in PATH_QUERY_ALIASES:
-        warn_on_alias = alias_key != MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY
+        warn_on_alias = (
+            alias_key != MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY
+            and alias_key not in UNDEPRECATED_PATH_QUERY_ALIASES
+        )
         if (
             alias_key == MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY
             and alias_key in normalized

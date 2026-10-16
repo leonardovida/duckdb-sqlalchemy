@@ -529,6 +529,7 @@ def test_md_user_info_uses_released_motherduck_columns(
     assert list(user_info.c.keys()) == expected
 
 
+@pytest.mark.usefixtures("latest_motherduck_client")
 def test_md_list_dives_uses_released_motherduck_columns() -> None:
     dives = olap.md_list_dives()
 
@@ -645,6 +646,7 @@ def test_prompt_jev_renders_named_criteria_and_questions() -> None:
     assert "Billing?" not in str(questions)
 
 
+@pytest.mark.usefixtures("latest_motherduck_client")
 def test_motherduck_flight_helpers_use_released_columns() -> None:
     assert list(olap.md_list_flights().c.keys()) == [
         "flight_id",
@@ -655,6 +657,7 @@ def test_motherduck_flight_helpers_use_released_columns() -> None:
         "current_version",
         "created_at",
         "updated_at",
+        "owner_name",
     ]
     assert list(olap.md_create_flight().c.keys()) == list(
         olap.md_list_flights().c.keys()
@@ -700,13 +703,22 @@ def test_motherduck_flight_helpers_use_released_columns() -> None:
         "access_token_name",
         "flight_secret_names",
         "config",
+        "max_runtime_sec",
+        "instance_type",
+    ]
+    assert list(olap.md_get_flight_version().c.keys()) == [
+        "version_id",
+        "flight_id",
+        "flight_version",
+        "created_at",
+        "access_token_name",
+        "flight_secret_names",
+        "config",
         "source_code",
         "requirements_txt",
         "max_runtime_sec",
+        "instance_type",
     ]
-    assert list(olap.md_get_flight_version().c.keys()) == list(
-        olap.md_list_flight_versions().c.keys()
-    )
 
     run = olap.md_run_flight(
         flight_id="00000000-0000-0000-0000-000000000000",
@@ -747,6 +759,7 @@ def test_deprecated_flight_helpers_compile_to_released_functions(
     assert sql_function in str(compiled)
 
 
+@pytest.mark.usefixtures("latest_motherduck_client")
 def test_deprecated_flight_logs_aliases_tabular_line_column() -> None:
     with pytest.warns(DeprecationWarning, match="md_get_flight_logs"):
         logs = olap.md_flight_logs()
@@ -791,6 +804,7 @@ def test_motherduck_flight_helpers_allow_null_config_values() -> None:
     assert compiled.params["config_1"] == {"MODE": None}
 
 
+@pytest.mark.usefixtures("latest_motherduck_client")
 def test_deprecated_motherduck_job_helpers_alias_flight_columns() -> None:
     with pytest.warns(DeprecationWarning, match="md_jobs"):
         jobs = olap.md_jobs(limit=1)
@@ -859,6 +873,16 @@ def test_deprecated_motherduck_job_helpers_alias_flight_columns() -> None:
             "md_token_name",
             "md_secret_names",
             "config",
+        ]
+    with pytest.warns(DeprecationWarning, match="md_get_job_version"):
+        assert list(olap.md_get_job_version().c.keys()) == [
+            "version_id",
+            "job_id",
+            "version",
+            "created_at",
+            "md_token_name",
+            "md_secret_names",
+            "config",
             "source_code",
             "requirements_txt",
         ]
@@ -879,6 +903,7 @@ def test_deprecated_motherduck_job_helpers_translate_parameters() -> None:
     assert compiled.params["version_number_1"] == 2
 
 
+@pytest.mark.usefixtures("latest_motherduck_client")
 def test_motherduck_dive_helpers_use_released_columns() -> None:
     assert list(olap.md_create_dive().c.keys()) == [
         "id",
@@ -893,7 +918,6 @@ def test_motherduck_dive_helpers_use_released_columns() -> None:
         "status_changed_at",
         "status_set_by",
         "status_applies_to_version",
-        "required_resources",
         "version_id",
         "version_storage_url",
         "version_description",
@@ -901,11 +925,22 @@ def test_motherduck_dive_helpers_use_released_columns() -> None:
         "version_api_version",
         "version_required_resources",
     ]
-    assert list(olap.md_update_dive_metadata().c.keys()) == list(
-        olap.md_list_dives().c.keys()
-    )
+    assert list(olap.md_update_dive_metadata().c.keys()) == [
+        "id",
+        "title",
+        "description",
+        "owner_id",
+        "current_version",
+        "created_at",
+        "updated_at",
+        "owner_name",
+        "status",
+        "status_changed_at",
+        "status_set_by",
+        "status_applies_to_version",
+    ]
     assert list(olap.md_update_dive_status().c.keys()) == list(
-        olap.md_list_dives().c.keys()
+        olap.md_update_dive_metadata().c.keys()
     )
     assert list(olap.md_get_dive().c.keys()) == [
         *list(olap.md_create_dive().c.keys()),
@@ -953,6 +988,7 @@ def test_motherduck_dive_helpers_render_named_parameters() -> None:
     ]
 
 
+@pytest.mark.usefixtures("latest_motherduck_client")
 def test_motherduck_dive_status_helper_renders_named_parameters() -> None:
     updated_status = olap.md_update_dive_status(
         id="00000000-0000-0000-0000-000000000000",
@@ -1925,9 +1961,8 @@ def test_extract_path_query_from_config_mutates_and_normalizes_aliases() -> None
         "tls": "off",
         "session_name": "team-a",
         "dbinstance_inactivity_ttl": "10m",
-        "motherduck_enable_server_side_temp_tables": "true",
     }
-    assert config == {"threads": 4}
+    assert config == {"threads": 4, "motherduck_enable_server_side_temp_tables": True}
 
 
 def test_extract_path_query_from_config_handles_motherduck_aliases() -> None:

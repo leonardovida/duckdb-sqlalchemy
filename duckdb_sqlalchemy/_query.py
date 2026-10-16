@@ -1,11 +1,26 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any, Dict, Mapping, Optional, Sequence
+
+_MICROSECOND = timedelta(microseconds=1)
+
+
+def format_interval(value: timedelta) -> str:
+    """Render ``value`` as a DuckDB interval string such as ``30s`` or ``1500ms``."""
+    microseconds = value // _MICROSECOND
+    if microseconds % 1_000_000 == 0:
+        return f"{microseconds // 1_000_000}s"
+    if microseconds % 1_000 == 0:
+        return f"{microseconds // 1_000}ms"
+    return f"{microseconds}us"
 
 
 def stringify_query_value(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, timedelta):
+        return format_interval(value)
     return str(value)
 
 

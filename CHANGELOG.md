@@ -8,6 +8,26 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+### Features
+
+- Set a MotherDuck connect timeout with `connection_timeout`, for example `duckdb:///md:analytics?connection_timeout=30s` or `create_motherduck_engine(..., connection_timeout=timedelta(seconds=30))`. It moves into the `md:` database string, where the MotherDuck extension for DuckDB 1.5.6 reads it. Before, the key reached DuckDB as an unknown config option. `motherduck_connection_timeout` is accepted too. See [Connection timeout](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/motherduck.md#connection-timeout). [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
+- Pass `datetime.timedelta` for the MotherDuck interval parameters `connection_timeout` and `dbinstance_inactivity_ttl`, and for settings the dialect applies with `SET`, in URL helpers or `connect_args["config"]`. Values render as DuckDB interval strings such as `30s` or `1500ms`. [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
+
+### Bug Fixes
+
+- `motherduck_enable_server_side_temp_tables=True` now enables server-side temporary tables. Before, the dialect put it in the `md:` database string, which the MotherDuck extension ignores, so temporary tables stayed local. The dialect now runs `SET motherduck_enable_server_side_temp_tables` on each new connection. [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
+- The MotherDuck table-function helpers select only the columns that the extension for your DuckDB version returns. Before, several default queries failed with a binder error: [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
+  - `md_list_flight_versions()` and `md_job_versions()` on DuckDB 1.5.5 and newer, which no longer return `source_code` and `requirements_txt`.
+  - `md_update_dive_metadata()` and `md_update_dive_status()` on every version, which never return `required_resources`.
+  - `md_get_dive()` and `md_create_dive()`, which do not return `required_resources`.
+  - Flight version helpers on DuckDB 1.5.3 (no `max_runtime_sec`), `md_get_flight_logs()` on DuckDB 1.5.3 and 1.5.4 (a single `logs` column), and Dive helpers before DuckDB 1.5.4 (no status columns).
+- The helpers also return the newer columns: `owner_name` from the Flight summary helpers on DuckDB 1.5.5 and newer, and `instance_type` from the Flight version helpers on DuckDB 1.5.6. See [Columns by DuckDB version](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/olap.md#columns-by-duckdb-version). [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
+
+### Compatibility
+
+- Accessing a column that the installed extension does not return, for example `md_list_flight_versions().c.source_code` on DuckDB 1.5.5, now raises `AttributeError` when you build the statement instead of a binder error when it runs. Read source columns with `md_get_flight_version()`, or pass `columns=` to name columns yourself. [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
+- `motherduck_enable_server_side_temp_tables` is no longer part of the `md:` database string, so it no longer changes the client instance cache key. [#200](https://github.com/leonardovida/duckdb-sqlalchemy/pull/200)
+
 ## [1.5.6.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.1...v1.5.6.2) (2026-10-16)
 
 ### Highlights
