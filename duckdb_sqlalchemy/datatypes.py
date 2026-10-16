@@ -190,9 +190,15 @@ class Struct(_FieldsType):
         processors = {}
         for name, member in self._fields or ():
             implementation = member.dialect_impl(dialect)
-            if (
+            standard_array = (
                 isinstance(implementation, sqltypes.ARRAY)
                 and type(implementation).bind_processor is PGARRAY.bind_processor
+            ) or (
+                isinstance(implementation, FixedArray)
+                and type(implementation).bind_processor is FixedArray.bind_processor
+            )
+            if (
+                standard_array
                 and implementation.item_type.dialect_impl(dialect).bind_processor(
                     dialect
                 )
@@ -204,6 +210,18 @@ class Struct(_FieldsType):
                 continue
             processor = implementation.bind_processor(dialect)
             if processor is not None:
+                if standard_array:
+
+                    def process_array(value: Any, convert: Any = processor) -> Any:
+                        # Standard array processors iterate ndarrays into NumPy
+                        # scalars. Convert to native Python values before item
+                        # hooks, while custom array hooks keep their own input.
+                        to_list = getattr(value, "tolist", None)
+                        if getattr(value, "ndim", 0) > 0 and callable(to_list):
+                            value = to_list()
+                        return convert(value)
+
+                    processor = process_array
                 processors[name.translate(_ASCII_LOWER)] = processor
         if not processors:
             return None

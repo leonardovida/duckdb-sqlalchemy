@@ -10,6 +10,7 @@ from sqlalchemy import (
     ARRAY,
     JSON,
     Column,
+    Double,
     Enum,
     Integer,
     MetaData,
@@ -201,3 +202,33 @@ def test_struct_uses_dialect_numeric_bind_processor(
             (None,),
         ]
         assert conn.execute(select(table.c.v)).scalars().all() == [value, None]
+
+
+@pytest.mark.parametrize(
+    "array_type", [ARRAY(Double), FixedArray(Double, 2), ARRAY(Double, dimensions=2)]
+)
+def test_struct_array_hooks_accept_integer_ndarrays(
+    db_path: Path, make_engine: EngineFactory, threshold: int, array_type: Any
+) -> None:
+    np = pytest.importorskip("numpy")
+    dimensions = getattr(array_type, "dimensions", 1)
+    value = np.array([[1, 2], [3, 4]] if dimensions == 2 else [1, 2], dtype=np.int64)
+    table = Table("ndarrays", MetaData(), Column("v", Struct({"items": array_type})))
+    engine = make_engine(db_path)
+    with engine.begin() as conn:
+        table.create(conn)
+        conn.execution_options(duckdb_copy_threshold=threshold).execute(
+            table.insert(), [{"v": {"items": value}}, {"v": None}]
+        )
+    engine.dispose()
+    with make_engine(db_path).connect() as conn:
+        expected = value.astype(float).tolist()
+        raw = tuple(expected) if isinstance(array_type, FixedArray) else expected
+        assert conn.exec_driver_sql("SELECT v FROM ndarrays").all() == [
+            ({"items": raw},),
+            (None,),
+        ]
+        assert conn.execute(select(table.c.v)).scalars().all() == [
+            {"items": expected},
+            None,
+        ]
