@@ -234,6 +234,24 @@ def test_deprecated_log_helpers_select_the_released_log_column(
             assert ("anon_2.line" in sql) is (released_column == "line")
 
 
+@pytest.mark.parametrize(
+    ("client_version", "expected"),
+    [
+        ("1.5.5.dev120", (*FLIGHT_VERSION, "max_runtime_sec")),
+        ("1.5.6rc1", (*FLIGHT_VERSION, "max_runtime_sec", "instance_type")),
+        ("2.0.0.dev7", (*FLIGHT_VERSION, "max_runtime_sec", "instance_type")),
+    ],
+)
+def test_prereleases_use_their_release_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    client_version: str,
+    expected: Tuple[str, ...],
+) -> None:
+    monkeypatch.setattr(olap, "duckdb_version", client_version)
+
+    assert tuple(olap.md_list_flight_versions().c.keys()) == expected
+
+
 def test_explicit_columns_override_version_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

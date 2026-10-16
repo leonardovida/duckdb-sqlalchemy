@@ -11,7 +11,7 @@ preserved from the upstream project for historical context.
 ### Features
 
 - Set a MotherDuck connect timeout with `connection_timeout`, for example `duckdb:///md:analytics?connection_timeout=30s` or `create_motherduck_engine(..., connection_timeout=timedelta(seconds=30))`. It moves into the `md:` database string, where the MotherDuck extension for DuckDB 1.5.6 reads it. Before, the key reached DuckDB as an unknown config option. `motherduck_connection_timeout` is accepted too. See [Connection timeout](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/motherduck.md#connection-timeout).
-- Pass `datetime.timedelta` for interval settings such as `connection_timeout` and `dbinstance_inactivity_ttl`, in URL helpers and in `connect_args["config"]`. Values render as DuckDB interval strings such as `30s` or `1500ms`.
+- Pass `datetime.timedelta` for the MotherDuck interval parameters `connection_timeout` and `dbinstance_inactivity_ttl`, and for settings the dialect applies with `SET`, in URL helpers or `connect_args["config"]`. Values render as DuckDB interval strings such as `30s` or `1500ms`.
 
 ### Bug Fixes
 

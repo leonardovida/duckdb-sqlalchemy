@@ -925,10 +925,20 @@ def test_motherduck_dive_helpers_use_released_columns() -> None:
         "version_api_version",
         "version_required_resources",
     ]
-    assert (
-        list(olap.md_update_dive_metadata().c.keys())
-        == list(olap.md_list_dives().c.keys())[:-1]
-    )
+    assert list(olap.md_update_dive_metadata().c.keys()) == [
+        "id",
+        "title",
+        "description",
+        "owner_id",
+        "current_version",
+        "created_at",
+        "updated_at",
+        "owner_name",
+        "status",
+        "status_changed_at",
+        "status_set_by",
+        "status_applies_to_version",
+    ]
     assert list(olap.md_update_dive_status().c.keys()) == list(
         olap.md_update_dive_metadata().c.keys()
     )
