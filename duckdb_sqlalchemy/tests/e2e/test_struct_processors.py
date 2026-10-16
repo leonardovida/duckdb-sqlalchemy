@@ -168,13 +168,17 @@ def test_struct_result_processors_read_existing_sql_values(
         ),
     )
     with make_engine(db_path).begin() as conn:
-        table.create(conn)
+        # Existing storage can spell a field differently from typed metadata.
+        conn.exec_driver_sql(
+            "CREATE TABLE existing_records "
+            "(v STRUCT(LABEL VARCHAR, doc JSON, n DECIMAL(38, 2)))"
+        )
         conn.exec_driver_sql(
             "INSERT INTO existing_records VALUES "
             "({'label': 'FIRST', 'doc': '{\"nested\": [1, null]}', 'n': 1.25})"
         )
         value = conn.execute(select(table.c.v)).scalar_one()
-        assert value == {"label": Label.FIRST, "doc": {"nested": [1, None]}, "n": 1.25}
+        assert value == {"LABEL": Label.FIRST, "doc": {"nested": [1, None]}, "n": 1.25}
         assert isinstance(value["n"], float)
 
 

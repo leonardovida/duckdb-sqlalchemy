@@ -227,7 +227,7 @@ class Struct(_FieldsType):
 
     def result_processor(self, dialect: Dialect, coltype: object) -> Any:
         processors = {
-            name: processor
+            name.translate(_ASCII_LOWER): processor
             for name, member in self._fields or ()
             if (
                 processor := member.dialect_impl(dialect).result_processor(
@@ -244,7 +244,8 @@ class Struct(_FieldsType):
                 return None
             return {
                 name: processor(item)
-                if (processor := processors.get(name)) is not None
+                if (processor := processors.get(str(name).translate(_ASCII_LOWER)))
+                is not None
                 else item
                 for name, item in value.items()
             }
