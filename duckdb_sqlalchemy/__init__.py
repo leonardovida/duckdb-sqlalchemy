@@ -197,7 +197,7 @@ supports_attach: bool = _capabilities.supports_attach
 supports_user_agent: bool = _capabilities.supports_user_agent
 
 if TYPE_CHECKING:
-    from sqlalchemy.engine import Connection
+    from sqlalchemy.engine import Connection, RowMapping
     from sqlalchemy.engine.interfaces import (  # noqa: F401
         IsolationLevel,
         ReflectedCheckConstraint,
@@ -2226,6 +2226,19 @@ class Dialect(PGDialect_psycopg2):
     ) -> List[str]:
         return list(self._duckdb_tables(connection, schema, filter_names))
 
+    def _rows_for_reflected_relations(
+        self,
+        rows: Iterable["RowMapping"],
+        relations: Mapping[str, Tuple[str, str]],
+    ) -> Iterable["RowMapping"]:
+        """Keep metadata belonging to the already resolved catalog and schema."""
+        for row in rows:
+            if relations.get(row["table_name"]) == (
+                row["database_name"],
+                row["schema_name"],
+            ):
+                yield row
+
     def _duckdb_constraint_rows(
         self,
         connection: "Connection",
@@ -2256,10 +2269,10 @@ class Dialect(PGDialect_psycopg2):
         )
         params["constraint_type"] = constraint_type
         constraints: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for row in connection.execute(stmt, params).mappings():
-            table_name = row["table_name"]
-            if tables.get(table_name) == (row["database_name"], row["schema_name"]):
-                constraints[table_name].append(dict(row))
+        for row in self._rows_for_reflected_relations(
+            connection.execute(stmt, params).mappings(), tables
+        ):
+            constraints[row["table_name"]].append(dict(row))
         return constraints
 
     def _duckdb_enum_rows(
@@ -2943,12 +2956,9 @@ class Dialect(PGDialect_psycopg2):
             suffix="ORDER BY table_name, index_name",
         )
         indexes: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for row in connection.execute(stmt, params).mappings():
-            if tables.get(row["table_name"]) != (
-                row["database_name"],
-                row["schema_name"],
-            ):
-                continue
+        for row in self._rows_for_reflected_relations(
+            connection.execute(stmt, params).mappings(), tables
+        ):
             expressions, column_names = self._reflect_duckdb_index_expressions(
                 row["expressions"]
             )
@@ -3424,9 +3434,9 @@ class Dialect(PGDialect_psycopg2):
         )
         rows = [
             dict(row)
-            for row in connection.execute(stmt, params).mappings()
-            if relations.get(row["table_name"])
-            == (row["database_name"], row["schema_name"])
+            for row in self._rows_for_reflected_relations(
+                connection.execute(stmt, params).mappings(), relations
+            )
         ]
         columns = self._duckdb_columns_from_rows(connection, rows)
         schema_key = self._reflection_schema_key(schema)
