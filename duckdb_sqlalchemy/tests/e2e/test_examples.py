@@ -9,7 +9,12 @@ import pytest
 EXAMPLES = Path(__file__).resolve().parents[3] / "examples"
 # MotherDuck examples need a token and network; their offline engine
 # construction is covered in test_connection_fixes.py.
-LOCAL_EXAMPLES = ["partitioned_parquet", "snapshot_live_join", "sqlalchemy_example"]
+LOCAL_EXAMPLES = [
+    "partitioned_parquet",
+    "snapshot_live_join",
+    "snapshot_schema_evolution",
+    "sqlalchemy_example",
+]
 
 
 @pytest.mark.skipif(not EXAMPLES.is_dir(), reason="examples directory not available")

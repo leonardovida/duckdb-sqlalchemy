@@ -8,6 +8,10 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+### Documentation
+
+- Add a runnable recipe for querying disjoint Parquet snapshots after adding an optional column, using `read_parquet(..., union_by_name=True)` and existing SQLAlchemy joins and binds. Document missing-column NULLs, type conflicts and overlapping-batch duplicates. No runtime API or behavior changes.
+
 ### Bug Fixes
 
 - Large `executemany` INSERTs no longer change values on the register fast path. Tz-aware TIME offsets, intervals, naive datetimes mixed with aware ones, STRUCT keys that differ only in case, and ints mixed with floats in text columns now fall back to the ordinary path and are stored as given. UNION columns, decimals wider than 38 digits and integers beyond HUGEINT no longer fail once a batch reaches 10,000 rows. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)

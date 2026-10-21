@@ -607,6 +607,52 @@ reflect the live table at query time. See the
 [runnable snapshot join example](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/examples/snapshot_live_join.py),
 which also updates an account after export and verifies the joined result.
 
+### Combine snapshots after adding a column
+
+When disjoint export batches add an optional column or reorder columns, use
+`union_by_name=True` to align the Parquet schemas by name. Older files return
+NULL for the added column:
+
+```python
+snapshot = read_parquet(
+    ["snapshots/batch-1/**/*.parquet", "snapshots/batch-2/**/*.parquet"],
+    columns=["id", "account_id", "region", "channel"],
+    union_by_name=True,
+    hive_partitioning=True,
+    hive_types={"region": "VARCHAR"},
+)
+report = (
+    select(snapshot.c.id, snapshot.c.channel, accounts.c.tier)
+    .join(accounts, snapshot.c.account_id == accounts.c.id)
+    .where(snapshot.c.id >= bindparam("minimum_id"))
+)
+rows = conn.execute(report, {"minimum_id": 1}).all()
+```
+
+Without `union_by_name`, selecting a column absent from the first file can
+fail even when it appears in later files. `columns` only names SQLAlchemy's
+output expressions. It neither adds missing fields nor enforces their types.
+Keep the same join-key type in each export and set `hive_types` for string
+partition identifiers. Name matching is not schema validation: DuckDB may
+coerce differing types, and incompatible changes such as scalar-to-list values
+still fail. Normalize incompatible batches separately with explicit projections
+and casts before combining them.
+
+Use an explicit list of nonempty batches. An empty partitioned export creates
+no files, so exclude its glob using the COPY count. If all batches are empty,
+return an empty result without scanning. This scan includes every
+row in the selected files, including duplicates from overlapping batches or
+repeated full snapshots. It does not deduplicate or choose the latest version.
+Reading schemas by name also increases memory use. See DuckDB's
+[schema combination documentation](https://duckdb.org/docs/1.5/data/multiple_files/combining_schemas.html).
+
+Run the self-contained
+[schema evolution example](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/examples/snapshot_schema_evolution.py)
+with `uv run python examples/snapshot_schema_evolution.py`. It verifies source
+equivalence across two disjoint partitioned batches, an added column, reordered
+columns, NULL regions, string identifiers, bound filters and a live account
+update. This recipe uses existing APIs and local files.
+
 ## ATTACH for multi-database analytics
 
 DuckDB can query across multiple databases in a single session:
