@@ -68,7 +68,9 @@ Parameters that are treated as part of the database string:
 - `user`
 - `host`, `region_host`, `port`, `tls`, `grpc_local_subchannel_pool`
 - `session_name` (read-scaling affinity)
-- `attach_mode` (`workspace` or `single`)
+- `attach_mode` (`workspace` or `single`. `single` attaches only the named
+  database and starts faster, but needs a database name: `md:?attach_mode=single`
+  fails to connect)
 - `access_mode` (`read_only` for read-scaling tokens)
 - `dbinstance_inactivity_ttl` (preferred; `motherduck_dbinstance_inactivity_ttl`
   remains supported but is deprecated)

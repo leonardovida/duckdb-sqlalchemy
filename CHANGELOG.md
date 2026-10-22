@@ -30,6 +30,10 @@ preserved from the upstream project for historical context.
 
 - URL path parameters such as `session_name` now win over the same keys in `connect_args["config"]`, as documented for other settings. Path parameters are sorted in the database string, so equal parameters share one DuckDB instance. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
 
+### Maintenance
+
+- The MotherDuck guides document the `prompt_jev` `multiple_choice` and `box` arguments and image input, which the helper already passes through, and note that `attach_mode=single` needs a database name. A credential-gated test binds both new `prompt_jev` forms against MotherDuck.
+
 ## [1.5.6.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4) (2026-10-16)
 
 ### Highlights
