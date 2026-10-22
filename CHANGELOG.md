@@ -31,6 +31,10 @@ preserved from the upstream project for historical context.
 - `duckdb-sqlalchemy` now requires `duckdb<2`. DuckDB 2.0.0 changes savepoint and open-result behavior the dialect does not handle yet, and MotherDuck does not support DuckDB 2.0 yet. Installs that resolved DuckDB 2.0 get DuckDB 1.5.x instead. Pin `duckdb<2` yourself if you install it separately. [#212](https://github.com/leonardovida/duckdb-sqlalchemy/pull/212)
 - URL path parameters such as `session_name` now win over the same keys in `connect_args["config"]`, as documented for other settings. Path parameters are sorted in the database string, so equal parameters share one DuckDB instance. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
 
+### Maintenance
+
+- The MotherDuck guides document the `prompt_jev` `multiple_choice` and `box` arguments and image input, which the helper already passes through, and note that `attach_mode=single` needs a database name. A credential-gated test binds both new `prompt_jev` forms against MotherDuck. [#211](https://github.com/leonardovida/duckdb-sqlalchemy/pull/211)
+
 ## [1.5.6.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4) (2026-10-16)
 
 ### Highlights

@@ -162,7 +162,8 @@ available with DuckDB 1.5.5.
 
 The [`prompt_jev`](https://motherduck.com/docs/sql-reference/motherduck-sql-reference/ai-functions/prompt-jev/)
 helper supports the function's positional input and instructions plus named
-`choice`, `score`, `noul`, `questions`, and `batch_size` arguments:
+`choice`, `score`, `noul`, `multiple_choice`, `questions`, `box`, and
+`batch_size` arguments:
 
 ```python
 from sqlalchemy import select
@@ -176,6 +177,24 @@ stmt = select(
     ).label("routing")
 )
 ```
+
+`multiple_choice` returns every criterion that applies instead of a single
+choice. The input can also be a list of images, each a dict with `name`,
+`image` (bytes) and an optional `format`. `box` locates an object in an image
+and returns its bounding box:
+
+```python
+with open("receipt.png", "rb") as file:
+    images = [{"name": "receipt.png", "image": file.read()}]
+
+stmt = select(prompt_jev(images, box="the total amount").label("total"))
+```
+
+`batch_size` is not supported with image input. The other arguments are
+combined as the function reference describes, so `box` cannot be used with
+instructions or criteria. `multiple_choice`, `box` and image input need the
+MotherDuck extension for DuckDB 1.5.6. Older clients reject them when the
+statement binds.
 
 MotherDuck currently limits `prompt_jev` to the regions listed in its function
 reference. The classification runs remotely and may incur usage charges.
