@@ -8,6 +8,25 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+- None yet.
+
+## [1.5.6.5](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.4...v1.5.6.5) (2026-10-22)
+
+### Highlights
+
+- Large bulk inserts, COPY helpers and reflected types keep values and types as written, and MotherDuck tokens no longer appear in engine URLs. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206) [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
+- Reflection finds tables case-insensitively and resolves `db.schema`, temp and attached-database names. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
+- The package requires `duckdb<2` until DuckDB 2.0 is supported. [#212](https://github.com/leonardovida/duckdb-sqlalchemy/pull/212)
+
+### Upgrading from 1.5.6.4
+
+1.5.6.5 is a maintenance release on the 1.5.6 line, so constraints such as `duckdb-sqlalchemy~=1.5.6.4` select it.
+
+1. Upgrade with `pip install -U duckdb-sqlalchemy` or update your lock file.
+2. If your environment has DuckDB 2.0.0, the upgrade moves it to the newest DuckDB 1.5.x. Keep `duckdb<2` wherever you pin DuckDB yourself.
+3. Run Alembic autogenerate and review the diff before applying it, since reflected types and index expressions changed.
+4. Check the Compatibility items below, and see [breaking and behavior changes](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/breaking-changes.md) for the full list.
+
 ### Bug Fixes
 
 - Large `executemany` INSERTs no longer change values on the register fast path. Tz-aware TIME offsets, intervals, naive datetimes mixed with aware ones, STRUCT keys that differ only in case, and ints mixed with floats in text columns now fall back to the ordinary path and are stored as given. UNION columns, decimals wider than 38 digits and integers beyond HUGEINT no longer fail once a batch reaches 10,000 rows. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
@@ -28,12 +47,19 @@ preserved from the upstream project for historical context.
 
 ### Compatibility
 
+- `copy_from_rows` raises `TypeError` for lists, tuples, dicts and `timedelta` values. Use `insert_from_arrow`, `copy_from_parquet` or a regular INSERT for LIST, STRUCT, MAP and INTERVAL columns. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- `VARINT`, `TIMESTAMP_NS` and `TIME_NS` columns reflect as `VarInt`, `TimestampNs` and `TimeNs`. Update `isinstance` checks and review Alembic comparisons. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
+- `engine.url` from `create_motherduck_engine` and `create_engine_from_paths` no longer contains the token. Read it from your own configuration if you read it from the URL. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
+- Transient-error retries skip more statements, such as `EXPLAIN ANALYSE`, `ducklake_*` and `*_execute` calls, and raise the original error instead. Nothing to do unless you relied on those retries. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
+- Reflection reports `CREATE TABLE Users` when asked for `users`, and reflected index `expressions` are SQL text such as `(lower("name"))`. Update code that expected the table to be missing or stripped quotes itself. [#208](https://github.com/leonardovida/duckdb-sqlalchemy/pull/208)
 - `duckdb-sqlalchemy` now requires `duckdb<2`. DuckDB 2.0.0 changes savepoint and open-result behavior the dialect does not handle yet, and MotherDuck does not support DuckDB 2.0 yet. Installs that resolved DuckDB 2.0 get DuckDB 1.5.x instead. Pin `duckdb<2` yourself if you install it separately. [#212](https://github.com/leonardovida/duckdb-sqlalchemy/pull/212)
 - URL path parameters such as `session_name` now win over the same keys in `connect_args["config"]`, as documented for other settings. Path parameters are sorted in the database string, so equal parameters share one DuckDB instance. [#207](https://github.com/leonardovida/duckdb-sqlalchemy/pull/207)
 
 ### Maintenance
 
 - The MotherDuck guides document the `prompt_jev` `multiple_choice` and `box` arguments and image input, which the helper already passes through, and note that `attach_mode=single` needs a database name. A credential-gated test binds both new `prompt_jev` forms against MotherDuck. [#211](https://github.com/leonardovida/duckdb-sqlalchemy/pull/211)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.4...v1.5.6.5
 
 ## [1.5.6.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4) (2026-10-16)
 

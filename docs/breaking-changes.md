@@ -17,6 +17,10 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
+- None yet.
+
+## [1.5.6.5](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.4...v1.5.6.5) (2026-10-22)
+
 - **DuckDB 2.0 is not supported yet** - The package now requires `duckdb>=1.3.0,<2`. DuckDB 2.0.0 drops the outer transaction's writes after a failed `SAVEPOINT` and rejects a new query while an Arrow result is open, so it is excluded until the dialect handles both. MotherDuck does not support DuckDB 2.0 yet either. Environments that resolved DuckDB 2.0.0 move to the newest 1.5.x on upgrade. Keep `duckdb<2` if you install DuckDB separately. [#212](https://github.com/leonardovida/duckdb-sqlalchemy/pull/212)
 - **Large INSERTs fall back for values the fast path would change** - An `executemany` INSERT that reaches `duckdb_copy_threshold` now uses the ordinary path when its values include tz-aware `time`, `timedelta`, naive and aware datetimes in one column, STRUCT keys that differ only in case, UNION columns, decimals wider than 38 digits, integers beyond HUGEINT, or ints mixed with floats in a non-numeric column. Those rows were stored with changed values, or failed, before. Batches of these values insert more slowly than other large batches. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
 - **`copy_from_rows` rejects nested and interval values** - Lists, tuples, dicts and `timedelta` values now raise `TypeError` instead of being written as Python reprs. Use `insert_from_arrow`, `copy_from_parquet` or a regular INSERT for LIST, STRUCT, MAP and INTERVAL columns. [#206](https://github.com/leonardovida/duckdb-sqlalchemy/pull/206)
