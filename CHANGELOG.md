@@ -32,7 +32,7 @@ preserved from the upstream project for historical context.
 
 ### Maintenance
 
-- The MotherDuck guides document the `prompt_jev` `multiple_choice` and `box` arguments and image input, which the helper already passes through, and note that `attach_mode=single` needs a database name. A credential-gated test binds both new `prompt_jev` forms against MotherDuck.
+- The MotherDuck guides document the `prompt_jev` `multiple_choice` and `box` arguments and image input, which the helper already passes through, and note that `attach_mode=single` needs a database name. A credential-gated test binds both new `prompt_jev` forms against MotherDuck. [#211](https://github.com/leonardovida/duckdb-sqlalchemy/pull/211)
 
 ## [1.5.6.4](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.3...v1.5.6.4) (2026-10-16)
 
