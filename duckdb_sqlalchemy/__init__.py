@@ -3190,7 +3190,9 @@ class Dialect(PGDialect_psycopg2):
             type_impl = table.c[name].type.dialect_impl(self)
             while isinstance(type_impl, sqltypes.TypeDecorator):
                 type_impl = type_impl.impl.dialect_impl(self)
-            if isinstance(type_impl, (sqltypes.Integer, sqltypes.Numeric)):
+            if isinstance(
+                type_impl, (sqltypes.Integer, sqltypes.Numeric, sqltypes.Float)
+            ):
                 numeric.add(name)
         return numeric
 
