@@ -8,7 +8,9 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
-- None yet.
+### Bug Fixes
+
+- Bulk INSERTs into text columns preserve each Decimal value's original scale and mixed integers' spelling, including Decimal values inside containers. Batches containing Decimal values for non-numeric destinations now use ordinary inserts instead of Arrow or pandas registration, which inferred one scale per field and silently changed stored strings such as `"1.2"` to `"1.200"`.
 
 ## [1.5.6.5](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.4...v1.5.6.5) (2026-10-22)
 

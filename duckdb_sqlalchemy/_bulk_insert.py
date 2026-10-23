@@ -114,7 +114,7 @@ def _changes_values_on_register(
     # One inferred DECIMAL type holds the widest integer part and scale.
     decimals: dict[tuple[Any, ...], tuple[int, int]] = {}
 
-    def visit(value: Any, path: tuple[Any, ...]) -> bool:
+    def visit(value: Any, path: tuple[Any, ...], preserve_decimal_text: bool) -> bool:
         if value is None or isinstance(value, (str, bool, bytes, float)):
             return False
         if isinstance(value, int):
@@ -127,6 +127,11 @@ def _changes_values_on_register(
         if isinstance(value, datetime.timedelta):
             return True
         if isinstance(value, Decimal):
+            # Registration infers one scale per field, including nested
+            # fields. A subsequent cast to text pads individually bound
+            # values (1.2 becomes "1.200", or an integer 1 becomes "1.00").
+            if preserve_decimal_text:
+                return True
             shape = _decimal_shape(value)
             if shape is None:
                 return True
@@ -141,7 +146,7 @@ def _changes_values_on_register(
                 if isinstance(key, str):
                     if keys.setdefault(key.lower(), key) != key:
                         return True
-                if visit(item, (*path, key)):
+                if visit(item, (*path, key), preserve_decimal_text):
                     return True
             return False
         dtype = getattr(value, "dtype", None)
@@ -153,7 +158,9 @@ def _changes_values_on_register(
         elif dtype is not None:
             return dtype.kind == "m"
         if isinstance(value, (list, tuple)) or getattr(value, "ndim", 0) > 0:
-            return any(visit(item, (*path, None)) for item in value)
+            return any(
+                visit(item, (*path, None), preserve_decimal_text) for item in value
+            )
         return False
 
     for index, name in enumerate(column_names):
@@ -181,7 +188,10 @@ def _changes_values_on_register(
                 return True
             continue
         path = (index,)
-        if any(visit(value, path) for value in values):
+        preserve_decimal_text = (
+            numeric_columns is not None and name not in numeric_columns
+        )
+        if any(visit(value, path, preserve_decimal_text) for value in values):
             return True
     return False
 

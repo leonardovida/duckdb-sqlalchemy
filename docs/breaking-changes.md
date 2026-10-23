@@ -17,7 +17,7 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
-- None yet.
+- **Decimal values in non-numeric bulk columns use ordinary inserts** - At `duckdb_copy_threshold`, batches containing Decimal values for text or other non-numeric destinations now retain individually bound values, including Decimal values nested in containers. Arrow and pandas registration previously inferred one scale per field, storing `Decimal("1.2")` as `"1.200"` alongside `Decimal("3.456")`, or an integer `1` as `"1.00"` alongside `Decimal("2.50")`. These batches may insert more slowly, including numeric containers that conservatively fall back. Scalar numeric destinations keep the existing fast-path eligibility. Existing rows are not rewritten, so review text values if your application used this combination.
 
 ## [1.5.6.5](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.4...v1.5.6.5) (2026-10-22)
 
