@@ -162,6 +162,15 @@ def _changes_values_on_register(
         else:
             values = [row[index] for row in rows]
         kinds = set(map(type, values))
+        # Registration infers one DECIMAL scale for the whole column. Casting
+        # that column to text pads values (1.2 becomes "1.200") and mixed
+        # integers (1 becomes "1.00"), unlike individually bound values.
+        if (
+            numeric_columns is not None
+            and name not in numeric_columns
+            and any(issubclass(kind, Decimal) for kind in kinds)
+        ):
+            return True
         # A column of ints and floats infers as DOUBLE, so a text column
         # would store "1.0" where the ordinary path stores "1".
         if (
