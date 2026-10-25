@@ -1827,6 +1827,8 @@ class Dialect(PGDialect_psycopg2):
         schema_name: Optional[str] = None,
         database_name: Optional[str] = None,
         default_to_current_schema: bool = False,
+        *,
+        include_temporary: bool = False,
     ) -> Tuple[str, Dict[str, str]]:
         """Build the catalog filter for a reflection query.
 
@@ -1836,6 +1838,8 @@ class Dialect(PGDialect_psycopg2):
         exists in several catalogs. Without a schema, ``default_to_current_schema``
         limits the query to the current database and schema; otherwise the
         caller ranks rows by DuckDB's name resolution order.
+        Relation queries may include temporary objects alongside that catalog
+        filter. An explicit database name still restricts the catalog.
         """
         sql = ""
         params = {}
@@ -1855,19 +1859,28 @@ class Dialect(PGDialect_psycopg2):
             sql += "AND schema_name = :schema_name\n"
             params.update({"schema_name": schema_name})
             if database_name is None:
-                sql += (
-                    "AND database_name = (\n"
+                database_filter = (
+                    "database_name = (\n"
                     "    SELECT database_name FROM duckdb_schemas()\n"
                     "    WHERE schema_name = :schema_name\n"
                     "    ORDER BY database_name <> current_database(), database_name\n"
                     "    LIMIT 1\n"
-                    ")\n"
+                    ")"
                 )
+                if include_temporary:
+                    database_filter = f"(temporary OR {database_filter})"
+                sql += f"AND {database_filter}\n"
         elif default_to_current_schema:
-            sql += (
-                "AND database_name = current_database()\n"
-                "AND schema_name = current_schema()\n"
-            )
+            if include_temporary:
+                sql += (
+                    "AND (temporary OR (database_name = current_database() "
+                    "AND schema_name = current_schema()))\n"
+                )
+            else:
+                sql += (
+                    "AND database_name = current_database()\n"
+                    "AND schema_name = current_schema()\n"
+                )
 
         if database_name is not None:
             sql += "AND database_name = :database_name\n"
@@ -1979,6 +1992,8 @@ class Dialect(PGDialect_psycopg2):
         filter_names: Optional[Collection[str]] = None,
         include_internal_filter: bool = False,
         suffix: str = "",
+        *,
+        include_temporary: bool = False,
     ) -> Tuple[Any, Dict[str, Any]]:
         params: Dict[str, Any] = {}
         names = None if filter_names is None else list(filter_names)
@@ -2004,7 +2019,9 @@ class Dialect(PGDialect_psycopg2):
         # named relations without a schema follows DuckDB's name resolution,
         # which the caller applies with _visible_duckdb_relation_rows.
         where_sql, where_params = self._build_query_where(
-            schema_name=schema, default_to_current_schema=filter_names is None
+            schema_name=schema,
+            default_to_current_schema=filter_names is None,
+            include_temporary=include_temporary,
         )
         sql += where_sql
         params.update(where_params)
@@ -2154,21 +2171,14 @@ class Dialect(PGDialect_psycopg2):
             # include that catalog before applying the requested scope.
             filter_names=[] if filter_names == [] else filter_names,
             include_internal_filter=True,
+            include_temporary=(
+                schema is None
+                and filter_names is None
+                and ObjectScope.TEMPORARY in scope
+            )
+            or (schema is not None and ObjectScope.DEFAULT not in scope),
         )
         sql = stmt.text
-        if schema is None and filter_names is None and ObjectScope.TEMPORARY in scope:
-            sql = sql.replace(
-                "AND database_name = current_database()\nAND schema_name = current_schema()",
-                "AND (temporary OR (database_name = current_database() "
-                "AND schema_name = current_schema()))",
-            )
-        if schema is not None and ObjectScope.DEFAULT not in scope:
-            database_name, schema_name = self.identifier_preparer._separate(schema)
-            if database_name is None:
-                sql = sql.replace(
-                    "AND database_name = (\n",
-                    "AND (temporary OR database_name = (\n",
-                ).replace("    LIMIT 1\n)\n", "    LIMIT 1\n))\n")
         if ObjectScope.DEFAULT not in scope:
             sql += "\nAND temporary"
         elif ObjectScope.TEMPORARY not in scope:
