@@ -2254,8 +2254,6 @@ class Dialect(PGDialect_psycopg2):
         connection: "Connection",
         constraint_type: str,
         tables: Mapping[str, Tuple[str, str]],
-        schema: Optional[str] = None,
-        filter_names: Optional[Collection[str]] = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
         """duckdb_constraints() rows of ``tables``, grouped by table name.
 
@@ -2271,7 +2269,7 @@ class Dialect(PGDialect_psycopg2):
                 "referenced_column_names"
             ),
             schema=None,
-            filter_names=filter_names,
+            filter_names=list(tables),
             suffix=(
                 "AND constraint_type = :constraint_type\n"
                 "ORDER BY table_name, constraint_index"
@@ -2754,9 +2752,7 @@ class Dialect(PGDialect_psycopg2):
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
         tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
-        rows = self._duckdb_constraint_rows(
-            connection, "PRIMARY KEY", tables, schema, list(tables)
-        )
+        rows = self._duckdb_constraint_rows(connection, "PRIMARY KEY", tables)
         constraints = {
             table_name: {
                 "name": row["constraint_name"],
@@ -2797,9 +2793,7 @@ class Dialect(PGDialect_psycopg2):
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
         tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
-        rows = self._duckdb_constraint_rows(
-            connection, "FOREIGN KEY", tables, schema, list(tables)
-        )
+        rows = self._duckdb_constraint_rows(connection, "FOREIGN KEY", tables)
         # DuckDB foreign keys stay within the resolved child's schema.
         referred_schemas: Dict[str, Optional[str]] = {}
         if rows and schema is None:
@@ -2864,9 +2858,7 @@ class Dialect(PGDialect_psycopg2):
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
         tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
-        rows = self._duckdb_constraint_rows(
-            connection, "UNIQUE", tables, schema, list(tables)
-        )
+        rows = self._duckdb_constraint_rows(connection, "UNIQUE", tables)
         unique_constraints = {
             table_name: [
                 {
@@ -2909,9 +2901,7 @@ class Dialect(PGDialect_psycopg2):
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
         tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
-        rows = self._duckdb_constraint_rows(
-            connection, "CHECK", tables, schema, list(tables)
-        )
+        rows = self._duckdb_constraint_rows(connection, "CHECK", tables)
         check_constraints = {
             table_name: [
                 {
