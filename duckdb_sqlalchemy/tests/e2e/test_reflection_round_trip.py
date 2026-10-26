@@ -194,3 +194,32 @@ def test_multi_metadata_stays_with_the_selected_relation(
             inspector.get_multi_indexes,
         ):
             assert getter(schema=schema, filter_names=[], scope=ObjectScope.ANY) == {}
+
+
+def test_multi_foreign_keys_stay_with_the_selected_schema(
+    db_path: Path, make_engine: EngineFactory
+) -> None:
+    engine = make_engine(db_path, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        conn.exec_driver_sql('CREATE SCHEMA "other schema"')
+        for namespace, column in (("main", "local_id"), ('"other schema"', "other_id")):
+            conn.exec_driver_sql(
+                f"CREATE TABLE {namespace}.parent (id INTEGER PRIMARY KEY)"
+            )
+            conn.exec_driver_sql(
+                f'CREATE TABLE {namespace}."Child Table" '
+                f"({column} INTEGER REFERENCES {namespace}.parent(id))"
+            )
+        inspector = inspect(conn)
+        for namespace, column in (("main", "local_id"), ('"other schema"', "other_id")):
+            options = dict(schema=namespace, filter_names=["CHILD TABLE", "missing"])
+            result = inspector.get_multi_foreign_keys(**options)
+            assert list(result) == [(namespace, "CHILD TABLE")]
+            foreign_key = result[(namespace, "CHILD TABLE")][0]
+            assert foreign_key["constrained_columns"] == [column]
+            assert foreign_key["referred_table"] == "parent"
+            assert foreign_key["referred_columns"] == ["id"]
+            assert (
+                inspector.get_multi_foreign_keys(schema=namespace, filter_names=[])
+                == {}
+            )
