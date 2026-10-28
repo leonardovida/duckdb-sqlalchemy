@@ -8,9 +8,35 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+- None yet.
+
+## [1.5.6.6](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.5...v1.5.6.6) (2026-10-28)
+
+### Highlights
+
+- Large bulk INSERTs into text columns store Decimal values exactly as provided. Earlier releases could change the stored text, for example `"1.2"` became `"1.200"`. [#214](https://github.com/leonardovida/duckdb-sqlalchemy/pull/214)
+
+### Upgrading from 1.5.6.5
+
+1.5.6.6 is a maintenance release on the 1.5.6 line, so constraints such as `duckdb-sqlalchemy~=1.5.6.5` select it.
+
+1. Upgrade with `pip install -U duckdb-sqlalchemy` or update the lock file.
+2. Review text columns that received large batches of Decimal values through an earlier release. This release does not rewrite existing rows.
+3. Check the Compatibility item below, and see [breaking and behavior changes](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/breaking-changes.md) for the full list.
+
 ### Bug Fixes
 
-- Bulk INSERTs into text columns preserve each Decimal value's original scale and mixed integers' spelling, including Decimal values inside containers. Batches containing Decimal values for non-numeric destinations now use ordinary inserts instead of Arrow or pandas registration, which inferred one scale per field and silently changed stored strings such as `"1.2"` to `"1.200"`.
+- Bulk INSERTs that reach `duckdb_copy_threshold` preserve each Decimal value's scale and the spelling of integers mixed with Decimal values when the destination is a text or other non-numeric column, including Decimal values inside lists, tuples and mappings. Earlier releases registered these batches as Arrow tables or pandas DataFrames, which inferred one scale per field and stored `Decimal("1.2")` as `"1.200"` next to `Decimal("3.456")`, or the integer `1` as `"1.00"` next to `Decimal("2.50")`. These batches now use ordinary inserts. [#214](https://github.com/leonardovida/duckdb-sqlalchemy/pull/214)
+
+### Compatibility
+
+- Batches that contain Decimal values for non-numeric destinations, and numeric containers that hold Decimal values, now insert through individually bound values and run more slowly than other large batches. Scalar numeric destinations keep the fast path. No change is required. Applications that need the fast path for these batches can convert the Decimal values to strings before insertion. [#214](https://github.com/leonardovida/duckdb-sqlalchemy/pull/214)
+
+### Maintenance
+
+- Reflection builds its temporary-object and constraint filters from the relations it resolves, instead of rewriting shared SQL fragments. Generated SQL, parameters and reflection results are unchanged. New tests cover shadowed tables and views, explicit catalogs, quoted schemas, name casing and foreign keys in same-named tables across schemas. [#215](https://github.com/leonardovida/duckdb-sqlalchemy/pull/215) [#216](https://github.com/leonardovida/duckdb-sqlalchemy/pull/216)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.5...v1.5.6.6
 
 ## [1.5.6.5](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.4...v1.5.6.5) (2026-10-22)
 
