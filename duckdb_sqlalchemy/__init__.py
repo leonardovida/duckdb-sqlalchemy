@@ -55,7 +55,12 @@ from sqlalchemy.engine.reflection import (
     cache,
 )
 from sqlalchemy.engine.url import URL as SAURL
-from sqlalchemy.exc import CompileError, InvalidRequestError, NoSuchTableError
+from sqlalchemy.exc import (
+    ArgumentError,
+    CompileError,
+    InvalidRequestError,
+    NoSuchTableError,
+)
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import bindparam
 from sqlalchemy.sql.compiler import IdentifierPreparer
@@ -1063,6 +1068,10 @@ def _prepare_connection_params(
     config = dict(cparams.get("config", {}))
     cparams["config"] = config
     config.update(cparams.pop("url_config", {}))
+    for key, value in config.items():
+        # Repeated URL query keys arrive as tuples. DuckDB takes lists.
+        if isinstance(value, tuple):
+            config[key] = list(value)
     for key in DIALECT_QUERY_KEYS:
         config.pop(key, None)
     if cparams.get("database") in {None, ""}:
@@ -1073,10 +1082,25 @@ def _prepare_connection_params(
     application_name = _pop_application_name(config)
     if not _looks_like_motherduck(cparams["database"]):
         # Without the motherduck extension loaded, connect() rejects its
-        # settings. SET them after preload_extensions instead.
+        # settings. SET them after preload_extensions instead, under the
+        # setting names the extension registers.
+        if "token" in config:
+            config.setdefault("motherduck_token", config.pop("token"))
+        config.pop("dbinstance_inactivity_ttl", None)
         core_keys = get_native_config()
     ext = {k: config.pop(k) for k in list(config) if k not in core_keys}
     return ext, application_name
+
+
+def _redacted_connect_error(exc: TypeError, cparams: Dict[str, Any]) -> TypeError:
+    # pybind11 appends "Invoked with: kwargs: ..." to the message, which
+    # echoes config values such as motherduck_token. Keep only the signature.
+    message = str(exc).split("Invoked with", 1)[0].rstrip()
+    return TypeError(
+        f"{message}\nduckdb.connect() received the arguments "
+        f"{sorted(cparams)} (values hidden). Pass DuckDB settings through "
+        'connect_args={"config": {...}} or the URL query.'
+    )
 
 
 class DuckDBIdentifierPreparer(PGIdentifierPreparer):
@@ -1592,6 +1616,8 @@ class Dialect(PGDialect_psycopg2):
     def connect(self, *cargs: Any, **cparams: Any) -> Any:
         core_keys = get_core_config()
         preload_extensions = cparams.pop("preload_extensions", [])
+        if isinstance(preload_extensions, str):
+            preload_extensions = [preload_extensions]
         ext, application_name = _prepare_connection_params(cparams, core_keys)
         config = cparams["config"]
         if supports_user_agent:
@@ -1606,7 +1632,10 @@ class Dialect(PGDialect_psycopg2):
 
         filesystems = cparams.pop("register_filesystems", [])
 
-        conn = duckdb.connect(*cargs, **cparams)
+        try:
+            conn = duckdb.connect(*cargs, **cparams)
+        except TypeError as exc:
+            raise _redacted_connect_error(exc, cparams) from None
 
         try:
             for extension in preload_extensions:
@@ -3090,6 +3119,18 @@ class Dialect(PGDialect_psycopg2):
         return self._iter_reflection_results(schema, table_names, {}, dict)
 
     def create_connect_args(self, url: SAURL) -> Tuple[tuple, dict]:
+        unsupported = [
+            name
+            for name in ("username", "password", "host", "port")
+            if getattr(url, name) is not None
+        ]
+        if unsupported:
+            raise ArgumentError(
+                f"DuckDB URLs do not take a {', '.join(unsupported)}. Use three "
+                "slashes before the database, for example duckdb:///md:my_db or "
+                "duckdb:///path/to/file.duckdb, and pass credentials such as "
+                "motherduck_token in the query or connect_args."
+            )
         opts = url.translate_connect_args(database="database")
         database = opts.get("database")
         if database in {None, ""}:
