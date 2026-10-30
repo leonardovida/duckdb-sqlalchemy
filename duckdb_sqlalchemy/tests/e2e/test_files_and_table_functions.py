@@ -236,8 +236,15 @@ def test_preload_extensions_accepts_a_single_name(make_engine: EngineFactory) ->
 def test_repeated_url_keys_reach_duckdb_as_a_list(
     tmp_path: Path, make_engine: EngineFactory
 ) -> None:
+    import duckdb
+
     from ... import URL
 
+    with duckdb.connect() as probe:
+        if not probe.execute(
+            "SELECT 1 FROM duckdb_settings() WHERE name = 'extension_directories'"
+        ).fetchone():
+            pytest.skip("extension_directories needs DuckDB 1.4 or newer")
     dirs = [str(tmp_path / "a"), str(tmp_path / "b")]
     engine = make_engine(URL(database=":memory:", extension_directories=dirs))
     with engine.connect() as conn:

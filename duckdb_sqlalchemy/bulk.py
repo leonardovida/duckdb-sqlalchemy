@@ -310,10 +310,15 @@ def _csv_value(
         and value.utcoffset() is not None
     ):
         # A regular INSERT converts an aware datetime to the session zone for
-        # TIMESTAMP columns. The CSV reader drops the offset for TIMESTAMP and
-        # applies it for TIMESTAMPTZ, so write the session-zone wall time with
-        # its offset to get the same value in both.
-        return value.astimezone(time_zone()).isoformat(" ")
+        # TIMESTAMP columns. Write that wall time without an offset: DuckDB
+        # reads it into TIMESTAMP as is and into TIMESTAMPTZ in the session
+        # zone. (DuckDB before 1.4 applies an offset when reading TIMESTAMP,
+        # later versions drop it.) Keep the offset only for wall times the
+        # session zone repeats, which would otherwise be ambiguous.
+        local = value.astimezone(time_zone())
+        if local.replace(fold=1 - local.fold).utcoffset() != local.utcoffset():
+            return local.isoformat(" ")
+        return local.replace(tzinfo=None).isoformat(" ")
     if isinstance(value, _BINARY_TYPES):
         raise TypeError(
             "copy_from_rows cannot write binary values "

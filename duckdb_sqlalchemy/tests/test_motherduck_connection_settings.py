@@ -244,9 +244,18 @@ def test_create_motherduck_engine_forwards_engine_arguments() -> None:
     from sqlalchemy.pool import StaticPool
 
     pool = StaticPool(lambda: None)
-    engine = md.create_motherduck_engine(
-        database="md:db", future=True, skip_autocommit_rollback=True, pool=pool
-    )
+    engine = md.create_motherduck_engine(database="md:db", future=True, pool=pool)
     assert engine.pool is pool
+    assert dict(engine.url.query) == {}
+
+
+def test_create_motherduck_engine_forwards_skip_autocommit_rollback() -> None:
+    from sqlalchemy.engine.default import DefaultDialect
+
+    if not hasattr(DefaultDialect(), "skip_autocommit_rollback"):
+        pytest.skip("skip_autocommit_rollback needs SQLAlchemy 2.0.43 or newer")
+    engine = md.create_motherduck_engine(
+        database="md:db", skip_autocommit_rollback=True
+    )
     assert dict(engine.url.query) == {}
     assert engine.dialect.skip_autocommit_rollback is True

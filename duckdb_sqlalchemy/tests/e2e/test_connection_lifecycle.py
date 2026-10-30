@@ -16,7 +16,10 @@ def test_raw_arrow_reader_does_not_block_later_statements(
     engine = make_engine(db_path)
     with engine.connect() as conn:
         result = conn.exec_driver_sql("SELECT * FROM range(10)")
-        reader = result.cursor.fetch_record_batch()
+        cursor = result.cursor
+        # to_arrow_reader replaces fetch_record_batch, which DuckDB 2.0 removes.
+        fetch_reader = getattr(cursor, "to_arrow_reader", None)
+        reader = fetch_reader() if fetch_reader else cursor.fetch_record_batch()
         assert reader.read_all().num_rows == 10
         # result stays referenced; the next statement and commit still work
         assert conn.execute(text("SELECT 1")).scalar() == 1
