@@ -308,6 +308,18 @@ _DUCKDB_IO_EXCEPTIONS: Tuple[type, ...] = tuple(
     )
     if isinstance(cls, type)
 )
+# OperationalError subclasses raised on a connection that is still usable.
+# Their messages quote table names and values, which can contain words such as
+# "timeout", so they never count as disconnects.
+_DUCKDB_LIVE_CONNECTION_EXCEPTIONS: Tuple[type, ...] = _DUCKDB_IO_EXCEPTIONS + tuple(
+    cls
+    for cls in (
+        getattr(duckdb, "TransactionException", None),
+        getattr(duckdb, "SerializationException", None),
+        getattr(duckdb, "OutOfMemoryException", None),
+    )
+    if isinstance(cls, type)
+)
 
 
 class DBAPI:
@@ -496,7 +508,17 @@ class ConnectionWrapper:
         self._transaction_statements = 0
 
     def commit(self) -> None:
-        self._buffer_pending_result()
+        try:
+            self._buffer_pending_result()
+        except BaseException:
+            # SQLAlchemy treats the transaction as over once commit() raises,
+            # and skips the reset rollback on pool checkin. End it here so the
+            # next checkout does not inherit an open DuckDB transaction.
+            try:
+                self.rollback()
+            except Exception:
+                pass
+            raise
         self._transaction_statements = None
         self.__c.commit()
 
@@ -618,6 +640,12 @@ class CursorWrapper:
         self._rows_fetched = False
         self._native_reader_active = False
         self._native_reader: Any = None
+        # A reader handed out by a raw fetch_record_batch()/to_arrow_reader()
+        # call owns the rest of the result, so there is nothing to buffer.
+        self._raw_reader_handed_out = False
+        # Set when buffering this result failed; later fetches re-raise it
+        # instead of reading whatever result the connection holds next.
+        self._buffer_error: Optional[BaseException] = None
 
     def _clear_result(self) -> None:
         self.__c.execute("")
@@ -633,6 +661,8 @@ class CursorWrapper:
         self._dml_rowcount = None
         self._is_dml_count = False
         self._rows_fetched = False
+        self._raw_reader_handed_out = False
+        self._buffer_error = None
 
     def _capture_dml_rowcount(self, statement: str) -> bool:
         """Read the "Count" result of a DML statement into ``rowcount``.
@@ -693,8 +723,23 @@ class CursorWrapper:
             )
         description = self.description
         rowcount = self.__c.rowcount
-        rows = self.__c.fetchall()
+        if self._raw_reader_handed_out:
+            self._store_buffered_result([], description, rowcount)
+            return
+        try:
+            rows = self.__c.fetchall()
+        except BaseException as exc:
+            self._store_buffered_result([], description, rowcount)
+            self._buffer_error = exc
+            raise
         self._store_buffered_result(rows, description, rowcount)
+
+    def _raise_buffer_error(self) -> None:
+        if self._buffer_error is not None:
+            raise InvalidRequestError(
+                "This result could not be read to the end before another "
+                "statement ran on the connection"
+            ) from self._buffer_error
 
     def _store_buffered_result(
         self, rows: Iterable[Tuple[Any, ...]], description: Any, rowcount: int
@@ -739,7 +784,12 @@ class CursorWrapper:
         self._before_execute()
         norm = statement.strip().lower().rstrip(";")
         if norm == "commit":  # this is largely for ipython-sql
+            in_transaction = (
+                self.__connection_wrapper._transaction_statements is not None
+            )
             self.__connection_wrapper.commit()
+            if in_transaction:
+                self.__connection_wrapper._begin()
             return
         elif _BEGIN_TRANSACTION_ISOLATION_RE.fullmatch(norm):
             self.__connection_wrapper._begin()
@@ -752,6 +802,7 @@ class CursorWrapper:
         elif norm.startswith("register"):
             view_name, df = _parse_register_params(parameters)
             self.__c.register(view_name, df)
+            self._clear_result()
             return
         elif norm == "show transaction isolation level":
             self.__c.execute("select 'read committed' as transaction_isolation")
@@ -825,6 +876,7 @@ class CursorWrapper:
             value = method(*args, **kwargs)
             self._rows_fetched = True
             if hasattr(value, "read_next_batch"):
+                self._raw_reader_handed_out = True
                 return value
             if name != "fetch_df_chunk":
                 self._store_buffered_result([], self.description, self.rowcount)
@@ -837,6 +889,7 @@ class CursorWrapper:
         if self._native_reader_active:
             raise InvalidRequestError("An Arrow batch reader already owns this result")
         if self._buffered_rows is not None:
+            self._raise_buffer_error()
             return self._buffered_rows.popleft() if self._buffered_rows else None
         self._rows_fetched = True
         row = self.__c.fetchone()
@@ -849,6 +902,7 @@ class CursorWrapper:
         if self._native_reader_active:
             raise InvalidRequestError("An Arrow batch reader already owns this result")
         if self._buffered_rows is not None:
+            self._raise_buffer_error()
             rows = list(self._buffered_rows)
             self._buffered_rows.clear()
             return rows
@@ -863,6 +917,7 @@ class CursorWrapper:
             raise InvalidRequestError("An Arrow batch reader already owns this result")
         count = self.arraysize if size is None else size
         if self._buffered_rows is not None:
+            self._raise_buffer_error()
             buffered = self._buffered_rows
             return [buffered.popleft() for _ in range(min(count, len(buffered)))]
         self._rows_fetched = True
@@ -1008,6 +1063,10 @@ class DuckDBExecutionContext(_PGExecutionContext):
             returning_rows = getattr(self, "_insertmanyvalues_rows", None)
             if returning_rows is not None:
                 self._rowcount = len(returning_rows)
+                if self.execution_options.get("duckdb_arrow"):
+                    self._duckdb_returning_arrow = _rows_to_arrow(
+                        returning_rows, cursor.description
+                    )
             else:
                 if self.execution_options.get("duckdb_arrow"):
                     fetch_arrow = getattr(cursor, "to_arrow_table", None)
@@ -1037,6 +1096,14 @@ class DuckDBExecutionContext(_PGExecutionContext):
                 result.close()
             return arrow_result
         return result
+
+
+def _rows_to_arrow(rows: Sequence[Sequence[Any]], description: Any) -> Any:
+    import pyarrow as pa
+
+    names = [column[0] for column in description or ()]
+    columns = list(zip(*rows)) if rows else [()] * len(names)
+    return pa.Table.from_arrays([pa.array(list(c)) for c in columns], names=names)
 
 
 def _apply_motherduck_defaults(config: Dict[str, Any], database: Optional[str]) -> None:
@@ -3350,7 +3417,7 @@ class Dialect(PGDialect_psycopg2):
             # connection that is still usable. Invalidating it would discard
             # the pooled connection and, for :memory:, the whole database.
             if not isinstance(e, duckdb.OperationalError) or isinstance(
-                e, _DUCKDB_IO_EXCEPTIONS
+                e, _DUCKDB_LIVE_CONNECTION_EXCEPTIONS
             ):
                 return False
         message = str(e).lower()
@@ -3388,6 +3455,12 @@ class Dialect(PGDialect_psycopg2):
             retry_count = 1
         if retry_count <= 0 or not _is_idempotent_statement(statement):
             return executor()
+        connection = getattr(cursor, "connection", None)
+        if isinstance(connection, ConnectionWrapper):
+            # Buffer another cursor's unread rows before the retry loop, so a
+            # failure fetching them is reported, not retried as this
+            # statement's failure (the retry's rollback would drop them).
+            connection._buffer_pending_result(cursor)
         backoff = options.get("duckdb_retry_backoff")
         attempt = 0
         first_error: Optional[Exception] = None

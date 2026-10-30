@@ -180,3 +180,73 @@ def test_apply_config_renders_timedelta_as_interval() -> None:
     assert conn.statements == [
         "SET motherduck_background_catalog_refresh_inactivity_timeout = '86400s'"
     ]
+
+
+def test_connect_type_error_does_not_echo_the_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sqlalchemy import create_engine
+
+    monkeypatch.setenv("MOTHERDUCK_TOKEN", "dummy-secret-token")
+    engine = create_engine(
+        "duckdb:///md:my_db", connect_args={"check_same_thread": False}
+    )
+    with pytest.raises(TypeError) as raised:
+        engine.connect()
+    message = str(raised.value)
+    assert "dummy-secret-token" not in message
+    assert "check_same_thread" in message
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "url", ["duckdb://somehost/md:my_db", "duckdb://user:secret@/local.duckdb"]
+)
+def test_urls_with_host_or_credentials_are_rejected(url: str) -> None:
+    from sqlalchemy import create_engine
+    from sqlalchemy.exc import ArgumentError
+
+    with pytest.raises(ArgumentError, match="three slashes") as raised:
+        create_engine(url)
+    assert "secret" not in str(raised.value)
+
+
+def test_token_on_a_local_database_is_set_under_the_extension_name(
+    captured_connect: Dict[str, Any],
+) -> None:
+    dialect = Dialect()
+    dialect.connect(
+        database="local.duckdb",
+        config={"token": "dummy", "dbinstance_inactivity_ttl": "5m"},
+    )
+    statements = captured_connect["conn"].statements
+    assert "SET motherduck_token = 'dummy'" in statements
+    assert not any(" token " in s or "SET dbinstance" in s for s in statements)
+
+
+def test_motherduck_url_requires_a_motherduck_database() -> None:
+    with pytest.raises(ValueError, match="md:analytics"):
+        MotherDuckURL(database="analytics", attach_mode="single")
+    with pytest.raises(ValueError, match="md:"):
+        md.create_motherduck_engine(database="my_db")
+
+
+def test_motherduck_url_keyword_alias_overrides_embedded_query() -> None:
+    with pytest.warns(DeprecationWarning, match="motherduck_session_name"):
+        url = MotherDuckURL(
+            database="md:db?session_name=embedded",
+            motherduck_session_name="kwarg",
+        )
+    assert url.query == {"session_name": "kwarg"}
+
+
+def test_create_motherduck_engine_forwards_engine_arguments() -> None:
+    from sqlalchemy.pool import StaticPool
+
+    pool = StaticPool(lambda: None)
+    engine = md.create_motherduck_engine(
+        database="md:db", future=True, skip_autocommit_rollback=True, pool=pool
+    )
+    assert engine.pool is pool
+    assert dict(engine.url.query) == {}
+    assert engine.dialect.skip_autocommit_rollback is True
