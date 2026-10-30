@@ -49,7 +49,7 @@ def test_savepoints_fail_loudly_and_keep_the_outer_transaction(
             conn.execute(text("INSERT INTO t VALUES (1)"))
             # DuckDB has no SAVEPOINT. The error must surface, not silently
             # degrade into a flat transaction.
-            with pytest.raises(exc.DBAPIError, match="SAVEPOINT"):
+            with pytest.raises(exc.ProgrammingError, match="SAVEPOINT"):
                 conn.begin_nested()
     with engine.connect() as conn:
         assert conn.execute(text("SELECT count(*) FROM t")).scalar() == 1

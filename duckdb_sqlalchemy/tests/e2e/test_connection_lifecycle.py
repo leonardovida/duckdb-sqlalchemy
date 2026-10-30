@@ -6,6 +6,7 @@ import duckdb
 import pytest
 from packaging.version import Version
 from sqlalchemy import Column, Integer, MetaData, Table, event, exc, insert, text
+from sqlalchemy.engine import Connection
 
 from .conftest import EngineFactory
 
@@ -27,6 +28,42 @@ def test_raw_arrow_reader_does_not_block_later_statements(
         assert conn.execute(text("SELECT 1")).scalar() == 1
         conn.commit()
         assert result is not None
+
+
+def _partly_read_reader(conn: Connection) -> object:
+    cursor = conn.exec_driver_sql("SELECT * FROM range(10)").cursor
+    fetch_reader = getattr(cursor, "to_arrow_reader", None)
+    if fetch_reader is not None:
+        reader = fetch_reader(batch_size=2)
+    else:
+        reader = cursor.fetch_record_batch(rows_per_batch=2)
+    assert reader.read_next_batch().num_rows == 2
+    return reader
+
+
+def test_partly_read_raw_arrow_reader_is_closed_by_commit_and_checkin(
+    db_path: Path, make_engine: EngineFactory
+) -> None:
+    engine = make_engine(db_path, pool_size=1)
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE t (i INTEGER)"))
+        conn.commit()
+
+        # The reader outlives its result and cursor. DuckDB 2.0 refused
+        # COMMIT, ROLLBACK and every later statement while it was open.
+        reader = _partly_read_reader(conn)
+        conn.execute(text("INSERT INTO t VALUES (1)"))
+        conn.commit()
+        with pytest.raises(pa.ArrowInvalid, match="closed"):
+            reader.read_next_batch()
+
+        reader = _partly_read_reader(conn)
+    # Pool checkin rolls back, which must not fail or leave the reader open.
+
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM t")).scalar() == 1
+    with pytest.raises(pa.ArrowInvalid, match="closed"):
+        reader.read_next_batch()
 
 
 def test_failed_commit_does_not_leak_a_transaction_to_the_pool(

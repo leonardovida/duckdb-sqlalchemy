@@ -17,7 +17,8 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
-- None yet.
+- **`begin_nested()` fails before reaching DuckDB** - `Connection.begin_nested()` and `Session.begin_nested()` still raise `ProgrammingError` that wraps a DuckDB `ParserException`, but the dialect raises it without sending `SAVEPOINT`. The error message now names the unsupported feature instead of quoting a syntax error. On DuckDB 2.0 the outer transaction previously lost every change made before the call. No change is required. [#220](https://github.com/leonardovida/duckdb-sqlalchemy/pull/220)
+- **Partly read Arrow readers close when the connection moves on** - A reader from `result.cursor.to_arrow_reader()` or `fetch_record_batch()` is closed before the connection runs another statement, commits, rolls back or returns to the pool. Reading it afterwards raises `pyarrow.ArrowInvalid` instead of ending early without an error on DuckDB 1.x or blocking the connection on DuckDB 2.0. Read the reader to the end before running the next statement. [#220](https://github.com/leonardovida/duckdb-sqlalchemy/pull/220)
 
 ## [1.5.6.7](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.6...v1.5.6.7) (2026-10-30)
 
