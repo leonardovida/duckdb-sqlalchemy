@@ -101,10 +101,12 @@ from .capabilities import get_capabilities
 from .config import apply_config, get_core_config, get_native_config
 from .datatypes import (
     ISCHEMA_NAMES,
+    DuckDBArray,
     DuckDBInteger,
     FixedArray,
     Map,
     Struct,
+    _process_decimal_bind,
     register_extension_types,
 )
 from .datatypes import Union as UnionType
@@ -1543,16 +1545,6 @@ def _exact_decimal_operand(element: Any) -> Optional[Tuple[int, int, bool]]:
     return None
 
 
-def _process_decimal_bind(value: Any) -> Any:
-    # DuckDB's binder drops a positive exponent (``Decimal("1E+5")`` binds as
-    # ``1.00000``), so rewrite such values without an exponent first.
-    if isinstance(value, decimal.Decimal) and value.is_finite():
-        exponent = value.as_tuple().exponent
-        if isinstance(exponent, int) and exponent > 0:
-            return decimal.Decimal(format(value, "f"))
-    return value
-
-
 class DuckDBNumeric(sqltypes.Numeric):
     """Numeric for a DBAPI that binds and returns ``Decimal`` natively.
 
@@ -1628,6 +1620,8 @@ class Dialect(PGDialect_psycopg2):
             # postgres type_codes (such as 701 for float) that duckdb doesn't have
             sqltypes.Numeric: DuckDBNumeric,
             sqltypes.Float: DuckDBFloat,
+            sqltypes.Integer: DuckDBInteger,
+            sqltypes.ARRAY: DuckDBArray,
             sqltypes.Enum: DuckDBENUM,
             sqltypes.JSON: sqltypes.JSON,
             sqltypes.JSON.JSONIndexType: DuckDBJSONIndex,

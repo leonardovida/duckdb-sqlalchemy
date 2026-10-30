@@ -1,11 +1,13 @@
 import csv
 import datetime
 import math
+import sys
 import tempfile
 import uuid
 from pathlib import Path
 from typing import (
     Any,
+    Callable,
     Dict,
     Iterable,
     Mapping,
@@ -271,9 +273,47 @@ def _resolve_null_marker(
     return marker, options
 
 
-def _csv_value(value: Any, null_marker: str) -> Any:
-    if value is None:
+def _is_pandas_missing(value: Any) -> bool:
+    # Rows built from a DataFrame carry pd.NA and pd.NaT. Only check them when
+    # the application already imported pandas.
+    pd = sys.modules.get("pandas")
+    return pd is not None and (value is pd.NA or value is pd.NaT)
+
+
+def _session_time_zone(connection: Any) -> datetime.tzinfo:
+    """The zone DuckDB uses to bind aware datetimes into TIMESTAMP columns."""
+    row = _execute_sql(
+        connection,
+        "SELECT value FROM duckdb_settings() WHERE name = 'TimeZone'",
+    ).fetchone()
+    if row is not None and row[0]:
+        try:
+            from zoneinfo import ZoneInfo
+
+            return ZoneInfo(str(row[0]))
+        except Exception:
+            pass
+    # Without ICU, DuckDB has no TimeZone setting and uses UTC.
+    return datetime.timezone.utc
+
+
+def _csv_value(
+    value: Any,
+    null_marker: str,
+    time_zone: Optional[Callable[[], datetime.tzinfo]] = None,
+) -> Any:
+    if value is None or _is_pandas_missing(value):
         return null_marker
+    if (
+        time_zone is not None
+        and isinstance(value, datetime.datetime)
+        and value.utcoffset() is not None
+    ):
+        # A regular INSERT converts an aware datetime to the session zone for
+        # TIMESTAMP columns. The CSV reader drops the offset for TIMESTAMP and
+        # applies it for TIMESTAMPTZ, so write the session-zone wall time with
+        # its offset to get the same value in both.
+        return value.astimezone(time_zone()).isoformat(" ")
     if isinstance(value, _BINARY_TYPES):
         raise TypeError(
             "copy_from_rows cannot write binary values "
@@ -312,6 +352,10 @@ def _csv_writer_options(options: Mapping[str, Any]) -> Dict[str, Any]:
     writer_options["doublequote"] = escape == quote
     if escape != quote:
         writer_options["escapechar"] = escape
+        # The csv module escapes characters in unquoted fields too, but DuckDB
+        # only reads escapes inside quotes. Quote every field so they round
+        # trip. Quoted null markers still load as NULL (allow_quoted_nulls).
+        writer_options["quoting"] = csv.QUOTE_ALL
     return writer_options
 
 
@@ -381,6 +425,13 @@ def _copy_rows_as_csv_chunks(
     writer = None
     count = 0
     primary = None
+    zone: Optional[datetime.tzinfo] = None
+
+    def time_zone() -> datetime.tzinfo:
+        nonlocal zone
+        if zone is None:
+            zone = _session_time_zone(connection)
+        return zone
 
     try:
         for row in rows:
@@ -393,7 +444,9 @@ def _copy_rows_as_csv_chunks(
                 flush_chunk(current_tmp)
                 tmp, writer, count = open_writer()
 
-            writer.writerow([_csv_value(value, null_marker) for value in row])
+            writer.writerow(
+                [_csv_value(value, null_marker, time_zone) for value in row]
+            )
             count += 1
 
         if tmp is not None and count:
@@ -591,14 +644,15 @@ def insert_from_arrow(
     preparer = connection.dialect.identifier_preparer
     target = _format_table(connection, table)
     targets = ", ".join(preparer.quote_identifier(name) for name in target_columns)
-    sources = ", ".join(preparer.quote_identifier(name) for name in source_columns)
     view_name = f"__duckdb_sa_arrow_{uuid.uuid4().hex}"
     dbapi_connection = connection.connection.dbapi_connection
     dbapi_connection.register(view_name, data)
     try:
         insert = "INSERT" if on_conflict is None else f"INSERT OR {on_conflict.upper()}"
         result = connection.exec_driver_sql(
-            f"{insert} INTO {target} ({targets}) SELECT {sources} FROM {view_name}"
+            # Select by position: DuckDB renames Arrow columns whose names
+            # differ only in case, so selecting them by name can repeat one.
+            f"{insert} INTO {target} ({targets}) SELECT * FROM {view_name}"
         )
     except BaseException:
         try:
