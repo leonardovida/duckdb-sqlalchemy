@@ -21,6 +21,7 @@ Production-ready DuckDB SQLAlchemy dialect for DuckDB and MotherDuck.
 - [Alembic integration](alembic)
 - [Performance and exact values](performance)
 - [Ecosystem adoption](adoption)
+- [Breaking and behavior changes](breaking-changes)
 
 ## Examples
 

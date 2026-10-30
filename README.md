@@ -161,7 +161,7 @@ nox -s ty
 pre-commit run --all-files
 ```
 
-Run `nox -s tests` for the full compatibility matrix; this is slower than the local test suite. See the [repository guidelines](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/AGENTS.md) before contributing.
+The `ty` pre-commit hook runs through [uv](https://docs.astral.sh/uv/), so install uv first. Run `nox -s tests` for the full compatibility matrix; this is slower than the local test suite. See the [repository guidelines](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/AGENTS.md) before contributing.
 
 [Report a bug](https://github.com/leonardovida/duckdb-sqlalchemy/issues) · [Read the changelog](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/CHANGELOG.md) · [View the roadmap](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/ROADMAP.md)
 

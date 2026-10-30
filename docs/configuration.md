@@ -74,7 +74,8 @@ Values containing spaces, punctuation, or SQL fragments are rejected.
 
 ## Register filesystems
 
-You can register filesystems via `fsspec`:
+You can register filesystems via `fsspec`. Install the implementation for the
+filesystem first, for example `pip install gcsfs` for Google Cloud Storage:
 
 ```python
 from fsspec import filesystem

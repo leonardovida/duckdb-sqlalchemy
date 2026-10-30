@@ -67,20 +67,27 @@ result = pd.read_sql_query(
 For large DataFrame writes, register the DataFrame and insert from it directly:
 
 ```python
-from sqlalchemy import text
+from sqlalchemy import Column, Integer, MetaData, String, Table, text
+
+people = Table(
+    "people", MetaData(), Column("id", Integer), Column("name", String)
+)
 
 with engine.begin() as conn:
+    people.create(conn)
     conn.execute(text("register(:name, :df)"), {"name": "people_df", "df": df})
     conn.execute(text("INSERT INTO people SELECT * FROM people_df"))
 ```
 
-If you already have rows in Python (dicts or tuples), you can enable the bulk
-insert fast path via execution options:
+If you already have rows in Python (dicts or tuples), an executemany INSERT of
+10,000 rows or more uses the bulk insert fast path by default. Lower
+`duckdb_copy_threshold` to use it for smaller batches, or set it to 0 to
+disable it:
 
 ```python
 rows = df.to_dict(orient="records")
 with engine.begin() as conn:
-    conn = conn.execution_options(duckdb_copy_threshold=10000)
+    conn = conn.execution_options(duckdb_copy_threshold=1000)
     conn.execute(people.insert(), rows)
 ```
 

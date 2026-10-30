@@ -14,6 +14,9 @@ This folder contains focused, task-oriented guides that keep the main README sho
 - [pandas-jupyter.md](pandas-jupyter.md) - DataFrame registration and notebook usage
 - [types-and-caveats.md](types-and-caveats.md) - Supported types, parameter binding, and gotchas
 - [alembic.md](alembic.md) - Alembic integration notes
+- [performance.md](performance.md) - Exact values, bulk loading and profiling
+- [adoption.md](adoption.md) - Ecosystem adoption and validation
+- [breaking-changes.md](breaking-changes.md) - Breaking and behavior changes by version
 
 ## Project references
 

@@ -5,7 +5,7 @@ from typing import Generator
 import nox
 from packaging.version import Version
 
-nox.options.default_venv_backend = "uv"
+nox.options.default_venv_backend = "uv|virtualenv"
 nox.options.error_on_external_run = True
 nox.options.sessions = ["ty"]
 
