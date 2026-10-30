@@ -204,7 +204,8 @@ def scratch_database(prefix: str, keep: bool = False) -> Iterator[str]:
 
 
 def main() -> None:
-    if not os.getenv("MOTHERDUCK_TOKEN"):
+    # The dialect reads either spelling of the token variable.
+    if not (os.getenv("MOTHERDUCK_TOKEN") or os.getenv("motherduck_token")):
         raise SystemExit("Set MOTHERDUCK_TOKEN before running this example")
     keep = "--keep" in sys.argv
 

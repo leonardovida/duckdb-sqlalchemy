@@ -50,6 +50,16 @@ def read_token() -> Optional[str]:
     return os.getenv("MOTHERDUCK_READ_SCALING_TOKEN") or None
 
 
+def reader_token() -> str:
+    """The read scaling token, or the read-write token when none is set."""
+    token = (
+        read_token() or os.getenv("MOTHERDUCK_TOKEN") or os.getenv("motherduck_token")
+    )
+    if not token:
+        raise SystemExit("Set MOTHERDUCK_TOKEN before running this example")
+    return token
+
+
 @lru_cache(maxsize=1024)
 def engine_for_user(database: str, user_id: str) -> Engine:
     """Return the cached engine that pins one end user to one replica."""
@@ -62,7 +72,7 @@ def engine_for_user(database: str, user_id: str) -> Engine:
         session_name=session_name,
         # Passing the token here keeps it out of the engine URL and overrides
         # MOTHERDUCK_TOKEN for this engine only.
-        motherduck_token=read_token() or os.environ["MOTHERDUCK_TOKEN"],
+        motherduck_token=reader_token(),
         pool_size=2,
         max_overflow=2,
         pool_pre_ping=True,
@@ -79,11 +89,7 @@ def shared_reader_pool(database: str) -> Engine:
     # READER_POOL_SIZE connections holds one connection per replica.
     return create_engine_from_paths(
         paths,
-        connect_args={
-            "config": {
-                "motherduck_token": read_token() or os.environ["MOTHERDUCK_TOKEN"]
-            }
-        },
+        connect_args={"config": {"motherduck_token": reader_token()}},
         pool_size=READER_POOL_SIZE,
         max_overflow=0,
         pool_pre_ping=True,
@@ -118,7 +124,8 @@ def scratch_database(prefix: str, keep: bool = False) -> Iterator[str]:
 
 
 def main() -> None:
-    if not os.getenv("MOTHERDUCK_TOKEN"):
+    # The dialect reads either spelling of the token variable.
+    if not (os.getenv("MOTHERDUCK_TOKEN") or os.getenv("motherduck_token")):
         raise SystemExit("Set MOTHERDUCK_TOKEN before running this example")
     if read_token() is None:
         print(
