@@ -186,8 +186,9 @@ current database and schema, with their labels. Pass `schema="name"` or
 
 DuckDB does not support these, so the statements SQLAlchemy emits for them fail:
 
-- savepoints: `Connection.begin_nested()` and `Session.begin_nested()` emit
-  `SAVEPOINT`, which DuckDB rejects with a parser error
+- savepoints: `Connection.begin_nested()` and `Session.begin_nested()` raise
+  `ProgrammingError`. The dialect raises it without sending `SAVEPOINT`, so the
+  outer transaction keeps its changes
 - row locks: `select(...).with_for_update()` fails with "SELECT locking clause
   is not supported"
 - adding or dropping UNIQUE, FOREIGN KEY, or CHECK constraints on an existing

@@ -60,6 +60,7 @@ from sqlalchemy.exc import (
     CompileError,
     InvalidRequestError,
     NoSuchTableError,
+    ProgrammingError,
 )
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import bindparam
@@ -507,6 +508,10 @@ class ConnectionWrapper:
         self.__c = c
         self.notices = list()
         self._pending_cursor: Optional["weakref.ReferenceType[CursorWrapper]"] = None
+        # Arrow reader handed out by a raw to_arrow_reader() call. It can
+        # outlive its cursor, and DuckDB 2.0 refuses every statement, COMMIT
+        # and ROLLBACK while it holds a partly read result.
+        self._raw_reader: Optional["weakref.ReferenceType[Any]"] = None
         # Statements run since begin(); None outside a transaction begun here.
         self._transaction_statements: Optional[int] = None
 
@@ -515,6 +520,21 @@ class ConnectionWrapper:
 
     def _set_pending_cursor(self, cursor: Optional["CursorWrapper"]) -> None:
         self._pending_cursor = weakref.ref(cursor) if cursor is not None else None
+
+    def _set_raw_reader(self, reader: Any) -> None:
+        self._raw_reader = weakref.ref(reader)
+
+    def _close_raw_reader(self) -> None:
+        """Close a raw Arrow reader before another statement replaces its result.
+
+        DuckDB 1.x silently discards the result, and DuckDB 2.0 raises until
+        the reader is drained or closed. Closing it makes both behave alike,
+        and later reads raise instead of returning rows of another query.
+        """
+        reader = self._raw_reader() if self._raw_reader is not None else None
+        self._raw_reader = None
+        if reader is not None:
+            reader.close()
 
     def _buffer_pending_result(
         self, requester: Optional["CursorWrapper"] = None
@@ -534,6 +554,9 @@ class ConnectionWrapper:
         if pending is not None and pending is not requester:
             pending._buffer_result()
         self._pending_cursor = None
+        # After buffering, which refuses to continue while a duckdb_arrow
+        # batch reader still owns the result.
+        self._close_raw_reader()
 
     def begin(self) -> None:
         if not self.autocommit:
@@ -570,6 +593,7 @@ class ConnectionWrapper:
         finally:
             self._pending_cursor = None
             self._transaction_statements = None
+            self._close_raw_reader()
             self.__c.rollback()
 
     def _count_statement(self) -> None:
@@ -600,6 +624,7 @@ class ConnectionWrapper:
                 pending.close()
         finally:
             self._pending_cursor = None
+            self._close_raw_reader()
             self.__c.close()
             self.closed = True
 
@@ -914,6 +939,7 @@ class CursorWrapper:
             self._rows_fetched = True
             if hasattr(value, "read_next_batch"):
                 self._raw_reader_handed_out = True
+                self.__connection_wrapper._set_raw_reader(value)
                 return value
             if name != "fetch_df_chunk":
                 self._store_buffered_result([], self.description, self.rowcount)
@@ -1858,6 +1884,19 @@ class Dialect(PGDialect_psycopg2):
 
     def do_begin(self, dbapi_connection: Any) -> None:
         dbapi_connection.begin()
+
+    def do_savepoint(self, connection: Any, name: str) -> None:
+        # DuckDB has no SAVEPOINT, and since DuckDB 2.0 a failed statement
+        # aborts the open transaction. Raise the same ProgrammingError without
+        # sending the statement, so the outer transaction stays usable.
+        raise ProgrammingError(
+            f"SAVEPOINT {name}",
+            None,
+            DBAPI.ParserException(
+                "Parser Error: DuckDB does not support SAVEPOINT. "
+                "Connection.begin_nested() and Session.begin_nested() are unavailable."
+            ),
+        )
 
     def get_view_names(
         self,

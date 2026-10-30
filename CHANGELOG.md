@@ -8,7 +8,14 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
-- None yet.
+### Bug Fixes
+
+- `Connection.begin_nested()` and `Session.begin_nested()` raise `ProgrammingError` without sending `SAVEPOINT` to DuckDB, so the outer transaction keeps its changes. DuckDB 2.0 aborts the whole transaction when a statement fails, so earlier releases lost every change made before the `begin_nested()` call on DuckDB 2.0. [#220](https://github.com/leonardovida/duckdb-sqlalchemy/pull/220)
+- A partly read Arrow reader from `result.cursor.to_arrow_reader()` is closed when the connection runs its next statement, commits, rolls back or returns to the pool. On DuckDB 2.0 such a reader previously made every later statement, including the pool's reset rollback, fail with "connection has an open result". [#220](https://github.com/leonardovida/duckdb-sqlalchemy/pull/220)
+
+### Compatibility
+
+- Reading such a reader after the connection has run another statement raises `pyarrow.ArrowInvalid` on every DuckDB version. Earlier releases ended such a reader early without an error on DuckDB 1.x. Read the reader to the end, or call `read_all()`, before running the next statement. [#220](https://github.com/leonardovida/duckdb-sqlalchemy/pull/220)
 
 ## [1.5.6.7](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.6...v1.5.6.7) (2026-10-30)
 
