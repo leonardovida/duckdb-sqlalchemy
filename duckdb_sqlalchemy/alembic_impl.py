@@ -190,6 +190,11 @@ class DuckDBImpl(DefaultImpl):
             and metadata_column.server_default is None
         ):
             return False
+        metadata_arg = getattr(metadata_column.server_default, "arg", None)
+        if isinstance(metadata_arg, str):
+            # SQLAlchemy emits a plain string default as a quoted literal, and
+            # DuckDB reflects it that way. Alembic passes the bare string.
+            rendered_metadata_default = "'" + metadata_arg.replace("'", "''") + "'"
         if rendered_inspector_default == rendered_metadata_default:
             return False
         if None in (rendered_inspector_default, rendered_metadata_default):
@@ -224,6 +229,10 @@ class DuckDBImpl(DefaultImpl):
             if not inspector_type.name:
                 # DuckDB does not report which named type a column uses.
                 return list(inspector_type.enums) != list(metadata_type.enums)
+        elif _is_varchar(inspector_type) and _is_varchar(metadata_type):
+            # TEXT, CHAR(n), NCHAR, VARCHAR(n) and STRING are all VARCHAR in
+            # DuckDB, which keeps no length, so they reflect as String().
+            return False
         elif isinstance(inspector_type, sqltypes.Float) and isinstance(
             metadata_type, sqltypes.Float
         ):
@@ -329,6 +338,12 @@ def _normalize_default(
     ):
         return value[1:-1]
     return _normalize_sql_expression(value)
+
+
+def _is_varchar(type_obj: Any) -> bool:
+    return isinstance(type_obj, sqltypes.String) and not isinstance(
+        type_obj, sqltypes.Enum
+    )
 
 
 def _is_nested(type_obj: Any) -> bool:
