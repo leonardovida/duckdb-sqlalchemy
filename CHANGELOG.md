@@ -8,11 +8,24 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+- None yet.
+
+## [1.5.6.7](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.6...v1.5.6.7) (2026-10-30)
+
 ### Highlights
 
 - Reflected indexes, foreign keys, generated columns and mixed-case schemas recreate correctly, and Alembic autogenerate stops reporting spurious string default and VARCHAR changes. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
 - Bulk inserts, COPY helpers and typed binds keep values intact in more cases, including datetimes mixed with dates, positive-exponent Decimals and NumPy arrays. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
 - Connection errors no longer echo MotherDuck tokens, and several transaction and result lifecycle errors no longer leave pooled connections in a broken state. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+
+### Upgrading from 1.5.6.6
+
+1.5.6.7 is a maintenance release on the 1.5.6 line, so constraints such as `duckdb-sqlalchemy~=1.5.6.6` select it. It contains behavior changes that some applications notice.
+
+1. Upgrade with `pip install -U duckdb-sqlalchemy` or update the lock file.
+2. Replace DuckDB URLs that contain a host, port, user name or password with `duckdb:///<database>`, and add the `md:` prefix to databases passed to `MotherDuckURL` or `create_motherduck_engine`.
+3. Run Alembic autogenerate and review the generated migration before applying it. Reflected index and foreign key names now follow the catalog spelling.
+4. Check the Compatibility items below, and see [breaking and behavior changes](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/breaking-changes.md) for the full list.
 
 ### Bug Fixes
 
@@ -52,6 +65,8 @@ preserved from the upstream project for historical context.
 - The pandas bulk-write examples run as written, and the guides describe the default `duckdb_copy_threshold` of 10,000 rows. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
 - The documentation index links the performance, adoption and breaking-changes pages, and notes that fsspec filesystems need their implementation package. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
 - The package declares the `Typing :: Typed` classifier, and the DuckDB and SQLAlchemy prerelease CI jobs no longer mark runs on `main` as failed. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.6...v1.5.6.7
 
 ## [1.5.6.6](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.5...v1.5.6.6) (2026-10-28)
 
