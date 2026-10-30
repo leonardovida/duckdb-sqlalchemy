@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 - `duckdb_sqlalchemy/` contains the dialect implementation and helpers (for example `datatypes.py`, `url.py`, `olap.py`, `config.py`).
 - `duckdb_sqlalchemy/tests/` holds pytest suites. End-to-end tests against real databases live in `duckdb_sqlalchemy/tests/e2e/`.
-- `examples/` provides runnable examples such as `examples/sqlalchemy_example.py`.
+- `examples/` provides runnable examples such as `examples/local_quickstart.py`.
 - Tooling and metadata are in `pyproject.toml`, `noxfile.py`, and `.pre-commit-config.yaml`.
 
 ## Build, Test, and Development Commands
