@@ -6,6 +6,4 @@ plugins:
   - jekyll-sitemap
 exclude:
   - README.md
-  - exec-plans/
-  - seo-checklist.md
   - releasing.md

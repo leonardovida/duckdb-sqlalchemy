@@ -414,39 +414,75 @@ def _load_example(name: str) -> ModuleType:
 
 
 @requires_examples
-def test_example_multi_instance_pool_builds_offline(
+def test_example_per_user_reader_pins_a_hashed_session_with_the_read_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("MOTHERDUCK_TOKEN", "fake")
-    module = _load_example("motherduck_multi_instance_pool")
+    monkeypatch.setenv("MOTHERDUCK_TOKEN", "read-write")
+    monkeypatch.setenv("MOTHERDUCK_READ_SCALING_TOKEN", "read-scaling")
+    calls = []
 
-    engine = module.build_engine()
+    def fake_connect(self: Any, *cargs: Any, **cparams: Any) -> object:
+        calls.append(cparams)
+        return object()
 
+    monkeypatch.setattr(duckdb_sqlalchemy.Dialect, "connect", fake_connect)
+    module = _load_example("motherduck_read_scaling")
+
+    engine = module.engine_for_user("shop", "customer-1")
+
+    assert module.engine_for_user("shop", "customer-1") is engine
     assert isinstance(engine.pool, pool.QueuePool)
-    assert engine.pool.size() == 5
-    assert engine.url.database == "md:my_db"
-    assert dict(engine.url.query) == {"attach_mode": "single", "user": "1"}
+    assert engine.url.database == "md:shop"
+    session_name = engine.url.query["session_name"]
+    assert "customer-1" not in session_name
+    assert module.engine_for_user("shop", "customer-2").url.query["session_name"] != (
+        session_name
+    )
+    cast(Any, engine.pool)._creator()
+    (kwargs,) = calls
+    assert _query(kwargs["database"]) == {
+        "attach_mode": ["single"],
+        "session_name": [session_name],
+    }
+    # The token stays out of the URL, and the read scaling token wins.
+    assert "read-scaling" not in str(engine.url)
+    assert kwargs["config"]["motherduck_token"] == "read-scaling"
+    module.engine_for_user.cache_clear()
 
 
 @requires_examples
-def test_example_read_scaling_per_user_builds_offline(
+def test_example_shared_reader_pool_spreads_connections_across_sessions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("MOTHERDUCK_TOKEN", "fake")
-    module = _load_example("motherduck_read_scaling_per_user")
+    monkeypatch.setenv("MOTHERDUCK_TOKEN", "read-write")
+    monkeypatch.delenv("MOTHERDUCK_READ_SCALING_TOKEN", raising=False)
+    calls = []
 
-    engine = module.get_engine_for_user("user-123")
+    def fake_connect(self: Any, *cargs: Any, **cparams: Any) -> object:
+        calls.append(cparams)
+        return object()
+
+    monkeypatch.setattr(duckdb_sqlalchemy.Dialect, "connect", fake_connect)
+    module = _load_example("motherduck_read_scaling")
+
+    engine = module.shared_reader_pool("shop")
 
     assert isinstance(engine.pool, pool.QueuePool)
-    assert engine.pool.size() == 5
-    assert engine.url.database == "md:my_db"
-    _, kwargs = engine.dialect.create_connect_args(engine.url)
-    assert _query(kwargs["database"]) == {
-        "attach_mode": ["single"],
-        "access_mode": ["read_only"],
-        "session_name": [engine.url.query["session_name"]],
-    }
-    assert kwargs["url_config"] == {}
+    assert engine.pool.size() == module.READER_POOL_SIZE
+    creator = cast(Any, engine.pool)._creator
+    for _ in range(module.READER_POOL_SIZE + 1):
+        creator()
+    sessions = [_query(c["database"])["session_name"][0] for c in calls]
+    assert sessions == [
+        "reader-0",
+        "reader-1",
+        "reader-2",
+        "reader-3",
+        "reader-0",
+    ]
+    # Without a read scaling token the readers fall back to MOTHERDUCK_TOKEN.
+    assert {c["config"]["motherduck_token"] for c in calls} == {"read-write"}
+    assert "read-write" not in str(engine.url)
 
 
 # 9. Connection setup failures close the DuckDB connection.

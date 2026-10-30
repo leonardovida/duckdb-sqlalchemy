@@ -101,7 +101,7 @@ with engine.connect() as conn:
 
 To connect to a specific existing database, use `duckdb:///md:my_db`. The dialect reads `MOTHERDUCK_TOKEN` or `motherduck_token` from the environment automatically.
 
-See the [MotherDuck connection guide](https://leonardovida.github.io/duckdb-sqlalchemy/motherduck.html) for authentication, attach modes, pooling, read scaling, and opt-in transient retries.
+See the [MotherDuck connection guide](https://leonardovida.github.io/duckdb-sqlalchemy/motherduck.html) for authentication, attach modes, reader pools on read scaling replicas, several writer processes on one Duckling, and opt-in transient retries. The [Dives guide](https://leonardovida.github.io/duckdb-sqlalchemy/dives.html) shows how to deploy MotherDuck Dives from Python.
 
 ## Documentation: find your next step
 
@@ -110,6 +110,7 @@ See the [MotherDuck connection guide](https://leonardovida.github.io/duckdb-sqla
 | Install the dialect and run my first query | [Getting started](https://leonardovida.github.io/duckdb-sqlalchemy/getting-started.html) |
 | Connect to a DuckDB file or MotherDuck database | [Connection URLs](https://leonardovida.github.io/duckdb-sqlalchemy/connection-urls.html) |
 | Set up MotherDuck authentication and read scaling | [MotherDuck](https://leonardovida.github.io/duckdb-sqlalchemy/motherduck.html) |
+| Build and deploy MotherDuck Dives | [MotherDuck Dives](https://leonardovida.github.io/duckdb-sqlalchemy/dives.html) |
 | Configure pooling, extensions, or filesystems | [Configuration](https://leonardovida.github.io/duckdb-sqlalchemy/configuration.html) |
 | Query Parquet/CSV, load rows, or attach databases | [Analytical queries and COPY helpers](https://leonardovida.github.io/duckdb-sqlalchemy/olap.html) |
 | Use pandas DataFrames or Jupyter notebooks | [Pandas and Jupyter](https://leonardovida.github.io/duckdb-sqlalchemy/pandas-jupyter.html) |
@@ -150,7 +151,7 @@ When migrating, replace the installed `duckdb-engine` distribution with `duckdb-
 
 ## Examples and contributing
 
-Explore [example scripts](https://github.com/leonardovida/duckdb-sqlalchemy/tree/main/examples) for local SQLAlchemy usage, MotherDuck read scaling, connection pools, Arrow reads, and attach modes.
+Explore [example scripts](https://github.com/leonardovida/duckdb-sqlalchemy/tree/main/examples) for local SQLAlchemy usage and Parquet snapshots, and for MotherDuck reader pools, concurrent writers, and Dives.
 
 To work on the dialect, clone the repository and install the development dependencies:
 
@@ -163,7 +164,7 @@ pre-commit run --all-files
 
 The `ty` pre-commit hook runs through [uv](https://docs.astral.sh/uv/), so install uv first. Run `nox -s tests` for the full compatibility matrix; this is slower than the local test suite. See the [repository guidelines](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/AGENTS.md) before contributing.
 
-[Report a bug](https://github.com/leonardovida/duckdb-sqlalchemy/issues) · [Read the changelog](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/CHANGELOG.md) · [View the roadmap](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/ROADMAP.md)
+[Report a bug](https://github.com/leonardovida/duckdb-sqlalchemy/issues) · [Read the changelog](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/CHANGELOG.md)
 
 ## License
 

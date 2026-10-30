@@ -142,22 +142,6 @@ see [analytical queries and COPY helpers](olap). CSV serialization honors
 single-character delimiter (`delim`, `delimiter` or `sep`), quote and escape
 options. Prefer typed Arrow/Parquet for binary, nested and exact decimal data.
 
-The [reviewed-contracts comparison](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/benchmarks/results/reviewed-contracts-2026-10-02.json)
-uses Python 3.14.0, DuckDB 1.5.5, SQLAlchemy 2.0.52 and Arrow 25.0.1 on the same
-host, with two warmups and five repeated samples per implementation:
-
-| Workload | Released baseline median (range) | Fixed median (range) |
-| --- | ---: | ---: |
-| Convert 50,000 mapping rows × 8 integer columns | 82.995 ms (78.268–85.645) | 38.639 ms (32.951–40.667) |
-| Arrow RETURNING, 100,000 rows × 2 columns | 67.327 ms (65.156–73.569) | 6.507 ms (6.225–6.685) |
-
-These are 53.4% and 90.3% elapsed-time reductions for the measured workloads.
-RETURNING Python peak allocation fell from 17,278,562 to 4,876 bytes.
-Conversion excludes input-row construction. Count, boundary values and full
-Arrow-table equality were verified. `tracemalloc` excludes native DuckDB/Arrow allocations, so this is not
-a process-memory or general throughput claim. Raw samples and variation are in
-the linked JSON.
-
 ## Profiling and query tags
 
 SQLAlchemy's `echo=True` logs statements and parameters; use `hide_parameters=True`

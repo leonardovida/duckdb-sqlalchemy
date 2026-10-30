@@ -17,6 +17,12 @@ preserved from the upstream project for historical context.
 
 - Reading such a reader after the connection has run another statement raises `pyarrow.ArrowInvalid` on every DuckDB version. Earlier releases ended such a reader early without an error on DuckDB 1.x. Read the reader to the end, or call `read_all()`, before running the next statement. [#220](https://github.com/leonardovida/duckdb-sqlalchemy/pull/220)
 
+### Maintenance
+
+- The MotherDuck examples cover current workloads. They show reader pools on read scaling replicas, several processes writing one database with retries for conflicting updates, and deploying Dives from Python with versions and a release status. Each example creates and drops its own database. The attach mode, Arrow read, multi-instance pool, queue pool and per-user read scaling scripts are replaced by these examples, and `sqlalchemy_example.py` is now `local_quickstart.py`. [#221](https://github.com/leonardovida/duckdb-sqlalchemy/pull/221)
+- A new MotherDuck Dives guide covers the component contract, deployment from Python, versions, embedding and the helper reference. The MotherDuck guide adds a connection pattern chooser and sections on reader pools, fresh reads after a write, multiple writer processes and one Duckling per tenant. It also states that only a read scaling token makes reader connections read-only, since `access_mode=read_only` does not block writes made with a read-write token. [#221](https://github.com/leonardovida/duckdb-sqlalchemy/pull/221)
+- Internal planning documents, the roadmap, the SEO checklist and a benchmark snapshot are no longer part of the repository. [#221](https://github.com/leonardovida/duckdb-sqlalchemy/pull/221)
+
 ## [1.5.6.7](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.6...v1.5.6.7) (2026-10-30)
 
 ### Highlights

@@ -32,3 +32,8 @@ jobs:
       - name: Test real service connection
         if: env.MOTHERDUCK_TOKEN != ''
         run: pytest -q duckdb_sqlalchemy/tests/test_integration.py -k motherduck --remote-data -rs
+      - name: Run the MotherDuck examples
+        if: env.MOTHERDUCK_TOKEN != ''
+        env:
+          MOTHERDUCK_READ_SCALING_TOKEN: ${{ secrets.MOTHERDUCK_READ_SCALING_TOKEN }}
+        run: pytest -q duckdb_sqlalchemy/tests/e2e/test_examples.py -k motherduck_example_runs --remote-data -rs

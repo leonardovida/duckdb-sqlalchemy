@@ -14,6 +14,24 @@ from sqlalchemy import create_engine
 engine = create_engine("duckdb:///md:my_db")
 ```
 
+## Choose a connection pattern
+
+Each MotherDuck account runs its queries on its own Duckling, and every
+connection made with that account's read-write token shares it. Pick the
+pattern by who reads and who writes:
+
+| Workload | Token | Engine | Example |
+| --- | --- | --- | --- |
+| Scripts, notebooks, ELT jobs | Read-write | `create_motherduck_engine(database="md:<db>", attach_mode="single")` | [`motherduck_quickstart.py`](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/examples/motherduck_quickstart.py) |
+| Several processes writing the same database | Read-write | One engine per process, retry the transaction on write conflicts | [`motherduck_concurrent_writers.py`](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/examples/motherduck_concurrent_writers.py) |
+| Dashboards with many concurrent users | Read scaling | One engine per user with a stable `session_name` | [`motherduck_read_scaling.py`](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/examples/motherduck_read_scaling.py) |
+| A backend serving anonymous reads | Read scaling | One engine whose pool rotates across session names | [`motherduck_read_scaling.py`](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/examples/motherduck_read_scaling.py) |
+| Customer-facing analytics with isolated tenants | One service account per tenant | One cached engine per tenant token | [Tenants](#one-duckling-per-tenant) |
+| Data apps in MotherDuck | Read-write | Deploy Dives with the `md_*_dive` helpers | [`motherduck_dive.py`](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/examples/motherduck_dive.py) |
+
+Every example creates its own uniquely named database and drops it when it
+finishes, so it can run against a real account.
+
 ## Quick start with config
 
 DuckDB settings (threads, memory limits, etc.) can be passed via `connect_args`:
@@ -71,7 +89,9 @@ Parameters that are treated as part of the database string:
 - `attach_mode` (`workspace` or `single`. `single` attaches only the named
   database and starts faster, but needs a database name: `md:?attach_mode=single`
   fails to connect)
-- `access_mode` (`read_only` for read-scaling tokens)
+- `access_mode` (`read_only` is accepted, but a read-write token can still
+  write through such a connection. Use a read scaling token to make readers
+  read-only)
 - `dbinstance_inactivity_ttl` (preferred; `motherduck_dbinstance_inactivity_ttl`
   remains supported but is deprecated)
 - `connection_timeout` (bounds how long opening the MotherDuck connection may
@@ -163,7 +183,158 @@ engine = create_motherduck_engine(
 ## Recommended defaults for apps/BI
 
 - Use `attach_mode=single` unless you need workspace-wide attach behavior.
-- For read scaling tokens, add `access_mode=read_only` and a stable `session_name`.
+- Serve dashboards and other read-heavy traffic with a read scaling token and a
+  stable `session_name` per end user.
+- Keep writers on a read-write token, and give heavy pipelines their own
+  database or service account so they do not compete for one Duckling.
+
+## Reader pools with read scaling
+
+A [read scaling token](https://motherduck.com/docs/key-tasks/authenticating-and-connecting-to-motherduck/read-scaling/)
+connects to a pool of read-only Duckling replicas: 4 by default, configurable
+up to 16. MotherDuck sends every connection with the same `session_name` to the
+same replica, so the session name decides how readers spread across the pool.
+
+Give each end user a stable session name to keep their queries on one replica
+with a warm cache. `stable_session_name` hashes the user id so it does not
+appear in MotherDuck logs. Cache one engine per user:
+
+```python
+import os
+from functools import lru_cache
+
+from duckdb_sqlalchemy import create_motherduck_engine, stable_session_name
+
+
+@lru_cache(maxsize=1024)
+def engine_for_user(user_id: str):
+    return create_motherduck_engine(
+        database="md:analytics",
+        attach_mode="single",
+        session_name=stable_session_name(user_id, salt=os.environ["SESSION_SALT"]),
+        motherduck_token=os.environ["MOTHERDUCK_READ_SCALING_TOKEN"],
+        pool_size=2,
+        max_overflow=2,
+        pool_pre_ping=True,
+    )
+```
+
+A token passed to `create_motherduck_engine` goes into the DuckDB config
+instead of the engine URL, and overrides `MOTHERDUCK_TOKEN` for that engine
+only, so a process can hold a writer engine and reader engines side by side.
+
+When requests are not tied to a user, one engine can spread its pooled
+connections across the replicas instead. `create_engine_from_paths` opens each
+new connection with the next path, so a pool as large as the replica pool
+holds one connection per replica:
+
+```python
+from duckdb_sqlalchemy import create_engine_from_paths
+
+readers = create_engine_from_paths(
+    [f"md:analytics?attach_mode=single&session_name=reader-{i}" for i in range(4)],
+    connect_args={"config": {"motherduck_token": os.environ["MOTHERDUCK_READ_SCALING_TOKEN"]}},
+    pool_size=4,
+    max_overflow=0,
+    pool_pre_ping=True,
+)
+```
+
+### Read your own writes
+
+Replicas pick up new data about once a minute. When a reader has to see a
+write right away, publish a snapshot from the writer after the write commits,
+then refresh the database on the reader:
+
+```python
+from sqlalchemy import text
+
+with writer.begin() as conn:
+    conn.execute(text("INSERT INTO orders SELECT * FROM staging_orders"))
+
+with writer.connect() as conn:
+    conn.execute(text("CREATE SNAPSHOT OF analytics"))
+
+with readers.connect() as conn:
+    conn.execute(text("REFRESH DATABASE analytics"))
+```
+
+Run `CREATE SNAPSHOT` outside the write transaction: inside it, the
+uncommitted changes of that transaction are discarded. Creating a snapshot
+interrupts running queries on the database, and `REFRESH DATABASE` only works
+on read scaling connections. To move a user to another replica, change their
+`session_name` or dispose of their engine.
+
+## Multiple writer processes
+
+Processes that connect with the same read-write token share one Duckling, so
+workers, orchestrator tasks and web servers can write to the same database at
+the same time. DuckDB checks for conflicts when a transaction commits:
+
+- Inserts from different processes do not conflict, and run side by side.
+- When two transactions update or delete the same row, the first commit wins.
+  The others raise `sqlalchemy.exc.OperationalError` wrapping a DuckDB
+  `TransactionException` whose message contains "Conflict". The losing
+  transaction is rolled back, and it can be retried as a whole.
+
+```python
+import random
+import time
+
+import duckdb
+from sqlalchemy.exc import OperationalError
+
+
+def run_with_conflict_retry(engine, work, attempts=10):
+    for attempt in range(1, attempts + 1):
+        try:
+            with engine.begin() as conn:
+                return work(conn)
+        except OperationalError as exc:
+            conflict = isinstance(exc.orig, duckdb.TransactionException) and (
+                "conflict" in str(exc.orig).lower()
+            )
+            if not conflict or attempt == attempts:
+                raise
+            time.sleep(random.uniform(0.05, 0.2) * attempt)
+```
+
+Create the engine inside each process, and start processes with `spawn` or
+`forkserver` (see [Multiprocessing](#multiprocessing-fork)). Concurrent DDL on
+the same objects also conflicts, so create tables before starting the writers.
+All writers share the Duckling's memory and CPU: give a heavy pipeline its own
+database, or its own service account and therefore its own Duckling, rather
+than adding more writer processes. The opt-in transient retry below does not
+retry write conflicts, because only the application knows whether the
+transaction can run again.
+
+## One Duckling per tenant
+
+For customer-facing analytics, MotherDuck recommends
+[one service account per tenant](https://motherduck.com/docs/key-tasks/customer-facing-analytics/).
+Each service account has its own Duckling, sized for that tenant, and its own
+tokens. Keep one engine per tenant and choose it per request:
+
+```python
+@lru_cache(maxsize=256)
+def engine_for_tenant(tenant: str):
+    return create_motherduck_engine(
+        database=f"md:{tenant}_analytics",
+        attach_mode="single",
+        motherduck_token=load_read_scaling_token(tenant),
+        performance=True,
+    )
+```
+
+`load_read_scaling_token` stands for your own secret store. Service accounts
+and their tokens are created with the
+[MotherDuck REST API](https://motherduck.com/docs/sql-reference/rest-api/users-create-service-account/).
+
+## Dives
+
+Dives are data apps stored in MotherDuck. Build the tables they read with
+SQLAlchemy, and create, version and release the Dive itself with the
+`md_*_dive` helpers. See [MotherDuck Dives](dives).
 
 ## Helpers
 
@@ -207,37 +378,6 @@ append_query_to_database("md:analytics", {"attach_mode": "single"})
 
 validate_motherduck_database_name("md:analytics")
 ```
-
-### Explicit read-scaling engine
-
-```python
-from duckdb_sqlalchemy import create_motherduck_engine, stable_session_name
-
-engine = create_motherduck_engine(
-    database="md:analytics",
-    attach_mode="single",
-    access_mode="read_only",
-    session_name=stable_session_name("user-123", salt="org-1"),
-    performance=True,
-)
-```
-
-### Read scaling session names
-
-Use a stable hash to keep per-user affinity:
-
-```python
-from duckdb_sqlalchemy import stable_session_name
-
-session_name = stable_session_name("user-123", salt="org-1")
-```
-
-### Read scaling consistency notes
-
-Read scaling routes queries to read replicas. If you need the freshest data,
-use a non-read-scaling token or route those queries to a separate writer
-engine. For per-user affinity, keep a stable `session_name`; to refresh
-routing, rotate the `session_name` or recycle the connection/pool.
 
 ### Performance-first engine helper
 
@@ -292,7 +432,12 @@ have side effects: enable retries only for workloads you know are idempotent.
 
 ### Multiple client-side instances
 
-To force distinct client instances, rotate across multiple database paths:
+DuckDB caches one client instance per database string, and every connection
+from that instance shares its local state. To give pooled connections separate
+client instances, rotate across database strings that differ only in a
+parameter such as `user`. They still run on the same Duckling. To spread
+connections across read scaling replicas, vary `session_name` instead (see
+[reader pools](#reader-pools-with-read-scaling)).
 
 ```python
 from duckdb_sqlalchemy import create_engine_from_paths

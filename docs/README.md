@@ -9,6 +9,7 @@ This folder contains focused, task-oriented guides that keep the main README sho
 - [migration-from-duckdb-engine.md](migration-from-duckdb-engine.md) - Migration guide from older dialects
 - [connection-urls.md](connection-urls.md) - URL formats, helpers, and manual escaping
 - [motherduck.md](motherduck.md) - Connection patterns and MotherDuck-specific options
+- [dives.md](dives.md) - Building and deploying MotherDuck Dives from Python
 - [configuration.md](configuration.md) - `connect_args`, extension preloads, and filesystem registration
 - [olap.md](olap.md) - Table functions (`read_parquet`, `read_csv_auto`) and ATTACH examples
 - [pandas-jupyter.md](pandas-jupyter.md) - DataFrame registration and notebook usage
@@ -21,10 +22,13 @@ This folder contains focused, task-oriented guides that keep the main README sho
 ## Project references
 
 - [CHANGELOG.md](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/CHANGELOG.md) - Release notes
-- [ROADMAP.md](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/ROADMAP.md) - Planned dialect work
 
 ## Examples
 
-The `examples/` directory contains runnable scripts. If you want a full
-end-to-end walkthrough, start with
-[examples/sqlalchemy_example.py](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/examples/sqlalchemy_example.py).
+The `examples/` directory contains runnable scripts, listed in
+[examples/README.md](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/examples/README.md).
+Start with
+[examples/local_quickstart.py](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/examples/local_quickstart.py)
+for DuckDB or
+[examples/motherduck_quickstart.py](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/examples/motherduck_quickstart.py)
+for MotherDuck.
