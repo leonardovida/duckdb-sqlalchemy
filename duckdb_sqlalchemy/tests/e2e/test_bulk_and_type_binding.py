@@ -208,3 +208,34 @@ def test_map_with_list_keys_round_trips_its_fetched_shape(
 
     assert fetched == {"key": [[1, 2], [3]], "value": ["a", "b"]}
     assert stored == [fetched, fetched]
+
+
+def test_copy_from_rows_stores_ambiguous_wall_times_like_insert(
+    db_path: Path, make_engine: EngineFactory
+) -> None:
+    # 2024-11-03 01:30 happens twice in New York. Both instants must keep
+    # the wall time in TIMESTAMP and the instant in TIMESTAMPTZ.
+    utc = datetime.timezone.utc
+    values = [
+        datetime.datetime(2024, 11, 3, 5, 30, tzinfo=utc),
+        datetime.datetime(2024, 11, 3, 6, 30, tzinfo=utc),
+    ]
+    engine = make_engine(db_path)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("SET TimeZone = 'America/New_York'")
+        conn.exec_driver_sql("CREATE TABLE t (id INTEGER, a TIMESTAMP, b TIMESTAMPTZ)")
+        for index, value in enumerate(values):
+            conn.exec_driver_sql("INSERT INTO t VALUES ($1, $2, $2)", (index, value))
+        copy_from_rows(
+            conn,
+            "t",
+            [(10 + index, value, value) for index, value in enumerate(values)],
+            columns=["id", "a", "b"],
+        )
+        conn.exec_driver_sql("SET TimeZone = 'UTC'")
+        rows = conn.exec_driver_sql("SELECT a, b FROM t ORDER BY id").all()
+
+    inserted, copied = rows[:2], rows[2:]
+    assert copied == inserted
+    assert [a for a, _ in inserted] == [datetime.datetime(2024, 11, 3, 1, 30)] * 2
+    assert [b for _, b in copied] == values

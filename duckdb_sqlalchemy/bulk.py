@@ -300,25 +300,17 @@ def _session_time_zone(connection: Any) -> datetime.tzinfo:
 def _csv_value(
     value: Any,
     null_marker: str,
-    time_zone: Optional[Callable[[], datetime.tzinfo]] = None,
+    aware_datetime: Optional[Callable[[datetime.datetime, int], str]] = None,
+    index: int = 0,
 ) -> Any:
     if value is None or _is_pandas_missing(value):
         return null_marker
     if (
-        time_zone is not None
+        aware_datetime is not None
         and isinstance(value, datetime.datetime)
         and value.utcoffset() is not None
     ):
-        # A regular INSERT converts an aware datetime to the session zone for
-        # TIMESTAMP columns. Write that wall time without an offset: DuckDB
-        # reads it into TIMESTAMP as is and into TIMESTAMPTZ in the session
-        # zone. (DuckDB before 1.4 applies an offset when reading TIMESTAMP,
-        # later versions drop it.) Keep the offset only for wall times the
-        # session zone repeats, which would otherwise be ambiguous.
-        local = value.astimezone(time_zone())
-        if local.replace(fold=1 - local.fold).utcoffset() != local.utcoffset():
-            return local.isoformat(" ")
-        return local.replace(tzinfo=None).isoformat(" ")
+        return aware_datetime(value, index)
     if isinstance(value, _BINARY_TYPES):
         raise TypeError(
             "copy_from_rows cannot write binary values "
@@ -362,6 +354,20 @@ def _csv_writer_options(options: Mapping[str, Any]) -> Dict[str, Any]:
         # trip. Quoted null markers still load as NULL (allow_quoted_nulls).
         writer_options["quoting"] = csv.QUOTE_ALL
     return writer_options
+
+
+def _timestamptz_columns(
+    connection: Any, table: TableLike, columns: Optional[Sequence[str]]
+) -> Sequence[bool]:
+    """Whether each CSV column of ``table`` is a TIMESTAMPTZ column."""
+    selected = _format_columns(connection, columns).strip()[1:-1] or "*"
+    # DESCRIBE reports declared types. A result description does not tell
+    # TIMESTAMP from TIMESTAMPTZ on DuckDB before 1.4.
+    rows = _execute_sql(
+        connection,
+        f"DESCRIBE SELECT {selected} FROM {_format_table(connection, table)}",
+    ).fetchall()
+    return [str(row[1]).upper() == "TIMESTAMP WITH TIME ZONE" for row in rows]
 
 
 def _copy_rows_as_csv_chunks(
@@ -431,12 +437,25 @@ def _copy_rows_as_csv_chunks(
     count = 0
     primary = None
     zone: Optional[datetime.tzinfo] = None
+    tz_columns: Optional[Sequence[bool]] = None
 
-    def time_zone() -> datetime.tzinfo:
-        nonlocal zone
+    def aware_datetime(value: datetime.datetime, index: int) -> str:
+        # A regular INSERT converts an aware datetime to the session zone for
+        # TIMESTAMP columns. Write that wall time without an offset: DuckDB
+        # reads it into TIMESTAMP as is and into TIMESTAMPTZ in the session
+        # zone. (DuckDB before 1.4 applies an offset when reading TIMESTAMP,
+        # later versions drop it.) A wall time the session zone repeats is
+        # ambiguous for TIMESTAMPTZ, so keep its offset for those columns only.
+        nonlocal zone, tz_columns
         if zone is None:
             zone = _session_time_zone(connection)
-        return zone
+        local = value.astimezone(zone)
+        if local.replace(fold=1 - local.fold).utcoffset() != local.utcoffset():
+            if tz_columns is None:
+                tz_columns = _timestamptz_columns(connection, table, columns)
+            if index < len(tz_columns) and tz_columns[index]:
+                return local.isoformat(" ")
+        return local.replace(tzinfo=None).isoformat(" ")
 
     try:
         for row in rows:
@@ -450,7 +469,10 @@ def _copy_rows_as_csv_chunks(
                 tmp, writer, count = open_writer()
 
             writer.writerow(
-                [_csv_value(value, null_marker, time_zone) for value in row]
+                [
+                    _csv_value(value, null_marker, aware_datetime, index)
+                    for index, value in enumerate(row)
+                ]
             )
             count += 1
 

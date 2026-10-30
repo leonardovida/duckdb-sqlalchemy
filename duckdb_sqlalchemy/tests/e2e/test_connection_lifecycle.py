@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
+import duckdb
 import pytest
+from packaging.version import Version
 from sqlalchemy import Column, Integer, MetaData, Table, event, exc, insert, text
 
 from .conftest import EngineFactory
@@ -100,6 +102,11 @@ def test_write_conflict_does_not_invalidate_the_connection(
         assert second.execute(text("SELECT count(*) FROM job_timeouts")).scalar() == 0
 
 
+@pytest.mark.xfail(
+    Version(duckdb.__version__) >= Version("2.0.0.dev0"),
+    reason="DuckDB 2.0 rejects new statements while a closed result is unfinished",
+    strict=True,
+)
 def test_register_returns_no_rows(make_engine: EngineFactory) -> None:
     engine = make_engine("duckdb:///:memory:")
     with engine.connect() as conn:
