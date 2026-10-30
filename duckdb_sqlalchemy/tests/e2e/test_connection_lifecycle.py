@@ -62,6 +62,9 @@ def test_retry_reports_a_fetch_error_of_an_earlier_result(
     engine = make_engine(
         "duckdb:///:memory:",
         execution_options={"duckdb_retry_on_transient": True},
+        # With more threads, another thread may report "Interrupted!"
+        # instead of the UDF's error.
+        connect_args={"config": {"threads": 1}},
     )
     event.listen(
         engine,
