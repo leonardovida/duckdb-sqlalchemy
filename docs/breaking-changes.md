@@ -17,6 +17,10 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
+- None yet.
+
+## [1.5.6.7](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.6...v1.5.6.7) (2026-10-30)
+
 - **DuckDB URLs reject a host, port or credentials** - A URL such as `duckdb://somehost/md:my_db` or `duckdb://user:secret@/local.duckdb` now raises `ArgumentError` when the engine is created, with a hint to use three slashes. These URLs previously failed at connect time with a `TypeError` that echoed the connection config, including `motherduck_token`. Use `duckdb:///<database>` and pass credentials in the query or `connect_args`. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
 - **MotherDuck helpers require a MotherDuck database** - `MotherDuckURL` and `create_motherduck_engine` raise `ValueError` for a database that does not start with `md:` or `motherduck:`. `create_motherduck_engine(database="my_db")` previously created a local file named `my_db`. Add the `md:` prefix, or use `sqlalchemy.create_engine` for local files. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
 - **Later `MotherDuckURL` sources win, deprecated spellings included** - A keyword argument now overrides `path_query`, `query` and a query string embedded in `database`, even when it uses a deprecated alias such as `motherduck_session_name`. The alias still emits its `DeprecationWarning`. Earlier releases kept the value from the earlier source. Review calls that pass the same setting twice. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
