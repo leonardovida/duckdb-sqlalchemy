@@ -7,6 +7,7 @@ select * from duckdb_types where type_category = 'NUMERIC';
 ```
 """
 
+import decimal
 import typing
 from typing import Any, Dict, Optional, Tuple, Type
 
@@ -33,8 +34,31 @@ SQLA_DOUBLE = getattr(sqltypes, "DOUBLE", None)
 IS_GT_1 = Version(duckdb_version) > Version("1.0.0")
 
 
+def _process_decimal_bind(value: Any) -> Any:
+    # DuckDB's binder drops a positive exponent (``Decimal("1E+5")`` binds as
+    # ``1.00000``), so rewrite such values without an exponent first.
+    if isinstance(value, decimal.Decimal) and value.is_finite():
+        exponent = value.as_tuple().exponent
+        if isinstance(exponent, int) and exponent > 0:
+            return decimal.Decimal(format(value, "f"))
+    return value
+
+
+def _ndarray_to_list(value: Any) -> Any:
+    # Iterating an ndarray yields NumPy scalars the native binder rejects.
+    to_list = getattr(value, "tolist", None)
+    if getattr(value, "ndim", 0) > 0 and callable(to_list):
+        return to_list()
+    return value
+
+
 class DuckDBInteger(Integer):
     cache_ok = True
+
+    def bind_processor(self, dialect: Dialect) -> Any:
+        # Decimal("1E+2") (what Decimal("100.00").normalize() returns) would
+        # otherwise bind as 1.
+        return _process_decimal_bind
 
 
 class UInt64(DuckDBInteger):
@@ -192,7 +216,8 @@ class Struct(_FieldsType):
             implementation = member.dialect_impl(dialect)
             standard_array = (
                 isinstance(implementation, sqltypes.ARRAY)
-                and type(implementation).bind_processor is PGARRAY.bind_processor
+                and type(implementation).bind_processor
+                in (PGARRAY.bind_processor, DuckDBArray.bind_processor)
             ) or (
                 isinstance(implementation, FixedArray)
                 and type(implementation).bind_processor is FixedArray.bind_processor
@@ -216,10 +241,7 @@ class Struct(_FieldsType):
                         # Standard array processors iterate ndarrays into NumPy
                         # scalars. Convert to native Python values before item
                         # hooks, while custom array hooks keep their own input.
-                        to_list = getattr(value, "tolist", None)
-                        if getattr(value, "ndim", 0) > 0 and callable(to_list):
-                            value = to_list()
-                        return convert(value)
+                        return convert(_ndarray_to_list(value))
 
                     processor = process_array
                 processors[name.translate(_ASCII_LOWER)] = processor
@@ -296,20 +318,30 @@ class Map(TypeEngine):
         self.value_type = type_api.to_instance(value_type)
 
     def bind_processor(self, dialect: Dialect) -> Any:
-        key_processor = self.key_type.dialect_impl(dialect).bind_processor(dialect)
+        key_impl = self.key_type.dialect_impl(dialect)
+        key_processor = key_impl.bind_processor(dialect)
         value_processor = self.value_type.dialect_impl(dialect).bind_processor(dialect)
+        # LIST, STRUCT and MAP keys are unhashable in Python, so such maps are
+        # fetched, and may be written back, as {"key": [...], "value": [...]}.
+        pair_shaped = isinstance(
+            key_impl, (sqltypes.ARRAY, FixedArray, _FieldsType, Map)
+        )
 
         def _bind(value: Any) -> Any:
             if value is None:
                 return None
+            if pair_shaped and value.keys() == {"key", "value"}:
+                keys, items = value["key"], value["value"]
+            else:
+                keys, items = value, value.values()
             return {
                 "key": [
                     key_processor(key) if key_processor is not None else key
-                    for key in value
+                    for key in keys
                 ],
                 "value": [
                     value_processor(item) if value_processor is not None else item
-                    for item in value.values()
+                    for item in items
                 ],
             }
 
@@ -375,7 +407,9 @@ class FixedArray(sqltypes.Indexable, TypeEngine):
         if processor is None:
             return None
         return lambda value: (
-            None if value is None else [processor(item) for item in value]
+            None
+            if value is None
+            else [processor(item) for item in _ndarray_to_list(value)]
         )
 
     def result_processor(self, dialect: Dialect, coltype: object) -> Any:
@@ -407,6 +441,21 @@ class Union(_FieldsType):
 
     def __init__(self, fields: FieldCollection):
         super().__init__(fields)
+
+    def bind_processor(self, dialect: Dialect) -> Any:
+        return _process_decimal_bind
+
+
+class DuckDBArray(PGARRAY):
+    """LIST type that binds NumPy arrays as native Python lists."""
+
+    cache_ok = True
+
+    def bind_processor(self, dialect: Dialect) -> Any:
+        processor = super().bind_processor(dialect)
+        if processor is None:
+            return None
+        return lambda value: processor(_ndarray_to_list(value))
 
 
 class TimestampNs(sqltypes.TIMESTAMP):
