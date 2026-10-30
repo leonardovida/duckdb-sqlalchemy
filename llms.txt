@@ -29,6 +29,9 @@ Docs (https://leonardovida.github.io/duckdb-sqlalchemy/):
 - types-and-caveats.html
 - alembic.html
 - migration-from-duckdb-engine.html
+- performance.html
+- adoption.html
+- breaking-changes.html
 
 Compatibility:
 - Python 3.10+

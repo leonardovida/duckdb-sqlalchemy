@@ -1,7 +1,7 @@
 import os
 import warnings
 from functools import lru_cache
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, Mapping, Optional, Tuple, Union
 
 from duckdb import __version__ as duckdb_version
 from packaging.version import Version
@@ -348,9 +348,14 @@ def _named_parameter(name: str, value: Any) -> Any:
 def table_function(
     name: str,
     *args: Any,
-    columns: Optional[Iterable[str]] = None,
+    columns: Optional[Union[Iterable[str], Mapping[str, str]]] = None,
     **kwargs: Any,
 ) -> Any:
+    if isinstance(columns, Mapping):
+        # A mapping is DuckDB's own ``columns`` name -> type parameter (read_csv,
+        # read_json, ...); its keys also name the SQLAlchemy output columns.
+        args = (*args, _named_parameter("columns", dict(columns)))
+        columns = tuple(columns)
     named_args = tuple(_named_parameter(key, value) for key, value in kwargs.items())
     fn = getattr(func, name)(*args, *named_args)
     if columns:
@@ -369,7 +374,7 @@ def _coerce_path(path: Any) -> Any:
     # DuckDB cannot bind os.PathLike values, so pass them as plain strings.
     if isinstance(path, os.PathLike):
         return os.fspath(path)
-    if isinstance(path, (list, tuple)):
+    if isinstance(path, Iterable) and not isinstance(path, (str, bytes)):
         return [_coerce_path(item) for item in path]
     return path
 
@@ -380,13 +385,7 @@ def _read_csv_function(
     columns: Optional[Union[Iterable[str], Mapping[str, str]]],
     kwargs: Dict[str, Any],
 ) -> Any:
-    args: List[Any] = [_coerce_path(path)]
-    if isinstance(columns, Mapping):
-        # A mapping is DuckDB's own ``columns`` name -> type parameter; its keys
-        # also name the SQLAlchemy output columns.
-        args.append(_named_parameter("columns", dict(columns)))
-        columns = tuple(columns)
-    return table_function(name, *args, columns=columns, **kwargs)
+    return table_function(name, _coerce_path(path), columns=columns, **kwargs)
 
 
 def read_parquet(

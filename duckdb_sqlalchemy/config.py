@@ -2,7 +2,7 @@ import os
 from datetime import timedelta
 from decimal import Decimal
 from functools import lru_cache
-from typing import Any, Dict, Set, Type, Union
+from typing import Any, Dict, List, Set, Tuple, Type, Union
 
 import duckdb
 from sqlalchemy import Boolean, Float, Integer, String
@@ -20,7 +20,18 @@ TYPES: Dict[Type, TypeEngine] = {
     str: String(),
 }
 
-ConfigValue = Union[str, int, bool, float, os.PathLike[Any], Decimal, timedelta, None]
+ConfigValue = Union[
+    str,
+    int,
+    bool,
+    float,
+    os.PathLike[Any],
+    Decimal,
+    timedelta,
+    List[Any],
+    Tuple[Any, ...],
+    None,
+]
 
 
 @lru_cache()
@@ -65,6 +76,11 @@ def _render_config_value(
 ) -> str:
     if value is None:
         return "NULL"
+    if isinstance(value, (list, tuple)):
+        items = (
+            _render_config_value(item, processors, string_processor) for item in value
+        )
+        return f"[{', '.join(items)}]"
 
     if isinstance(value, os.PathLike):
         path = value.__fspath__()

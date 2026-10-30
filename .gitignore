@@ -11,9 +11,15 @@ htmlcov/
 coverage.xml
 .DS_Store
 .hypothesis/
-.kodiak.toml
-.release-please-manifest.json
-kodiak/
+# DuckDB files written by tests, docs snippets and benchmarks
+/*.duckdb
+/*.duckdb.wal
+/*.db
+/benchmark.json
+/baseline.json
+# Claude Code local state
+.claude/worktrees/
+.claude/settings.local.json
 .idea
 .vscode
 results.xml

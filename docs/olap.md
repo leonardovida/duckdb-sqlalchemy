@@ -411,13 +411,14 @@ with engine.connect().execution_options(stream_results=True, duckdb_arraysize=10
 ## Bulk writes
 
 For large `INSERT` executemany workloads, the dialect can register a pandas/Arrow
-object and run `INSERT INTO ... SELECT ...` internally. Control the threshold
-with `duckdb_copy_threshold`:
+object and run `INSERT INTO ... SELECT ...` internally. Batches of 10,000 rows
+or more use it by default. Change the threshold with `duckdb_copy_threshold`,
+or set it to 0 to disable the fast path:
 
 ```python
 rows = [{"event_id": 1, "ts": "2024-01-01"}, {"event_id": 2, "ts": "2024-01-02"}]
 with engine.begin() as conn:
-    conn.execution_options(duckdb_copy_threshold=10000)
+    conn = conn.execution_options(duckdb_copy_threshold=1000)
     conn.execute(events.insert(), rows)
 ```
 

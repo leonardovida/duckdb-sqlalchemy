@@ -25,7 +25,11 @@ from duckdb_sqlalchemy import insert_from_arrow
 def main() -> None:
     installed = distribution("duckdb-sqlalchemy")
     module_path = Path(duckdb_sqlalchemy.__file__).resolve()
-    assert module_path.is_relative_to(Path(installed.locate_file("")).resolve())
+    assert module_path.is_relative_to(Path(installed.locate_file("")).resolve()), (
+        f"duckdb_sqlalchemy was imported from {module_path}, not an installed "
+        "wheel or sdist. Run this script in a fresh environment with the built "
+        "distribution installed."
+    )
     assert installed.version == duckdb_sqlalchemy.__version__
     assert not any(
         str(path).startswith("duckdb_sqlalchemy/tests/")

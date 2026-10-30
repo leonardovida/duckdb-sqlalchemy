@@ -121,6 +121,7 @@ jobs:
   sqlalchemy_prerelease:
     # Informational: upstream prerelease regressions do not block merges.
     runs-on: ubuntu-latest
+    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v7
@@ -155,6 +156,7 @@ jobs:
   duckdb_prerelease:
     # Informational: upstream nightly regressions do not block merges.
     runs-on: ubuntu-latest
+    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v7

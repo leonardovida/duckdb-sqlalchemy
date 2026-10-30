@@ -55,7 +55,12 @@ from sqlalchemy.engine.reflection import (
     cache,
 )
 from sqlalchemy.engine.url import URL as SAURL
-from sqlalchemy.exc import CompileError, InvalidRequestError, NoSuchTableError
+from sqlalchemy.exc import (
+    ArgumentError,
+    CompileError,
+    InvalidRequestError,
+    NoSuchTableError,
+)
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import bindparam
 from sqlalchemy.sql.compiler import IdentifierPreparer
@@ -96,10 +101,12 @@ from .capabilities import get_capabilities
 from .config import apply_config, get_core_config, get_native_config
 from .datatypes import (
     ISCHEMA_NAMES,
+    DuckDBArray,
     DuckDBInteger,
     FixedArray,
     Map,
     Struct,
+    _process_decimal_bind,
     register_extension_types,
 )
 from .datatypes import Union as UnionType
@@ -303,6 +310,18 @@ _DUCKDB_IO_EXCEPTIONS: Tuple[type, ...] = tuple(
     )
     if isinstance(cls, type)
 )
+# OperationalError subclasses raised on a connection that is still usable.
+# Their messages quote table names and values, which can contain words such as
+# "timeout", so they never count as disconnects.
+_DUCKDB_LIVE_CONNECTION_EXCEPTIONS: Tuple[type, ...] = _DUCKDB_IO_EXCEPTIONS + tuple(
+    cls
+    for cls in (
+        getattr(duckdb, "TransactionException", None),
+        getattr(duckdb, "SerializationException", None),
+        getattr(duckdb, "OutOfMemoryException", None),
+    )
+    if isinstance(cls, type)
+)
 
 
 class DBAPI:
@@ -441,6 +460,41 @@ def _strip_enclosing_parentheses(expression: str) -> str:
     return expression
 
 
+def _generated_column_expression(
+    table_sql: str, column_name: str, data_type: str
+) -> Optional[str]:
+    """The expression of ``column_name`` in a CREATE TABLE statement, if generated.
+
+    DuckDB writes generated columns as ``name TYPE GENERATED ALWAYS AS(expr)``,
+    quoting the name only when it needs quotes.
+    """
+    marker = f" {data_type} GENERATED ALWAYS AS("
+    quoted = '"' + column_name.replace('"', '""') + '"'
+    for name in (quoted, column_name):
+        for separator in ("(", ", "):
+            start = table_sql.find(separator + name + marker)
+            if start < 0:
+                continue
+            begin = start + len(separator + name + marker)
+            depth = 1
+            quote: Optional[str] = None
+            for index in range(begin, len(table_sql)):
+                char = table_sql[index]
+                if quote is not None:
+                    if char == quote:
+                        quote = None
+                elif char in ("'", '"'):
+                    quote = char
+                elif char == "(":
+                    depth += 1
+                elif char == ")":
+                    depth -= 1
+                    if depth == 0:
+                        return table_sql[begin:index].strip()
+            return None
+    return None
+
+
 class ConnectionWrapper:
     __c: duckdb.DuckDBPyConnection
     notices: List[str]
@@ -491,7 +545,17 @@ class ConnectionWrapper:
         self._transaction_statements = 0
 
     def commit(self) -> None:
-        self._buffer_pending_result()
+        try:
+            self._buffer_pending_result()
+        except BaseException:
+            # SQLAlchemy treats the transaction as over once commit() raises,
+            # and skips the reset rollback on pool checkin. End it here so the
+            # next checkout does not inherit an open DuckDB transaction.
+            try:
+                self.rollback()
+            except Exception:
+                pass
+            raise
         self._transaction_statements = None
         self.__c.commit()
 
@@ -613,6 +677,12 @@ class CursorWrapper:
         self._rows_fetched = False
         self._native_reader_active = False
         self._native_reader: Any = None
+        # A reader handed out by a raw fetch_record_batch()/to_arrow_reader()
+        # call owns the rest of the result, so there is nothing to buffer.
+        self._raw_reader_handed_out = False
+        # Set when buffering this result failed; later fetches re-raise it
+        # instead of reading whatever result the connection holds next.
+        self._buffer_error: Optional[BaseException] = None
 
     def _clear_result(self) -> None:
         self.__c.execute("")
@@ -628,6 +698,8 @@ class CursorWrapper:
         self._dml_rowcount = None
         self._is_dml_count = False
         self._rows_fetched = False
+        self._raw_reader_handed_out = False
+        self._buffer_error = None
 
     def _capture_dml_rowcount(self, statement: str) -> bool:
         """Read the "Count" result of a DML statement into ``rowcount``.
@@ -688,8 +760,23 @@ class CursorWrapper:
             )
         description = self.description
         rowcount = self.__c.rowcount
-        rows = self.__c.fetchall()
+        if self._raw_reader_handed_out:
+            self._store_buffered_result([], description, rowcount)
+            return
+        try:
+            rows = self.__c.fetchall()
+        except BaseException as exc:
+            self._store_buffered_result([], description, rowcount)
+            self._buffer_error = exc
+            raise
         self._store_buffered_result(rows, description, rowcount)
+
+    def _raise_buffer_error(self) -> None:
+        if self._buffer_error is not None:
+            raise InvalidRequestError(
+                "This result could not be read to the end before another "
+                "statement ran on the connection"
+            ) from self._buffer_error
 
     def _store_buffered_result(
         self, rows: Iterable[Tuple[Any, ...]], description: Any, rowcount: int
@@ -734,7 +821,12 @@ class CursorWrapper:
         self._before_execute()
         norm = statement.strip().lower().rstrip(";")
         if norm == "commit":  # this is largely for ipython-sql
+            in_transaction = (
+                self.__connection_wrapper._transaction_statements is not None
+            )
             self.__connection_wrapper.commit()
+            if in_transaction:
+                self.__connection_wrapper._begin()
             return
         elif _BEGIN_TRANSACTION_ISOLATION_RE.fullmatch(norm):
             self.__connection_wrapper._begin()
@@ -747,6 +839,7 @@ class CursorWrapper:
         elif norm.startswith("register"):
             view_name, df = _parse_register_params(parameters)
             self.__c.register(view_name, df)
+            self._clear_result()
             return
         elif norm == "show transaction isolation level":
             self.__c.execute("select 'read committed' as transaction_isolation")
@@ -820,6 +913,7 @@ class CursorWrapper:
             value = method(*args, **kwargs)
             self._rows_fetched = True
             if hasattr(value, "read_next_batch"):
+                self._raw_reader_handed_out = True
                 return value
             if name != "fetch_df_chunk":
                 self._store_buffered_result([], self.description, self.rowcount)
@@ -832,6 +926,7 @@ class CursorWrapper:
         if self._native_reader_active:
             raise InvalidRequestError("An Arrow batch reader already owns this result")
         if self._buffered_rows is not None:
+            self._raise_buffer_error()
             return self._buffered_rows.popleft() if self._buffered_rows else None
         self._rows_fetched = True
         row = self.__c.fetchone()
@@ -844,6 +939,7 @@ class CursorWrapper:
         if self._native_reader_active:
             raise InvalidRequestError("An Arrow batch reader already owns this result")
         if self._buffered_rows is not None:
+            self._raise_buffer_error()
             rows = list(self._buffered_rows)
             self._buffered_rows.clear()
             return rows
@@ -858,6 +954,7 @@ class CursorWrapper:
             raise InvalidRequestError("An Arrow batch reader already owns this result")
         count = self.arraysize if size is None else size
         if self._buffered_rows is not None:
+            self._raise_buffer_error()
             buffered = self._buffered_rows
             return [buffered.popleft() for _ in range(min(count, len(buffered)))]
         self._rows_fetched = True
@@ -1003,6 +1100,10 @@ class DuckDBExecutionContext(_PGExecutionContext):
             returning_rows = getattr(self, "_insertmanyvalues_rows", None)
             if returning_rows is not None:
                 self._rowcount = len(returning_rows)
+                if self.execution_options.get("duckdb_arrow"):
+                    self._duckdb_returning_arrow = _rows_to_arrow(
+                        returning_rows, cursor.description
+                    )
             else:
                 if self.execution_options.get("duckdb_arrow"):
                     fetch_arrow = getattr(cursor, "to_arrow_table", None)
@@ -1034,6 +1135,14 @@ class DuckDBExecutionContext(_PGExecutionContext):
         return result
 
 
+def _rows_to_arrow(rows: Sequence[Sequence[Any]], description: Any) -> Any:
+    import pyarrow as pa
+
+    names = [column[0] for column in description or ()]
+    columns = list(zip(*rows)) if rows else [()] * len(names)
+    return pa.Table.from_arrays([pa.array(list(c)) for c in columns], names=names)
+
+
 def _apply_motherduck_defaults(config: Dict[str, Any], database: Optional[str]) -> None:
     if _looks_like_motherduck(database) and not has_explicit_motherduck_credential(
         database, config
@@ -1063,6 +1172,10 @@ def _prepare_connection_params(
     config = dict(cparams.get("config", {}))
     cparams["config"] = config
     config.update(cparams.pop("url_config", {}))
+    for key, value in config.items():
+        # Repeated URL query keys arrive as tuples. DuckDB takes lists.
+        if isinstance(value, tuple):
+            config[key] = list(value)
     for key in DIALECT_QUERY_KEYS:
         config.pop(key, None)
     if cparams.get("database") in {None, ""}:
@@ -1073,10 +1186,25 @@ def _prepare_connection_params(
     application_name = _pop_application_name(config)
     if not _looks_like_motherduck(cparams["database"]):
         # Without the motherduck extension loaded, connect() rejects its
-        # settings. SET them after preload_extensions instead.
+        # settings. SET them after preload_extensions instead, under the
+        # setting names the extension registers.
+        if "token" in config:
+            config.setdefault("motherduck_token", config.pop("token"))
+        config.pop("dbinstance_inactivity_ttl", None)
         core_keys = get_native_config()
     ext = {k: config.pop(k) for k in list(config) if k not in core_keys}
     return ext, application_name
+
+
+def _redacted_connect_error(exc: TypeError, cparams: Dict[str, Any]) -> TypeError:
+    # pybind11 appends "Invoked with: kwargs: ..." to the message, which
+    # echoes config values such as motherduck_token. Keep only the signature.
+    message = str(exc).split("Invoked with", 1)[0].rstrip()
+    return TypeError(
+        f"{message}\nduckdb.connect() received the arguments "
+        f"{sorted(cparams)} (values hidden). Pass DuckDB settings through "
+        'connect_args={"config": {...}} or the URL query.'
+    )
 
 
 class DuckDBIdentifierPreparer(PGIdentifierPreparer):
@@ -1181,8 +1309,31 @@ def _implicit_sequence_ddl_name(preparer: IdentifierPreparer, column: Any) -> st
     return name
 
 
+def _uses_reflected_implicit_sequence(
+    preparer: IdentifierPreparer, column: Any
+) -> bool:
+    """Whether a reflected default is ``nextval`` of this column's implicit sequence.
+
+    A table reflected from DuckDB keeps that default instead of the implicit
+    sequence, so creating it elsewhere must create the sequence too.
+    """
+    server_default = column.server_default
+    arg = getattr(server_default, "arg", None)
+    if not isinstance(server_default, sa_schema.DefaultClause) or arg is None:
+        return False
+    default = arg if isinstance(arg, str) else getattr(arg, "text", None)
+    if not isinstance(default, str):
+        return False
+    name = _implicit_sequence_ddl_name(preparer, column).replace("'", "''")
+    return default.strip() == f"nextval('{name}')"
+
+
 def _execute_implicit_sequence_ddl(
-    target: Any, connection: Any, statement_prefix: str
+    target: Any,
+    connection: Any,
+    statement_prefix: str,
+    *,
+    include_reflected: bool = False,
 ) -> None:
     if connection.dialect.name != "duckdb":
         return
@@ -1196,7 +1347,9 @@ def _execute_implicit_sequence_ddl(
     if schema_translate_map:
         preparer = preparer._with_schema_translate(schema_translate_map)
     for column in target.columns:
-        if _column_needs_implicit_sequence(column):
+        if _column_needs_implicit_sequence(column) or (
+            include_reflected and _uses_reflected_implicit_sequence(preparer, column)
+        ):
             statement = (
                 f"{statement_prefix} {_implicit_sequence_ddl_name(preparer, column)}"
             )
@@ -1219,10 +1372,15 @@ def _create_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
         if temporary
         else "CREATE SEQUENCE IF NOT EXISTS"
     )
-    _execute_implicit_sequence_ddl(target, connection, statement)
+    _execute_implicit_sequence_ddl(
+        target, connection, statement, include_reflected=True
+    )
 
 
 def _drop_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
+    # A reflected nextval() default does not own its sequence: Alembic batch
+    # recreates and autogenerated migrations drop such tables while another
+    # table still uses it. Only sequences the dialect implied are dropped.
     if target.info.get("_duckdb_preserve_implicit_sequence"):
         return
     _execute_implicit_sequence_ddl(target, connection, "DROP SEQUENCE IF EXISTS")
@@ -1233,6 +1391,18 @@ event.listen(sa_schema.Table, "after_drop", _drop_implicit_sequences)
 
 
 class DuckDBDDLCompiler(PGDDLCompiler):
+    def visit_computed_column(self, generated: Any, **kw: Any) -> str:
+        # DuckDB generated columns are always virtual. PostgreSQL's compiler
+        # renders STORED, which DuckDB rejects.
+        if generated.persisted is True:
+            raise CompileError(
+                "DuckDB supports only virtual generated columns. Use "
+                "Computed(..., persisted=False) or leave 'persisted' unset."
+            )
+        return "GENERATED ALWAYS AS (%s)" % self.sql_compiler.process(
+            generated.sqltext, include_table=False, literal_binds=True
+        )
+
     def get_column_specification(self, column: Any, **kwargs: Any) -> str:
         if not _column_needs_implicit_sequence(column):
             # PostgreSQL renders SERIAL for reflected sequence-backed keys,
@@ -1452,16 +1622,6 @@ def _exact_decimal_operand(element: Any) -> Optional[Tuple[int, int, bool]]:
     return None
 
 
-def _process_decimal_bind(value: Any) -> Any:
-    # DuckDB's binder drops a positive exponent (``Decimal("1E+5")`` binds as
-    # ``1.00000``), so rewrite such values without an exponent first.
-    if isinstance(value, decimal.Decimal) and value.is_finite():
-        exponent = value.as_tuple().exponent
-        if isinstance(exponent, int) and exponent > 0:
-            return decimal.Decimal(format(value, "f"))
-    return value
-
-
 class DuckDBNumeric(sqltypes.Numeric):
     """Numeric for a DBAPI that binds and returns ``Decimal`` natively.
 
@@ -1472,6 +1632,17 @@ class DuckDBNumeric(sqltypes.Numeric):
 
     def bind_processor(self, dialect: Any) -> Any:
         return _process_decimal_bind
+
+    def literal_processor(self, dialect: Any) -> Any:
+        base = super().literal_processor(dialect)
+
+        def process(value: Any) -> str:
+            # DuckDB parses 1.5E-7 as DOUBLE. Plain notation keeps it DECIMAL.
+            if isinstance(value, decimal.Decimal) and value.is_finite():
+                return format(value, "f")
+            return base(value)
+
+        return process
 
     def result_processor(self, dialect: Any, coltype: object) -> Any:
         if not self.asdecimal:
@@ -1537,6 +1708,8 @@ class Dialect(PGDialect_psycopg2):
             # postgres type_codes (such as 701 for float) that duckdb doesn't have
             sqltypes.Numeric: DuckDBNumeric,
             sqltypes.Float: DuckDBFloat,
+            sqltypes.Integer: DuckDBInteger,
+            sqltypes.ARRAY: DuckDBArray,
             sqltypes.Enum: DuckDBENUM,
             sqltypes.JSON: sqltypes.JSON,
             sqltypes.JSON.JSONIndexType: DuckDBJSONIndex,
@@ -1592,6 +1765,8 @@ class Dialect(PGDialect_psycopg2):
     def connect(self, *cargs: Any, **cparams: Any) -> Any:
         core_keys = get_core_config()
         preload_extensions = cparams.pop("preload_extensions", [])
+        if isinstance(preload_extensions, str):
+            preload_extensions = [preload_extensions]
         ext, application_name = _prepare_connection_params(cparams, core_keys)
         config = cparams["config"]
         if supports_user_agent:
@@ -1606,7 +1781,10 @@ class Dialect(PGDialect_psycopg2):
 
         filesystems = cparams.pop("register_filesystems", [])
 
-        conn = duckdb.connect(*cargs, **cparams)
+        try:
+            conn = duckdb.connect(*cargs, **cparams)
+        except TypeError as exc:
+            raise _redacted_connect_error(exc, cparams) from None
 
         try:
             for extension in preload_extensions:
@@ -1794,7 +1972,8 @@ class Dialect(PGDialect_psycopg2):
         return (
             connection.execute(
                 text(
-                    "SELECT 1 FROM duckdb_sequences() WHERE sequence_name = :sequence_name "
+                    "SELECT 1 FROM duckdb_sequences() "
+                    "WHERE lower(sequence_name) = lower(:sequence_name) "
                     + where
                     + " LIMIT 1"
                 ),
@@ -1856,13 +2035,14 @@ class Dialect(PGDialect_psycopg2):
             params.update({"table_name": table_name})
 
         if schema_name is not None:
-            sql += "AND schema_name = :schema_name\n"
+            # Schema and database names resolve case-insensitively, as tables do.
+            sql += "AND lower(schema_name) = lower(:schema_name)\n"
             params.update({"schema_name": schema_name})
             if database_name is None:
                 database_filter = (
                     "database_name = (\n"
                     "    SELECT database_name FROM duckdb_schemas()\n"
-                    "    WHERE schema_name = :schema_name\n"
+                    "    WHERE lower(schema_name) = lower(:schema_name)\n"
                     "    ORDER BY database_name <> current_database(), database_name\n"
                     "    LIMIT 1\n"
                     ")"
@@ -1883,7 +2063,7 @@ class Dialect(PGDialect_psycopg2):
                 )
 
         if database_name is not None:
-            sql += "AND database_name = :database_name\n"
+            sql += "AND lower(database_name) = lower(:database_name)\n"
             params.update({"database_name": database_name})
 
         return sql, params
@@ -2283,6 +2463,46 @@ class Dialect(PGDialect_psycopg2):
             constraints[row["table_name"]].append(dict(row))
         return constraints
 
+    def _referenced_relations(
+        self,
+        connection: "Connection",
+        tables: Mapping[str, Tuple[str, str]],
+        foreign_key_rows: Mapping[str, List[Dict[str, Any]]],
+    ) -> Dict[Tuple[str, str, str], Tuple[str, Dict[str, str]]]:
+        """Catalog spelling of the tables and columns foreign keys reference.
+
+        Keys are ``(database, schema, lower(table))`` of the referenced table,
+        which shares the child's database and schema. Values hold the table's
+        own name and a map of lower-cased column names to their spelling.
+        """
+        names = sorted(
+            {
+                row["referenced_table"].lower()
+                for table_rows in foreign_key_rows.values()
+                for row in table_rows
+            }
+        )
+        if not names:
+            return {}
+        result = connection.execute(
+            text(
+                "SELECT database_name, schema_name, table_name, column_name "
+                "FROM duckdb_columns() "
+                "WHERE lower(table_name) IN "
+                "(SELECT unnest(CAST(:names AS VARCHAR[])))"
+            ),
+            {"names": names},
+        )
+        wanted = {tables[table_name] for table_name in foreign_key_rows}
+        referenced: Dict[Tuple[str, str, str], Tuple[str, Dict[str, str]]] = {}
+        for database_name, schema_name, table_name, column_name in result:
+            if (database_name, schema_name) not in wanted:
+                continue
+            key = (database_name, schema_name, table_name.lower())
+            entry = referenced.setdefault(key, (table_name, {}))
+            entry[1][column_name.lower()] = column_name
+        return referenced
+
     def _duckdb_enum_rows(
         self, connection: "Connection", type_ids: Collection[Any]
     ) -> Dict[Any, Dict[str, Any]]:
@@ -2428,6 +2648,28 @@ class Dialect(PGDialect_psycopg2):
         if value.startswith('"') and value.endswith('"'):
             return value[1:-1].replace('""', '"')
         return None
+
+    def _canonical_column_names(
+        self,
+        connection: "Connection",
+        relations: Mapping[str, Tuple[str, str]],
+        table_names: Collection[str],
+    ) -> Dict[str, Dict[str, str]]:
+        """Map each table's lower-cased column names to their catalog spelling."""
+        if not table_names:
+            return {}
+        stmt, params = self._duckdb_reflection_stmt(
+            "duckdb_columns()",
+            "database_name, schema_name, table_name, column_name",
+            schema=None,
+            filter_names=list(table_names),
+        )
+        columns: Dict[str, Dict[str, str]] = defaultdict(dict)
+        for row in self._rows_for_reflected_relations(
+            connection.execute(stmt, params).mappings(), relations
+        ):
+            columns[row["table_name"]][row["column_name"].lower()] = row["column_name"]
+        return columns
 
     def _reflect_duckdb_index_expressions(
         self,
@@ -2605,6 +2847,56 @@ class Dialect(PGDialect_psycopg2):
                     reflected = sqltypes.ARRAY(reflected, dimensions=1)
         return reflected
 
+    def _generated_column_expressions(
+        self, connection: "Connection", rows: Sequence[Dict[str, Any]]
+    ) -> Dict[Tuple[str, str, str, str], str]:
+        """Expressions of generated columns, keyed by lower-cased table name.
+
+        duckdb_columns() reports a generated column's expression as its
+        default, so only the table's CREATE statement tells the two apart.
+        """
+        candidates = [
+            row
+            for row in rows
+            if row["column_default"] is not None
+            and not re.match(r"^nextval\s*\(", row["column_default"], re.IGNORECASE)
+        ]
+        if not candidates:
+            return {}
+        names = sorted({row["table_name"].lower() for row in candidates})
+        result = connection.execute(
+            text(
+                "SELECT database_name, schema_name, table_name, sql "
+                "FROM duckdb_tables() WHERE lower(table_name) IN "
+                "(SELECT unnest(CAST(:names AS VARCHAR[])))"
+            ),
+            {"names": names},
+        )
+        table_sql = {
+            (database_name, schema_name, table_name.lower()): sql
+            for database_name, schema_name, table_name, sql in result
+            if sql and "GENERATED ALWAYS AS(" in sql
+        }
+        expressions: Dict[Tuple[str, str, str, str], str] = {}
+        for row in candidates:
+            sql = table_sql.get(
+                (row["database_name"], row["schema_name"], row["table_name"].lower())
+            )
+            if sql is None:
+                continue
+            expression = _generated_column_expression(
+                sql, row["column_name"], row["data_type"]
+            )
+            if expression is not None:
+                key = (
+                    row["database_name"],
+                    row["schema_name"],
+                    row["table_name"].lower(),
+                    row["column_name"],
+                )
+                expressions[key] = expression
+        return expressions
+
     def _duckdb_columns_from_rows(
         self, connection: "Connection", rows: Sequence[Dict[str, Any]]
     ) -> Dict[str, List[Dict[str, Any]]]:
@@ -2616,27 +2908,38 @@ class Dialect(PGDialect_psycopg2):
                 if row["data_type"].upper().startswith("ENUM")
             ],
         )
+        generated = self._generated_column_expressions(connection, rows)
         columns: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for row in rows:
-            columns[row["table_name"]].append(
-                {
-                    "name": row["column_name"],
-                    "type": self._reflect_duckdb_data_type(
-                        row["data_type"],
-                        row.get("data_type_id"),
-                        enum_rows,
-                        type_description=f"column '{row['column_name']}'",
-                    ),
-                    "nullable": bool(row["is_nullable"]),
-                    "default": row["column_default"],
-                    "autoincrement": bool(
-                        re.match(
-                            r"^nextval\s*\(", row["column_default"] or "", re.IGNORECASE
-                        )
-                    ),
-                    "comment": row["comment"],
-                }
+            column: Dict[str, Any] = {
+                "name": row["column_name"],
+                "type": self._reflect_duckdb_data_type(
+                    row["data_type"],
+                    row.get("data_type_id"),
+                    enum_rows,
+                    type_description=f"column '{row['column_name']}'",
+                ),
+                "nullable": bool(row["is_nullable"]),
+                "default": row["column_default"],
+                "autoincrement": bool(
+                    re.match(
+                        r"^nextval\s*\(", row["column_default"] or "", re.IGNORECASE
+                    )
+                ),
+                "comment": row["comment"],
+            }
+            expression = generated.get(
+                (
+                    row["database_name"],
+                    row["schema_name"],
+                    row["table_name"].lower(),
+                    row["column_name"],
+                )
             )
+            if expression is not None:
+                column["default"] = None
+                column["computed"] = {"sqltext": expression, "persisted": False}
+            columns[row["table_name"]].append(column)
         return dict(columns)
 
     def _reflection_schema_key(self, schema: Optional[str]) -> Optional[str]:
@@ -2794,6 +3097,7 @@ class Dialect(PGDialect_psycopg2):
     ) -> Iterable[Tuple[Any, Any]]:
         tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
         rows = self._duckdb_constraint_rows(connection, "FOREIGN KEY", tables)
+        referenced = self._referenced_relations(connection, tables, rows)
         # DuckDB foreign keys stay within the resolved child's schema.
         referred_schemas: Dict[str, Optional[str]] = {}
         if rows and schema is None:
@@ -2810,23 +3114,34 @@ class Dialect(PGDialect_psycopg2):
                     if database_name == current_database
                     else f"{quote(database_name)}.{quote(schema_name)}"
                 )
-        foreign_keys = {
-            table_name: [
-                {
-                    "name": row["constraint_name"],
-                    "constrained_columns": list(row["constraint_column_names"]),
-                    "referred_schema": schema
-                    if schema is not None
-                    else referred_schemas.get(table_name),
-                    "referred_table": row["referenced_table"],
-                    "referred_columns": list(row["referenced_column_names"]),
-                    "options": {},
-                    "comment": None,
-                }
-                for row in table_rows
-            ]
-            for table_name, table_rows in rows.items()
-        }
+        foreign_keys: Dict[str, List[Dict[str, Any]]] = {}
+        for table_name, table_rows in rows.items():
+            database_name, schema_name = tables[table_name]
+            foreign_keys[table_name] = []
+            for row in table_rows:
+                # REFERENCES keeps the names as written. DuckDB resolves them
+                # case-insensitively, so report the referenced table's own
+                # spelling, as for any other reflected name.
+                referred_table, referred_columns = referenced.get(
+                    (database_name, schema_name, row["referenced_table"].lower()),
+                    (row["referenced_table"], {}),
+                )
+                foreign_keys[table_name].append(
+                    {
+                        "name": row["constraint_name"],
+                        "constrained_columns": list(row["constraint_column_names"]),
+                        "referred_schema": schema
+                        if schema is not None
+                        else referred_schemas.get(table_name),
+                        "referred_table": referred_table,
+                        "referred_columns": [
+                            referred_columns.get(column.lower(), column)
+                            for column in row["referenced_column_names"]
+                        ],
+                        "options": {},
+                        "comment": None,
+                    }
+                )
         return self._iter_reflection_results(
             schema, tables, foreign_keys, ReflectionDefaults.foreign_keys
         )
@@ -2956,12 +3271,25 @@ class Dialect(PGDialect_psycopg2):
             suffix="ORDER BY table_name, index_name",
         )
         indexes: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for row in self._rows_for_reflected_relations(
-            connection.execute(stmt, params).mappings(), tables
-        ):
+        index_rows = list(
+            self._rows_for_reflected_relations(
+                connection.execute(stmt, params).mappings(), tables
+            )
+        )
+        table_columns = self._canonical_column_names(
+            connection, tables, {row["table_name"] for row in index_rows}
+        )
+        for row in index_rows:
             expressions, column_names = self._reflect_duckdb_index_expressions(
                 row["expressions"]
             )
+            # Index DDL keeps the identifiers as written. DuckDB matches them
+            # to columns case-insensitively, so report the column's own name.
+            columns = table_columns.get(row["table_name"], {})
+            column_names = [
+                None if name is None else columns.get(name.lower())
+                for name in column_names
+            ]
             reflected_index: Dict[str, Any] = {
                 "name": row["index_name"],
                 "column_names": column_names,
@@ -3056,10 +3384,13 @@ class Dialect(PGDialect_psycopg2):
     def has_schema(self, connection: "Connection", schema: str, **kw: Any) -> bool:
         """Whether ``schema`` (``schema`` or ``database.schema``) exists."""
         database_name, schema_name = self.identifier_preparer._separate(schema)
-        sql = "SELECT 1 FROM duckdb_schemas() WHERE schema_name = :schema_name"
+        sql = (
+            "SELECT 1 FROM duckdb_schemas() "
+            "WHERE lower(schema_name) = lower(:schema_name)"
+        )
         params = {"schema_name": schema_name}
         if database_name is not None:
-            sql += " AND database_name = :database_name"
+            sql += " AND lower(database_name) = lower(:database_name)"
             params["database_name"] = database_name
         return connection.execute(text(sql + " LIMIT 1"), params).first() is not None
 
@@ -3090,6 +3421,18 @@ class Dialect(PGDialect_psycopg2):
         return self._iter_reflection_results(schema, table_names, {}, dict)
 
     def create_connect_args(self, url: SAURL) -> Tuple[tuple, dict]:
+        unsupported = [
+            name
+            for name in ("username", "password", "host", "port")
+            if getattr(url, name) is not None
+        ]
+        if unsupported:
+            raise ArgumentError(
+                f"DuckDB URLs do not take a {', '.join(unsupported)}. Use three "
+                "slashes before the database, for example duckdb:///md:my_db or "
+                "duckdb:///path/to/file.duckdb, and pass credentials such as "
+                "motherduck_token in the query or connect_args."
+            )
         opts = url.translate_connect_args(database="database")
         database = opts.get("database")
         if database in {None, ""}:
@@ -3309,7 +3652,7 @@ class Dialect(PGDialect_psycopg2):
             # connection that is still usable. Invalidating it would discard
             # the pooled connection and, for :memory:, the whole database.
             if not isinstance(e, duckdb.OperationalError) or isinstance(
-                e, _DUCKDB_IO_EXCEPTIONS
+                e, _DUCKDB_LIVE_CONNECTION_EXCEPTIONS
             ):
                 return False
         message = str(e).lower()
@@ -3347,6 +3690,12 @@ class Dialect(PGDialect_psycopg2):
             retry_count = 1
         if retry_count <= 0 or not _is_idempotent_statement(statement):
             return executor()
+        connection = getattr(cursor, "connection", None)
+        if isinstance(connection, ConnectionWrapper):
+            # Buffer another cursor's unread rows before the retry loop, so a
+            # failure fetching them is reported, not retried as this
+            # statement's failure (the retry's rollback would drop them).
+            connection._buffer_pending_result(cursor)
         backoff = options.get("duckdb_retry_backoff")
         attempt = 0
         first_error: Optional[Exception] = None

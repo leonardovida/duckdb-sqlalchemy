@@ -8,7 +8,50 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
-- None yet.
+### Highlights
+
+- Reflected indexes, foreign keys, generated columns and mixed-case schemas recreate correctly, and Alembic autogenerate stops reporting spurious string default and VARCHAR changes. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- Bulk inserts, COPY helpers and typed binds keep values intact in more cases, including datetimes mixed with dates, positive-exponent Decimals and NumPy arrays. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- Connection errors no longer echo MotherDuck tokens, and several transaction and result lifecycle errors no longer leave pooled connections in a broken state. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+
+### Bug Fixes
+
+- Connection `TypeError` messages no longer include config values such as `motherduck_token`. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- Raw Arrow readers taken from `result.cursor` no longer make later statements and commits fail with "result closed". [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- A commit that fails because an Arrow batch reader is still open rolls back, so the next pool checkout no longer fails with "cannot start a transaction within a transaction". [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- Transient-error retries report a fetch error of an earlier partly read result instead of retrying the new statement and truncating the earlier result. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- Write conflicts on tables whose names contain words such as `timeout` no longer invalidate the connection. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- `register` no longer returns the previous statement's rows, and `duckdb_arrow=True` works for executemany `INSERT ... RETURNING`. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- A raw `COMMIT` inside a transaction keeps later writes transactional. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- `preload_extensions` accepts a single extension name, and repeated URL query keys such as `extension_directories` reach DuckDB as lists. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- `read_parquet` and `read_csv` accept any iterable of paths, and `table_function` passes column type mappings to DuckDB. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- Large `executemany` INSERTs no longer truncate datetimes to midnight when a column, LIST item or STRUCT field also contains `date` values. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- Integer and UNION columns store Decimal values with a positive exponent, such as `Decimal("1E+2")`, at their full value. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- `FixedArray` and `ARRAY` columns accept NumPy arrays of any numeric dtype, such as float32 embeddings. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- MAP values with LIST, STRUCT or MAP keys can be inserted in the `{"key": [...], "value": [...]}` shape in which they are fetched. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- `copy_from_rows` stores strings with backslashes or quotes unchanged when `escape` differs from `quote`, stores aware datetimes as a regular INSERT does, and writes pandas `NA` and `NaT` as NULL. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- `insert_from_arrow` loads Arrow columns whose names differ only in case into their own target columns. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- Reflected indexes and foreign keys recreate correctly when the DDL spelled names in a different case than the table definition. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- Reflection finds schemas, attached databases and sequences regardless of case. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- `Computed` columns can be created, and generated columns reflect with their expression. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- Tables reflected with an autoincrement primary key can be created in a new database. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- Decimal literals keep full precision when rendered inline or used as server defaults. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- Alembic autogenerate no longer reports changes for plain string server defaults or for `Text`, `CHAR` and `String(n)` columns. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+
+### Compatibility
+
+- DuckDB URLs with a host, port, user name or password raise `ArgumentError`. Use `duckdb:///<database>`. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- `MotherDuckURL` and `create_motherduck_engine` raise `ValueError` for databases without the `md:` or `motherduck:` prefix. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- In `MotherDuckURL`, keyword arguments override `path_query`, `query` and an embedded query string even when they use a deprecated alias. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- `Computed(..., persisted=True)` raises `CompileError`. Use `persisted=False` or leave `persisted` unset. Reflected generated columns have `default=None` and a `computed` entry. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- Reflected index and foreign key names follow the catalog spelling, and schema, database and sequence lookups are case-insensitive. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- Untyped `text()` parameters still bind `Decimal("1E+2")` as 1, which is DuckDB behavior. Use a typed column or `bindparam`, or format the value with `format(value, "f")`. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+
+### Maintenance
+
+- The pandas bulk-write examples run as written, and the guides describe the default `duckdb_copy_threshold` of 10,000 rows. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- The documentation index links the performance, adoption and breaking-changes pages, and notes that fsspec filesystems need their implementation package. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
+- The package declares the `Typing :: Typed` classifier, and the DuckDB and SQLAlchemy prerelease CI jobs no longer mark runs on `main` as failed. [#218](https://github.com/leonardovida/duckdb-sqlalchemy/pull/218)
 
 ## [1.5.6.6](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.5...v1.5.6.6) (2026-10-28)
 

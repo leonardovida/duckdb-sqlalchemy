@@ -23,6 +23,7 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Database",
     "Topic :: Database :: Front-Ends",
+    "Typing :: Typed",
 ]
 dependencies = [
     "duckdb>=1.3.0,<2",
@@ -92,7 +93,7 @@ ignore = ['E203', 'E501']
 
 [tool.hatch.build.targets.wheel]
 packages = ["duckdb_sqlalchemy"]
-exclude = ["duckdb_sqlalchemy/tests", "duckdb_sqlalchemy/conftest.py"]
+exclude = ["duckdb_sqlalchemy/tests"]
 
 [tool.hatch.build.targets.sdist]
 include = [

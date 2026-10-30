@@ -1,11 +1,13 @@
 import csv
 import datetime
 import math
+import sys
 import tempfile
 import uuid
 from pathlib import Path
 from typing import (
     Any,
+    Callable,
     Dict,
     Iterable,
     Mapping,
@@ -271,9 +273,44 @@ def _resolve_null_marker(
     return marker, options
 
 
-def _csv_value(value: Any, null_marker: str) -> Any:
-    if value is None:
+def _is_pandas_missing(value: Any) -> bool:
+    # Rows built from a DataFrame carry pd.NA and pd.NaT. Only check them when
+    # the application already imported pandas.
+    pd = sys.modules.get("pandas")
+    return pd is not None and (value is pd.NA or value is pd.NaT)
+
+
+def _session_time_zone(connection: Any) -> datetime.tzinfo:
+    """The zone DuckDB uses to bind aware datetimes into TIMESTAMP columns."""
+    row = _execute_sql(
+        connection,
+        "SELECT value FROM duckdb_settings() WHERE name = 'TimeZone'",
+    ).fetchone()
+    if row is not None and row[0]:
+        try:
+            from zoneinfo import ZoneInfo
+
+            return ZoneInfo(str(row[0]))
+        except Exception:
+            pass
+    # Without ICU, DuckDB has no TimeZone setting and uses UTC.
+    return datetime.timezone.utc
+
+
+def _csv_value(
+    value: Any,
+    null_marker: str,
+    aware_datetime: Optional[Callable[[datetime.datetime, int], str]] = None,
+    index: int = 0,
+) -> Any:
+    if value is None or _is_pandas_missing(value):
         return null_marker
+    if (
+        aware_datetime is not None
+        and isinstance(value, datetime.datetime)
+        and value.utcoffset() is not None
+    ):
+        return aware_datetime(value, index)
     if isinstance(value, _BINARY_TYPES):
         raise TypeError(
             "copy_from_rows cannot write binary values "
@@ -312,7 +349,25 @@ def _csv_writer_options(options: Mapping[str, Any]) -> Dict[str, Any]:
     writer_options["doublequote"] = escape == quote
     if escape != quote:
         writer_options["escapechar"] = escape
+        # The csv module escapes characters in unquoted fields too, but DuckDB
+        # only reads escapes inside quotes. Quote every field so they round
+        # trip. Quoted null markers still load as NULL (allow_quoted_nulls).
+        writer_options["quoting"] = csv.QUOTE_ALL
     return writer_options
+
+
+def _timestamptz_columns(
+    connection: Any, table: TableLike, columns: Optional[Sequence[str]]
+) -> Sequence[bool]:
+    """Whether each CSV column of ``table`` is a TIMESTAMPTZ column."""
+    selected = _format_columns(connection, columns).strip()[1:-1] or "*"
+    # DESCRIBE reports declared types. A result description does not tell
+    # TIMESTAMP from TIMESTAMPTZ on DuckDB before 1.4.
+    rows = _execute_sql(
+        connection,
+        f"DESCRIBE SELECT {selected} FROM {_format_table(connection, table)}",
+    ).fetchall()
+    return [str(row[1]).upper() == "TIMESTAMP WITH TIME ZONE" for row in rows]
 
 
 def _copy_rows_as_csv_chunks(
@@ -381,6 +436,26 @@ def _copy_rows_as_csv_chunks(
     writer = None
     count = 0
     primary = None
+    zone: Optional[datetime.tzinfo] = None
+    tz_columns: Optional[Sequence[bool]] = None
+
+    def aware_datetime(value: datetime.datetime, index: int) -> str:
+        # A regular INSERT converts an aware datetime to the session zone for
+        # TIMESTAMP columns. Write that wall time without an offset: DuckDB
+        # reads it into TIMESTAMP as is and into TIMESTAMPTZ in the session
+        # zone. (DuckDB before 1.4 applies an offset when reading TIMESTAMP,
+        # later versions drop it.) A wall time the session zone repeats is
+        # ambiguous for TIMESTAMPTZ, so keep its offset for those columns only.
+        nonlocal zone, tz_columns
+        if zone is None:
+            zone = _session_time_zone(connection)
+        local = value.astimezone(zone)
+        if local.replace(fold=1 - local.fold).utcoffset() != local.utcoffset():
+            if tz_columns is None:
+                tz_columns = _timestamptz_columns(connection, table, columns)
+            if index < len(tz_columns) and tz_columns[index]:
+                return local.isoformat(" ")
+        return local.replace(tzinfo=None).isoformat(" ")
 
     try:
         for row in rows:
@@ -393,7 +468,12 @@ def _copy_rows_as_csv_chunks(
                 flush_chunk(current_tmp)
                 tmp, writer, count = open_writer()
 
-            writer.writerow([_csv_value(value, null_marker) for value in row])
+            writer.writerow(
+                [
+                    _csv_value(value, null_marker, aware_datetime, index)
+                    for index, value in enumerate(row)
+                ]
+            )
             count += 1
 
         if tmp is not None and count:
@@ -591,14 +671,15 @@ def insert_from_arrow(
     preparer = connection.dialect.identifier_preparer
     target = _format_table(connection, table)
     targets = ", ".join(preparer.quote_identifier(name) for name in target_columns)
-    sources = ", ".join(preparer.quote_identifier(name) for name in source_columns)
     view_name = f"__duckdb_sa_arrow_{uuid.uuid4().hex}"
     dbapi_connection = connection.connection.dbapi_connection
     dbapi_connection.register(view_name, data)
     try:
         insert = "INSERT" if on_conflict is None else f"INSERT OR {on_conflict.upper()}"
         result = connection.exec_driver_sql(
-            f"{insert} INTO {target} ({targets}) SELECT {sources} FROM {view_name}"
+            # Select by position: DuckDB renames Arrow columns whose names
+            # differ only in case, so selecting them by name can repeat one.
+            f"{insert} INTO {target} ({targets}) SELECT * FROM {view_name}"
         )
     except BaseException:
         try:

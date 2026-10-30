@@ -106,10 +106,14 @@ def _changes_values_on_register(
     Arrow table or DataFrame infers one type per column (or nested field),
     which drops TIME offsets, turns intervals into microseconds, shifts naive
     datetimes mixed with aware ones, merges STRUCT keys that differ only in
-    case and renders integers mixed with floats as floats.
+    case, renders integers mixed with floats as floats and truncates
+    datetimes mixed with dates to midnight.
     """
     mapping_rows = rows_use_mapping_shape(rows)
     aware: dict[tuple[Any, ...], bool] = {}
+    # Whether a field holds datetimes (True) or plain dates (False). Arrow
+    # infers a field with both as date32 and drops the time of day.
+    has_time: dict[tuple[Any, ...], bool] = {}
     struct_keys: dict[tuple[Any, ...], dict[str, str]] = {}
     # One inferred DECIMAL type holds the widest integer part and scale.
     decimals: dict[tuple[Any, ...], tuple[int, int]] = {}
@@ -120,8 +124,12 @@ def _changes_values_on_register(
         if isinstance(value, int):
             return False
         if isinstance(value, datetime.datetime):
+            if has_time.setdefault(path, True) is not True:
+                return True
             has_tz = value.tzinfo is not None
             return aware.setdefault(path, has_tz) is not has_tz
+        if isinstance(value, datetime.date):
+            return has_time.setdefault(path, False) is not False
         if isinstance(value, datetime.time):
             return value.tzinfo is not None
         if isinstance(value, datetime.timedelta):

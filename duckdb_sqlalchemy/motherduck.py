@@ -116,6 +116,7 @@ CREATE_ENGINE_KWARGS = frozenset(
         "echo_pool",
         "enable_from_linting",
         "execution_options",
+        "future",
         "hide_parameters",
         "insertmanyvalues_page_size",
         "isolation_level",
@@ -125,6 +126,7 @@ CREATE_ENGINE_KWARGS = frozenset(
         "logging_name",
         "max_identifier_length",
         "max_overflow",
+        "module",
         "paramstyle",
         "plugins",
         "pool_logging_name",
@@ -133,6 +135,7 @@ CREATE_ENGINE_KWARGS = frozenset(
         "pool_timeout",
         "pool_use_lifo",
         "query_cache_size",
+        "skip_autocommit_rollback",
         "use_insertmanyvalues",
     }
 )
@@ -222,7 +225,11 @@ def _normalize_path_query_aliases(path_query: Dict[str, Any]) -> Dict[str, Any]:
 def _normalize_path_query_mapping(
     *mappings: Optional[Mapping[str, Any]],
 ) -> Dict[str, Any]:
-    return _normalize_path_query_aliases(merge_query_mappings(*mappings))
+    # Resolve aliases per source so a later source wins even when it uses a
+    # deprecated spelling of a key an earlier source set canonically.
+    return merge_query_mappings(
+        *(_normalize_path_query_aliases(dict(mapping or {})) for mapping in mappings)
+    )
 
 
 def _normalize_config_aliases(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -405,6 +412,12 @@ def MotherDuckURL(
     """
 
     database_name, separator, embedded = database.partition("?")
+    if not is_motherduck_database(database_name):
+        raise ValueError(
+            f"MotherDuck databases start with 'md:' or 'motherduck:', got "
+            f"{database_name!r}. Use 'md:{database_name}' for a MotherDuck "
+            "database, or sqlalchemy.create_engine for a local one."
+        )
     validate_motherduck_database_name(database_name)
     embedded_query: Dict[str, Any] = {}
     if separator:
@@ -486,6 +499,10 @@ def create_motherduck_engine(
         for key in list(path_params)
         if key in CREATE_ENGINE_KWARGS
     }
+    # A Pool instance goes to create_engine. A string such as pool="queue"
+    # stays in the URL as the dialect's pool override.
+    if isinstance(path_params.get("pool"), Pool):
+        engine_kwargs["pool"] = path_params.pop("pool")
     url = MotherDuckURL(database=database, query=query, **path_params)
     # Credentials go to DuckDB config so str(engine.url), logs and
     # tracebacks do not show them.

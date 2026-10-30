@@ -1792,7 +1792,8 @@ def test_motherduck_url_normalizes_deprecated_session_aliases() -> None:
         )
 
     assert url.database == "md:db"
-    assert url.query == {"session_name": "old-team"}
+    # Keyword arguments take precedence over path_query, aliases included.
+    assert url.query == {"session_name": "legacy-team"}
     assert [str(w.message) for w in recorded] == [
         "`session_hint` is deprecated; use `session_name` instead.",
         "`motherduck_session_hint` is deprecated; use `session_name` instead.",
