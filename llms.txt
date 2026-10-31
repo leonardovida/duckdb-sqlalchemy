@@ -8,7 +8,7 @@ Key entry points:
 - duckdb_sqlalchemy table functions (read_parquet, read_csv, table_function)
 - duckdb_sqlalchemy COPY helpers (copy_from_parquet, copy_from_csv, copy_from_rows, copy_to_parquet)
 - duckdb_sqlalchemy.checkpoint
-- MotherDuck SQL function helpers (md_list_dives, md_get_guide, md_list_flights, prompt_jev, ...)
+- MotherDuck SQL function helpers (md_create_dive, md_update_dive_content, md_list_dives, md_get_guide, prompt_jev, ...)
 
 Behavior notes:
 - Reflection without a schema covers the current database and schema; pass schema="db.schema" for attached databases
@@ -23,6 +23,7 @@ Docs (https://leonardovida.github.io/duckdb-sqlalchemy/):
 - overview.html
 - connection-urls.html
 - motherduck.html
+- dives.html
 - configuration.html
 - olap.html
 - pandas-jupyter.html

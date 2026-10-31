@@ -43,5 +43,4 @@ SQLAlchemy URLs use the `duckdb://` driver name in both packages. Existing URLs 
   [adoption evidence](adoption) for downstream integration proposals.
 - See [motherduck.md](motherduck) for MotherDuck-specific behavior.
 - See the [README](https://github.com/leonardovida/duckdb-sqlalchemy#readme)
-  for project lineage and the
-  [roadmap](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/ROADMAP.md).
+  for project lineage.

@@ -14,6 +14,7 @@ Production-ready DuckDB SQLAlchemy dialect for DuckDB and MotherDuck.
 - [Migration from duckdb_engine](migration-from-duckdb-engine)
 - [Connection URLs](connection-urls)
 - [MotherDuck](motherduck)
+- [MotherDuck Dives](dives)
 - [Configuration](configuration)
 - [OLAP workflows](olap)
 - [Pandas and Jupyter](pandas-jupyter)
@@ -26,4 +27,5 @@ Production-ready DuckDB SQLAlchemy dialect for DuckDB and MotherDuck.
 ## Examples
 
 See [examples/](https://github.com/leonardovida/duckdb-sqlalchemy/tree/main/examples)
-for runnable scripts.
+for runnable scripts, including MotherDuck reader pools, concurrent writers and
+Dive deployment.
