@@ -17,6 +17,10 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
+- None yet.
+
+## [1.5.6.8](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.7...v1.5.6.8) (2026-11-02)
+
 - **`with_for_update()` is ignored** - `select(...).with_for_update()` compiles without a locking clause, as on SQLite, instead of failing with "SELECT locking clause is not supported". DuckDB has no row locks. A transaction that writes a row another open transaction changed fails with a `TransactionException`. Roll back and run the transaction again when that happens. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
 - **`fetch()` with `percent` or `with_ties`** - `fetch(n, percent=True)` compiles to `LIMIT n PERCENT` instead of failing in DuckDB. `fetch(n, with_ties=True)` raises `CompileError` when the statement is compiled, instead of `ProgrammingError` from DuckDB. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
 - **`tablesample` samples a percentage** - `tablesample(table, n)` compiles to `TABLESAMPLE system(n PERCENT)` with constant arguments. It previously failed. DuckDB's `system` method samples whole vectors of 2048 rows, so use `func.bernoulli(n)` for small tables. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
