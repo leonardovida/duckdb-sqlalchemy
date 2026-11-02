@@ -441,8 +441,9 @@ with engine.connect() as conn:
 
 The helper accepts SQLAlchemy `Select` and compound selects such as
 `union_all()`. Pass one parameter mapping through `parameters`; normal typed
-bind processing and expanding `IN` parameters are preserved. Raw SQL strings,
-`text()` statements, and inserts/updates/deletes are not accepted. SQLAlchemy
+bind processing and expanding `IN` parameters are preserved. A `Table` or a
+table name such as `"analytics.events"` exports the whole table. Raw SQL
+strings, `text()` statements, and inserts/updates/deletes are not accepted. SQLAlchemy
 expressions remain trusted application code.
 
 COPY options such as `compression` are passed as keyword arguments. The format

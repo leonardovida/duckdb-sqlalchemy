@@ -24,7 +24,7 @@ from sqlalchemy import (
     text,
 )
 
-from ...datatypes import Map, Struct
+from ...datatypes import Map, Struct, UInt8, UInt32, UInt64
 from .conftest import EngineFactory
 
 pytest.importorskip("alembic")
@@ -71,7 +71,14 @@ def _metadata(version: int) -> MetaData:
         Column("history", ARRAY(Struct({"at": DateTime, "v": Integer}))),
         Column("ratio", Float(precision=24)),
         Column("mood", Enum("sad", "ok", name="mood")),
+        # DuckDB reports these named ENUMs by their labels
+        Column("moods", ARRAY(Enum("sad", "ok", name="mood"))),
+        Column("last_visit", Struct({"mood": Enum("sad", "ok", name="mood")})),
         Column("status", Enum("on", "off")),
+        # DuckDB stores these as UTINYINT, UINTEGER and UBIGINT
+        Column("retries", UInt8),
+        Column("visits", UInt32),
+        Column("bytes_sent", UInt64),
     ]
     if version >= 2:
         columns.append(Column("nickname", String))

@@ -147,7 +147,7 @@ def test_copy_to_parquet_overwrites_and_survives_rollback(
 def test_copy_to_parquet_rejects_non_select(invalid: object, tmp_path: Path) -> None:
     engine = create_engine("duckdb:///:memory:")
     with engine.connect() as connection:
-        with pytest.raises(TypeError, match="Select or CompoundSelect"):
+        with pytest.raises(TypeError, match="requires a Select, CompoundSelect"):
             copy_to_parquet(connection, invalid, tmp_path / "invalid.parquet")
 
 

@@ -18,11 +18,12 @@ from typing import (
     cast,
 )
 
+from sqlalchemy import literal_column, select, text
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.elements import ClauseElement
 from sqlalchemy.sql.expression import Executable
 from sqlalchemy.sql.expression import table as table_clause
-from sqlalchemy.sql.selectable import CompoundSelect, Select
+from sqlalchemy.sql.selectable import CompoundSelect, FromClause, Select
 from sqlalchemy.sql.visitors import InternalTraversal
 
 from ._row_shape import rows_as_sequences
@@ -163,23 +164,30 @@ def _compile_copy_to_parquet(
 
 def copy_to_parquet(
     connection: Any,
-    selectable: Union[Select, CompoundSelect],
+    selectable: Union[Select, CompoundSelect, FromClause, str],
     path: Union[str, Path],
     *,
     parameters: Optional[Mapping[str, Any]] = None,
     **options: Any,
 ) -> Any:
-    """Export a SELECT to Parquet and return DuckDB's COPY result.
+    """Export a SELECT, a table or a table name to Parquet.
 
-    By default the result contains a single ``Count`` column. COPY options
-    may change the result schema.
+    Returns DuckDB's COPY result, which by default contains a single ``Count``
+    column. COPY options may change the result schema.
     The output path is a literal for compatibility with older DuckDB releases.
     COPY overwrites an existing single-file destination, and its file write is
     not rolled back with the surrounding SQL transaction.
     """
 
+    if isinstance(selectable, str):
+        name = _format_table(connection, selectable)
+        selectable = select(literal_column("*")).select_from(text(name))
+    elif isinstance(selectable, FromClause):
+        selectable = select(selectable)
     if not isinstance(selectable, (Select, CompoundSelect)):
-        raise TypeError("copy_to_parquet requires a Select or CompoundSelect")
+        raise TypeError(
+            "copy_to_parquet requires a Select, CompoundSelect, table or table name"
+        )
     if any(str(key).lower() == "format" for key in options):
         raise ValueError("copy_to_parquet always uses FORMAT parquet")
     if parameters is not None and not isinstance(parameters, Mapping):

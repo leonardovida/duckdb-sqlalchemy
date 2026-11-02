@@ -189,11 +189,23 @@ DuckDB does not support these, so the statements SQLAlchemy emits for them fail:
 - savepoints: `Connection.begin_nested()` and `Session.begin_nested()` raise
   `ProgrammingError`. The dialect raises it without sending `SAVEPOINT`, so the
   outer transaction keeps its changes
-- row locks: `select(...).with_for_update()` fails with "SELECT locking clause
-  is not supported"
 - adding or dropping UNIQUE, FOREIGN KEY, or CHECK constraints on an existing
   table (`ALTER TABLE ... ADD CONSTRAINT`); see
   [Alembic integration](alembic) for a batch-mode workaround
+
+## Statements the dialect adapts
+
+- row locks: DuckDB has no `SELECT ... FOR UPDATE`, so `with_for_update()` is
+  ignored, as on SQLite. DuckDB detects conflicting writes instead: a
+  transaction that updates or deletes a row another open transaction changed
+  fails with a `TransactionException`. Roll back and run the transaction again
+- `select(...).fetch(n, percent=True)` compiles to `LIMIT n PERCENT`, and
+  `fetch(n, with_ties=True)` raises `CompileError`
+- `tablesample(table, n)` samples `n` percent, as in standard SQL, and
+  compiles to `TABLESAMPLE system(n PERCENT)`. DuckDB samples whole vectors
+  of 2048 rows with `system`, so use `tablesample(table, func.bernoulli(n))`
+  for small tables
+- `a.bitwise_xor(b)` compiles to `xor(a, b)`
 
 ## Isolation levels
 
@@ -205,6 +217,12 @@ DuckDB has a single transaction isolation level. The dialect accepts
 
 `Numeric`/`DECIMAL` values are bound and returned as `decimal.Decimal` without
 passing through float. Use `Numeric(asdecimal=False)` or `Float` for floats.
+DuckDB binds a `Decimal` parameter as `DOUBLE` when it needs more than 38
+digits, which includes a value below 1 with 38 fractional digits, such as
+`Decimal("0.00000000000000000000008706567643447616")`. Such a parameter loses
+precision even when the target column is `DECIMAL(38, 38)`, and so does the same
+number written as a SQL literal. Pass such a value as text inside a cast, for
+example `cast(literal(format(value, "f")), Numeric(38, 38))`.
 Generic `Float()` and `Float(precision > 24)` compile to `DOUBLE` (64 bits);
 `REAL` and `Float(24)` use 32 bits. Existing FLOAT columns retain their original
 precision until explicitly migrated.
