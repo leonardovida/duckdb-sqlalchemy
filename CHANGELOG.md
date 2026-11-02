@@ -8,8 +8,34 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+- None yet.
+
+## [1.5.6.8](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.7...v1.5.6.8) (2026-11-02)
+
+### Highlights
+
+- Transactions stay usable on DuckDB 2.0 after a failed `begin_nested()` call or a partly read Arrow reader, so pooled connections no longer lose earlier changes or fail with "connection has an open result". [#220](https://github.com/leonardovida/duckdb-sqlalchemy/pull/220)
+- More SQLAlchemy constructs compile to valid DuckDB SQL, including `bitwise_xor`, `tablesample`, `fetch(percent=True)` and named ENUMs inside nested types, and STRUCT fields and MAP keys can be selected with their declared types. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
+- The MotherDuck examples and guides cover reader pools, concurrent writer processes and deploying Dives from Python. [#221](https://github.com/leonardovida/duckdb-sqlalchemy/pull/221)
+
+### Upgrading from 1.5.6.7
+
+1.5.6.8 is a maintenance release on the 1.5.6 line, so constraints such as `duckdb-sqlalchemy~=1.5.6.7` select it. It contains behavior changes that some applications notice.
+
+1. Upgrade with `pip install -U duckdb-sqlalchemy` or update the lock file.
+2. Read partly consumed Arrow readers to the end before running the next statement on the same connection.
+3. Run Alembic autogenerate and review the generated migration before applying it. Unsigned integer columns and named ENUMs inside nested columns no longer produce type changes.
+4. Check the Compatibility items below, and see [breaking and behavior changes](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/breaking-changes.md) for the full list.
+
+### Features
+
+- `Struct` columns support `column["field"]` and `Map` columns support `column[key]`. The expression returns the declared field or value type, so result processors such as `Numeric`, `Enum` and `Uuid` apply, and it can be filtered and aggregated. Field names match case-insensitively, as in DuckDB. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
+- `copy_to_parquet` accepts a `Table` or a table name such as `"analytics.events"` and exports the whole table. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
+
 ### Bug Fixes
 
+- `Connection.begin_nested()` and `Session.begin_nested()` raise `ProgrammingError` without sending `SAVEPOINT` to DuckDB, so the outer transaction keeps its changes. DuckDB 2.0 aborts the whole transaction when a statement fails, so earlier releases lost every change made before the `begin_nested()` call on DuckDB 2.0. [#220](https://github.com/leonardovida/duckdb-sqlalchemy/pull/220)
+- A partly read Arrow reader from `result.cursor.to_arrow_reader()` is closed when the connection runs its next statement, commits, rolls back or returns to the pool. On DuckDB 2.0 such a reader previously made every later statement, including the pool's reset rollback, fail with "connection has an open result". [#220](https://github.com/leonardovida/duckdb-sqlalchemy/pull/220)
 - `column.bitwise_xor(other)` compiles to DuckDB's `xor(a, b)`. It previously rendered PostgreSQL's `#` operator, which DuckDB rejects with a syntax error. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
 - `tablesample(table, n)` samples `n` percent and compiles to `TABLESAMPLE system(n PERCENT)`, with the sample size and `seed` rendered as constants. It previously failed because DuckDB accepts only constants there, and DuckDB reads a bare number as a row count. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
 - `select(...).fetch(n, percent=True)` compiles to `LIMIT n PERCENT`. It previously failed with a DuckDB syntax error. `fetch(n, with_ties=True)` raises `CompileError`, because DuckDB has no equivalent. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
@@ -18,19 +44,11 @@ preserved from the upstream project for historical context.
 - Alembic autogenerate no longer reports `modify_type` for `UInt8`, `UInt16`, `UInt32`, `UInt64` and `VarInt` columns, which DuckDB stores as `UTINYINT`, `USMALLINT`, `UINTEGER`, `UBIGINT` and `BIGNUM`. It also no longer reports a named `Enum` inside a `Struct`, `Map`, `FixedArray` or `ARRAY` column as changed. A change to the ENUM labels is still detected. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
 - Indexing a `FixedArray` column no longer emits an `SADeprecationWarning` about `operator_classes` on SQLAlchemy 2.1. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
 
-### Features
-
-- `Struct` columns support `column["field"]` and `Map` columns support `column[key]`. The expression returns the declared field or value type, so result processors such as `Numeric`, `Enum` and `Uuid` apply, and it can be filtered and aggregated. Field names match case-insensitively, as in DuckDB. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
-- `copy_to_parquet` accepts a `Table` or a table name such as `"analytics.events"` and exports the whole table. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
-
-- `Connection.begin_nested()` and `Session.begin_nested()` raise `ProgrammingError` without sending `SAVEPOINT` to DuckDB, so the outer transaction keeps its changes. DuckDB 2.0 aborts the whole transaction when a statement fails, so earlier releases lost every change made before the `begin_nested()` call on DuckDB 2.0. [#220](https://github.com/leonardovida/duckdb-sqlalchemy/pull/220)
-- A partly read Arrow reader from `result.cursor.to_arrow_reader()` is closed when the connection runs its next statement, commits, rolls back or returns to the pool. On DuckDB 2.0 such a reader previously made every later statement, including the pool's reset rollback, fail with "connection has an open result". [#220](https://github.com/leonardovida/duckdb-sqlalchemy/pull/220)
-
 ### Compatibility
 
 - `select(...).with_for_update()` is ignored, as on SQLite, instead of failing with "SELECT locking clause is not supported". DuckDB has no row locks and reports conflicting writes from concurrent transactions with a `TransactionException`. Applications that relied on the error to detect unsupported locking should check for DuckDB explicitly. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
 - Code that checked for `NullType` on reflected STRUCT, MAP or UNION columns with ENUM members receives the nested type instead. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)
-- Reading such a reader after the connection has run another statement raises `pyarrow.ArrowInvalid` on every DuckDB version. Earlier releases ended such a reader early without an error on DuckDB 1.x. Read the reader to the end, or call `read_all()`, before running the next statement. [#220](https://github.com/leonardovida/duckdb-sqlalchemy/pull/220)
+- Reading a partly read Arrow reader from `result.cursor.to_arrow_reader()` after the connection has run another statement raises `pyarrow.ArrowInvalid` on every DuckDB version. Earlier releases ended such a reader early without an error on DuckDB 1.x. Read the reader to the end, or call `read_all()`, before running the next statement. [#220](https://github.com/leonardovida/duckdb-sqlalchemy/pull/220)
 
 ### Maintenance
 
@@ -38,6 +56,8 @@ preserved from the upstream project for historical context.
 - The MotherDuck examples cover current workloads. They show reader pools on read scaling replicas, several processes writing one database with retries for conflicting updates, and deploying Dives from Python with versions and a release status. Each example creates and drops its own database. The attach mode, Arrow read, multi-instance pool, queue pool and per-user read scaling scripts are replaced by these examples, and `sqlalchemy_example.py` is now `local_quickstart.py`. [#221](https://github.com/leonardovida/duckdb-sqlalchemy/pull/221)
 - A new MotherDuck Dives guide covers the component contract, deployment from Python, versions, embedding and the helper reference. The MotherDuck guide adds a connection pattern chooser and sections on reader pools, fresh reads after a write, multiple writer processes and one Duckling per tenant. It also states that only a read scaling token makes reader connections read-only, since `access_mode=read_only` does not block writes made with a read-write token. [#221](https://github.com/leonardovida/duckdb-sqlalchemy/pull/221)
 - Internal planning documents, the roadmap, the SEO checklist and a benchmark snapshot are no longer part of the repository. [#221](https://github.com/leonardovida/duckdb-sqlalchemy/pull/221)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.7...v1.5.6.8
 
 ## [1.5.6.7](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.6...v1.5.6.7) (2026-10-30)
 
