@@ -1467,7 +1467,9 @@ class DuckDBENUM(ENUM):
 
 class DuckDBTypeCompiler(PGTypeCompiler):
     def visit_ENUM(self, type_: Any, identifier_preparer: Any = None, **kw: Any) -> str:
-        if not type_.name:
+        # duckdb_inline_enum renders named ENUMs by their labels too, which is
+        # how DuckDB reports them inside nested types.
+        if not type_.name or kw.get("duckdb_inline_enum"):
             render = sqltypes.String().literal_processor(self.dialect)
             return "ENUM(%s)" % ", ".join(render(label) for label in type_.enums)
         return super().visit_ENUM(type_, identifier_preparer=identifier_preparer, **kw)
@@ -1556,6 +1558,53 @@ class DuckDBCompiler(PGCompiler):
         self, binary: Any, operator: Any, **kw: Any
     ) -> str:
         return "NOT %s" % self._regexp_matches(binary, **kw)
+
+    def visit_bitwise_xor_op_binary(self, binary: Any, operator: Any, **kw: Any) -> str:
+        # PostgreSQL's ``#`` is not a DuckDB operator, and ``^`` is power.
+        return "xor(%s, %s)" % (
+            self.process(binary.left, **kw),
+            self.process(binary.right, **kw),
+        )
+
+    def for_update_clause(self, select: Any, **kw: Any) -> str:
+        # DuckDB has no row locks: concurrent writes to the same rows fail
+        # with a TransactionException instead. Like SQLite, ignore the clause.
+        return ""
+
+    def fetch_clause(self, select: Any, **kw: Any) -> str:
+        options = select._fetch_clause_options
+        if select._fetch_clause is None or not (
+            options["percent"] or options["with_ties"]
+        ):
+            return super().fetch_clause(select, **kw)
+        if options["with_ties"]:
+            raise CompileError("DuckDB does not support FETCH ... WITH TIES")
+        # DuckDB has no FETCH ... PERCENT, and LIMIT ... PERCENT takes a constant.
+        kw["literal_binds"] = True
+        text = "\n LIMIT %s PERCENT" % self.process(select._fetch_clause, **kw)
+        if select._offset_clause is not None:
+            text += " OFFSET %s" % self.process(select._offset_clause, **kw)
+        return text
+
+    def visit_tablesample(
+        self, tablesample: Any, asfrom: bool = False, **kw: Any
+    ) -> str:
+        # SQL's TABLESAMPLE SYSTEM(10) samples 10 percent, but DuckDB reads a
+        # bare number as a row count, and it accepts only constants.
+        method = tablesample._get_method()
+        literal_kw = dict(kw, literal_binds=True)
+        arguments = ", ".join(
+            f"{self.process(argument, **literal_kw)} PERCENT"
+            for argument in method.clauses
+        )
+        text = "%s TABLESAMPLE %s(%s)" % (
+            self.visit_alias(tablesample, asfrom=True, **kw),
+            method.name,
+            arguments,
+        )
+        if tablesample.seed is not None:
+            text += " REPEATABLE (%s)" % self.process(tablesample.seed, **literal_kw)
+        return text
 
     def visit_truediv_binary(self, binary: Any, operator: Any, **kw: Any) -> str:
         if getattr(self.dialect, "exact_decimal_division", False):
@@ -2646,23 +2695,18 @@ class Dialect(PGDialect_psycopg2):
     ) -> Any:
         """Reflect STRUCT(...), MAP(...) and UNION(...) into the dialect's types.
 
-        Falls back to NullType when a member type is not recognized or is an
-        ENUM, whose type name DuckDB does not report inside nested types, so a
-        reflected type always compiles back to valid DDL.
+        Falls back to NullType when a member type is not recognized, so a
+        reflected type always compiles back to valid DDL. DuckDB reports ENUM
+        members by their labels, so they reflect as unnamed ENUMs that render
+        inline, like top-level ENUM columns.
         """
         kind = data_type[: data_type.index("(")].strip().upper()
         members = self._split_duckdb_list(data_type[data_type.index("(") + 1 : -1])
 
         def reflect(member_type: str) -> Any:
-            reflected = self._reflect_duckdb_data_type(
+            return self._reflect_duckdb_data_type(
                 member_type, None, {}, type_description=type_description
             )
-            item_type = getattr(reflected, "item_type", reflected)
-            while hasattr(item_type, "item_type"):
-                item_type = item_type.item_type
-            if isinstance(item_type, sqltypes.Enum):
-                return sqltypes.NULLTYPE
-            return reflected
 
         if kind == "MAP":
             if len(members) != 2:

@@ -98,6 +98,25 @@ def test_parquet_and_csv_round_trips_preserve_rows(
             assert _rows(conn, target) == ROWS, target.name
 
 
+def test_copy_to_parquet_exports_a_table_or_table_name(
+    tmp_path: Path, make_engine: EngineFactory
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    metadata = MetaData()
+    source = _table(metadata, "source")
+    target = _table(metadata, "target")
+    metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(source.insert(), ROWS)
+        for name, table in [("table.parquet", source), ("name.parquet", "source")]:
+            assert copy_to_parquet(conn, table, tmp_path / name).scalar_one() == 3
+            copy_from_parquet(conn, target, tmp_path / name)
+            assert _rows(conn, target) == ROWS
+            conn.execute(target.delete())
+        with pytest.raises(ValueError):
+            copy_to_parquet(conn, "source; DROP TABLE source", tmp_path / "x.parquet")
+
+
 def test_copy_from_rows_is_transactional(
     db_path: Path, make_engine: EngineFactory
 ) -> None:

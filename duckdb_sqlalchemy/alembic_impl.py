@@ -28,7 +28,7 @@ from . import (
     _implicit_sequence_ddl_name,
     _strip_enclosing_parentheses,
 )
-from .datatypes import FixedArray, Map, Struct, Union
+from .datatypes import DuckDBInteger, FixedArray, Map, Struct, Union
 
 __all__ = ["DuckDBImpl"]
 
@@ -37,6 +37,21 @@ _previous_impl = _alembic_impl._impls.get("duckdb")
 
 def _float_width(ddl: str) -> int:
     return 4 if ddl.strip().upper() in ("REAL", "FLOAT", "FLOAT4") else 8
+
+
+# DuckDB stores these spellings of its integer types under the canonical name.
+_INTEGER_ALIASES = {
+    "uint8": "utinyint",
+    "uint16": "usmallint",
+    "uint32": "uinteger",
+    "uint64": "ubigint",
+    "varint": "bignum",
+}
+
+
+def _integer_name(ddl: str) -> str:
+    name = ddl.strip().lower()
+    return _INTEGER_ALIASES.get(name, name)
 
 
 class DuckDBImpl(DefaultImpl):
@@ -219,9 +234,12 @@ class DuckDBImpl(DefaultImpl):
             or isinstance(metadata_type, FixedArray)
             or (_is_nested(inspector_type) and _is_nested(metadata_type))
         ):
+            # DuckDB reports an ENUM inside a nested type by its labels.
             compiler = self.dialect.type_compiler_instance
-            return _normalize_sql_expression(compiler.process(inspector_type)) != (
-                _normalize_sql_expression(compiler.process(metadata_type))
+            inspector_ddl = compiler.process(inspector_type, duckdb_inline_enum=True)
+            metadata_ddl = compiler.process(metadata_type, duckdb_inline_enum=True)
+            return _normalize_sql_expression(inspector_ddl) != (
+                _normalize_sql_expression(metadata_ddl)
             )
         if isinstance(inspector_type, sqltypes.Enum) and isinstance(
             metadata_type, sqltypes.Enum
@@ -233,6 +251,14 @@ class DuckDBImpl(DefaultImpl):
             # TEXT, CHAR(n), NCHAR, VARCHAR(n) and STRING are all VARCHAR in
             # DuckDB, which keeps no length, so they reflect as String().
             return False
+        elif isinstance(inspector_type, DuckDBInteger) or isinstance(
+            metadata_type, DuckDBInteger
+        ):
+            # UInt32 creates a UINTEGER column, which reflects as UInteger.
+            compiler = self.dialect.type_compiler_instance
+            return _integer_name(compiler.process(inspector_type)) != _integer_name(
+                compiler.process(metadata_type)
+            )
         elif isinstance(inspector_type, sqltypes.Float) and isinstance(
             metadata_type, sqltypes.Float
         ):
@@ -348,7 +374,10 @@ def _is_varchar(type_obj: Any) -> bool:
 
 def _is_nested(type_obj: Any) -> bool:
     if isinstance(type_obj, sqltypes.ARRAY):
-        type_obj = type_obj.item_type
+        # A LIST of a named ENUM reflects with an unnamed ENUM item.
+        return isinstance(
+            type_obj.item_type, (Struct, Union, Map, FixedArray, sqltypes.Enum)
+        )
     return isinstance(type_obj, (Struct, Union, Map, FixedArray))
 
 

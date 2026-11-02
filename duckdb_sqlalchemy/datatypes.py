@@ -13,12 +13,13 @@ from typing import Any, Dict, Optional, Tuple, Type
 
 import duckdb
 from packaging.version import Version
-from sqlalchemy import exc, util
+from sqlalchemy import exc, literal, util
 from sqlalchemy.dialects.postgresql import ARRAY as PGARRAY
 from sqlalchemy.dialects.postgresql.base import PGTypeCompiler
 from sqlalchemy.engine import Dialect
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.sql import sqltypes, type_api
+from sqlalchemy.sql import operators, sqltypes, type_api
+from sqlalchemy.sql.base import SchemaEventTarget
 from sqlalchemy.sql.compiler import IdentifierPreparer
 from sqlalchemy.sql.type_api import TypeEngine
 from sqlalchemy.types import BigInteger, Integer, SmallInteger, String
@@ -143,6 +144,13 @@ FieldCollection = typing.Union[
     typing.Iterable[Tuple[str, TV]],
 ]
 NormalizedFields = Optional[Tuple[Tuple[str, TypeEngine], ...]]
+# SQLAlchemy 2.1 warns about indexable types that declare no operator classes.
+_OperatorClass: Any = getattr(operators, "OperatorClass", None)
+_KEYED_OPERATORS: Any = (
+    None
+    if _OperatorClass is None
+    else _OperatorClass.BASE | _OperatorClass.COMPARISON | _OperatorClass.INDEXABLE
+)
 _ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 
 
@@ -174,7 +182,31 @@ def _normalize_fields_cache_key(
     )
 
 
-class _FieldsType(TypeEngine):
+class _MemberSchemaEvents(SchemaEventTarget):
+    """Attach member types such as a named ``Enum`` to the column, as ARRAY does.
+
+    ``create_all`` then emits ``CREATE TYPE`` for an ENUM used inside a STRUCT,
+    MAP, UNION or fixed-size ARRAY before the table that refers to it by name.
+    """
+
+    def _member_types(self) -> typing.Iterable[TypeEngine]:
+        raise NotImplementedError
+
+    def _set_parent(self, parent: Any, outer: bool = False, **kw: Any) -> None:
+        if outer:
+            return
+        for member in self._member_types():
+            if isinstance(member, SchemaEventTarget):
+                member._set_parent(parent, **kw)
+
+    def _set_parent_with_dispatch(self, parent: Any, **kw: Any) -> None:
+        super()._set_parent_with_dispatch(parent, outer=True)
+        for member in self._member_types():
+            if isinstance(member, SchemaEventTarget):
+                member._set_parent_with_dispatch(parent)
+
+
+class _FieldsType(_MemberSchemaEvents, TypeEngine):
     cache_ok = True
     fields: Optional[FieldCollection]
     _fields: NormalizedFields
@@ -184,6 +216,9 @@ class _FieldsType(TypeEngine):
         self._fields = _normalize_fields(fields)
         self._fields_cache_key = _normalize_fields_cache_key(self._fields)
 
+    def _member_types(self) -> typing.Iterable[TypeEngine]:
+        return [member for _, member in self._fields or ()]
+
     @util.memoized_property
     def _static_cache_key(self):  # type: ignore[override]
         if self._fields_cache_key is None:
@@ -191,7 +226,7 @@ class _FieldsType(TypeEngine):
         return (self.__class__, ("fields", self._fields_cache_key))
 
 
-class Struct(_FieldsType):
+class Struct(sqltypes.Indexable, _FieldsType):
     """
     Represents a STRUCT type in DuckDB
 
@@ -205,10 +240,33 @@ class Struct(_FieldsType):
     )
     ```
 
+    ``column["first"]`` reads one field as its declared type, so the field's
+    result processor applies.
+
     :param fields: only optional due to limitations with how much type information DuckDB returns to us in the description field
     """
 
     __visit_name__ = "struct"
+
+    class Comparator(sqltypes.Indexable.Comparator):
+        def _setup_getitem(self, index: Any) -> Any:
+            if not isinstance(index, str):
+                raise TypeError(f"STRUCT fields are named by strings, got {index!r}")
+            # DuckDB matches STRUCT field names case-insensitively for ASCII.
+            wanted = index.translate(_ASCII_LOWER)
+            member = next(
+                (
+                    member
+                    for name, member in typing.cast(Struct, self.type)._fields or ()
+                    if name.translate(_ASCII_LOWER) == wanted
+                ),
+                sqltypes.NULLTYPE,
+            )
+            return operators.getitem, literal(index, String()), member
+
+    comparator_factory = Comparator
+    if _KEYED_OPERATORS is not None:
+        operator_classes = _KEYED_OPERATORS
 
     def bind_processor(self, dialect: Dialect) -> Any:
         processors = {}
@@ -293,7 +351,7 @@ class Struct(_FieldsType):
         return process
 
 
-class Map(TypeEngine):
+class Map(sqltypes.Indexable, _MemberSchemaEvents, TypeEngine):
     """
     Represents a MAP type in DuckDB
 
@@ -310,12 +368,26 @@ class Map(TypeEngine):
 
     __visit_name__ = "map"
     cache_ok = True
+
+    class Comparator(sqltypes.Indexable.Comparator):
+        def _setup_getitem(self, index: Any) -> Any:
+            # DuckDB 1.3+ returns the value, or NULL for a missing key.
+            map_type = typing.cast(Map, self.type)
+            key = literal(index, map_type.key_type)
+            return operators.getitem, key, map_type.value_type
+
+    comparator_factory = Comparator
+    if _KEYED_OPERATORS is not None:
+        operator_classes = _KEYED_OPERATORS
     key_type: TypeEngine
     value_type: TypeEngine
 
     def __init__(self, key_type: TV, value_type: TV):
         self.key_type = type_api.to_instance(key_type)
         self.value_type = type_api.to_instance(value_type)
+
+    def _member_types(self) -> typing.Iterable[TypeEngine]:
+        return (self.key_type, self.value_type)
 
     def bind_processor(self, dialect: Dialect) -> Any:
         key_impl = self.key_type.dialect_impl(dialect)
@@ -388,11 +460,13 @@ class Map(TypeEngine):
         return _convert
 
 
-class FixedArray(sqltypes.Indexable, TypeEngine):
+class FixedArray(_MemberSchemaEvents, sqltypes.Indexable, TypeEngine):
     """DuckDB ARRAY with an enforced size, unlike a variable-length LIST."""
 
     cache_ok = True
     comparator_factory = sqltypes.ARRAY.Comparator
+    if hasattr(sqltypes.ARRAY, "operator_classes"):
+        operator_classes = getattr(sqltypes.ARRAY, "operator_classes")
     dimensions = 1
     zero_indexes = False
 
@@ -401,6 +475,9 @@ class FixedArray(sqltypes.Indexable, TypeEngine):
             raise ValueError("FixedArray size must be a positive integer")
         self.item_type = type_api.to_instance(item_type)
         self.size = size
+
+    def _member_types(self) -> typing.Iterable[TypeEngine]:
+        return (self.item_type,)
 
     def bind_processor(self, dialect: Dialect) -> Any:
         processor = self.item_type.dialect_impl(dialect).bind_processor(dialect)

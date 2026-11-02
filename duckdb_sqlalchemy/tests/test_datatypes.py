@@ -428,7 +428,7 @@ def test_nested_type_reflection_round_trips(engine: Engine) -> None:
         assert row.tags == {"a": [1, 2]}
 
 
-def test_nested_types_with_enum_members_reflect_as_null_type(engine: Engine) -> None:
+def test_nested_types_with_enum_members_reflect_their_labels(engine: Engine) -> None:
     with engine.begin() as conn:
         conn.execute(text("CREATE TYPE mood AS ENUM ('sad', 'happy')"))
         conn.execute(
@@ -439,8 +439,26 @@ def test_nested_types_with_enum_members_reflect_as_null_type(engine: Engine) -> 
         )
         table = Table("nested_enum", MetaData(), autoload_with=conn)
 
-    for column in table.columns:
-        assert column.type == sqltypes.NULLTYPE, column.name
+    struct, nested_list, map_ = (column.type for column in table.columns)
+    assert struct.fields["m"].enums == ["sad", "happy"]
+    assert nested_list.fields["m"].item_type.enums == ["sad", "happy"]
+    assert map_.key_type.enums == ["sad", "happy"]
+    # DuckDB does not report the ENUM's name, so the copy declares it inline.
+    fresh = create_engine("duckdb:///:memory:")
+    try:
+        table.metadata.create_all(fresh)
+        with fresh.begin() as conn:
+            conn.execute(
+                table.insert(),
+                {"s": {"m": "happy"}, "l": {"m": ["sad"]}, "k": {"sad": 1}},
+            )
+            assert conn.execute(table.select()).one() == (
+                {"m": "happy"},
+                {"m": ["sad"]},
+                {"sad": 1},
+            )
+    finally:
+        fresh.dispose()
 
 
 @mark.parametrize(
@@ -636,6 +654,12 @@ def _decimal_operand(draw: Any) -> Tuple[decimal.Decimal, int, int]:
     return value, precision, scale
 
 
+def _binds_as_decimal(value: decimal.Decimal) -> bool:
+    _, digits, exponent = value.as_tuple()
+    assert isinstance(exponent, int)
+    return max(len(digits), -exponent + (len(digits) < -exponent)) <= 38
+
+
 @settings(max_examples=200, deadline=None)
 @given(left=_decimal_operand(), right=_decimal_operand())
 @example(  # result scale 38
@@ -652,6 +676,8 @@ def test_exact_decimal_division_matches_python_decimal(
 ) -> None:
     (a, p1, s1), (b, p2, s2) = left, right
     assume(p1 - s1 + s2 <= 22)  # wider quotients keep DuckDB's DOUBLE
+    # DuckDB binds a Decimal below 1 with 38 fractional digits as DOUBLE.
+    assume(all(_binds_as_decimal(value) for value in (a, b)))
     expr = cast_(bindparam("a", a), Numeric(p1, s1)) / cast_(
         bindparam("b", b), Numeric(p2, s2)
     )
