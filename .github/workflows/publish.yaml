@@ -223,7 +223,18 @@ jobs:
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
         run: |
           python -m venv /tmp/published
-          /tmp/published/bin/pip install --no-cache-dir --only-binary=:all: "duckdb-sqlalchemy==$RELEASE_VERSION" pyarrow pandas
+          # The PyPI index can list a new version a few minutes after the JSON API does.
+          for attempt in $(seq 1 30); do
+            if /tmp/published/bin/pip install --no-cache-dir --only-binary=:all: "duckdb-sqlalchemy==$RELEASE_VERSION" pyarrow pandas; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "PyPI did not serve duckdb-sqlalchemy $RELEASE_VERSION in time"
+              exit 1
+            fi
+            echo "Waiting for PyPI to serve duckdb-sqlalchemy $RELEASE_VERSION ($attempt/30)"
+            sleep 10
+          done
           /tmp/published/bin/python -I scripts/verify_distribution.py
 
   github-release:

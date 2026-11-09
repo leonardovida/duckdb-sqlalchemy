@@ -14,6 +14,27 @@ from sqlalchemy import create_engine
 engine = create_engine("duckdb:///md:my_db")
 ```
 
+## DuckDB versions
+
+MotherDuck accepts a range of DuckDB client versions and rejects connections
+from versions outside it. In November 2026 the range is DuckDB 1.4.1 to 1.5.6
+in every region, and us-east-1 also accepts 1.4.0. DuckDB 1.3 is past its end
+of life on MotherDuck, and MotherDuck rejects connections from DuckDB 1.3
+clients with an error that asks them to upgrade. DuckDB 2.0 is not supported
+by MotherDuck or by this package yet.
+
+duckdb-sqlalchemy still supports DuckDB 1.3 for local databases. For
+MotherDuck, install a DuckDB version in the supported range:
+
+```bash
+pip install -U "duckdb>=1.4.1,<2" duckdb-sqlalchemy
+```
+
+MotherDuck publishes end-of-support dates in its
+[version lifecycle schedule](https://motherduck.com/docs/troubleshooting/version-lifecycle-schedules/)
+and the current range per region in
+[duckdb-versions.json](https://motherduck.com/docs/duckdb-versions.json).
+
 ## Choose a connection pattern
 
 Each MotherDuck account runs its queries on its own Duckling, and every
