@@ -22,10 +22,30 @@ with engine.begin() as conn:
 ```
 
 Set the threshold to 0 to use the ordinary path. Successful conversion is
-prepared once and reused by execution. A batch with a large integer mixed
-with floating-point values stays on the ordinary path to prevent rounding
-during inference. The pandas fallback also declines NaN batches, because
-DuckDB's pandas scan treats NaN as NULL while ordinary bindings preserve NaN.
+prepared once and reused by execution.
+
+Arrow and pandas infer one type per column, so some batches would store
+different values than individually bound parameters. Those batches stay on the
+ordinary path, which stores the same values and takes longer. A batch stays on
+the ordinary path when:
+
+- the statement has RETURNING, `values()` expressions, prefixes such as
+  `OR REPLACE`, hints or CTEs, or the table has SQL-expression or sequence
+  defaults
+- a column type has a bind expression, or is a `Map` or `Union`
+- a column mixes integers above the float precision limit with floats
+- a non-numeric column, such as `String`, mixes integers or booleans with
+  floats, or holds `Decimal` values
+- a column, LIST item or STRUCT field mixes `date` with `datetime` values, or
+  naive with time-zone-aware datetimes
+- a value is a `timedelta`, a `time` with a time zone, a non-finite `Decimal`,
+  or a `Decimal` that needs more than 38 digits
+- STRUCT keys in one column differ only in case
+- only pandas can hold the batch and it contains NaN, because DuckDB's pandas
+  scan treats NaN as NULL while ordinary bindings preserve NaN
+
+To check which path a batch takes, compare timings with
+`duckdb_copy_threshold=0`.
 
 ## Direct Arrow ingestion
 
@@ -110,6 +130,12 @@ SQLAlchemy 2.1's multi-table existence checks use a catalog batch plus one
 visibility query, regardless of the number of names. Bulk reflection filters
 table/view kind and temporary/default scope before resolving shadows.
 Enum metadata is queried only for enum columns.
+
+An `Inspector` resolves the tables and views of a schema once and reuses the
+result for columns, keys, constraints, indexes and comments. `MetaData.reflect()`
+on 20 tables takes 10 statements. Create a new `Inspector`, or call
+`Inspector.clear_cache()`, after DDL: an `Inspector` can otherwise keep
+reporting a table that was dropped or replaced.
 
 ## Reproduce timings and memory
 

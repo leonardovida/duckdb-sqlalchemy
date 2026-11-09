@@ -50,6 +50,9 @@ boundaries:
 - Filter reflection object scope/kind before name resolution; never combine
   metadata from relations that shadow one another.
 - Preserve exact values before selecting a bulk data path; decline lossy inference.
+- Resolve the relations of a reflection call through `_duckdb_relation_rows`,
+  which keeps them in the Inspector's `info_cache`. Treat the cached rows as
+  read-only, and never cache a name that did not resolve.
 - Validate or quote identifiers before rendering SQL fragments.
 - Preserve compatibility with the supported SQLAlchemy 2.0 and 2.1 lines
   without breaking the DuckDB releases tested in `noxfile.py`.

@@ -68,11 +68,19 @@ with engine.connect().execution_options(
     conn.execute(stmt)
 ```
 
-- `duckdb_arrow`: return Arrow tables for SELECTs (`result.arrow` or `result.all()`) or bounded batch readers (`result.batches()`); requires `pyarrow`.
-- `duckdb_copy_threshold`: for large INSERT executemany, register a pandas/Arrow object and run `INSERT INTO ... SELECT ...`.
-- `insertmanyvalues_page_size`: canonical SQLAlchemy batch size for 2.x multi-row VALUES inserts.
-- `duckdb_insertmanyvalues_page_size`: deprecated alias for `insertmanyvalues_page_size`; still supported for backward compatibility.
-- `duckdb_arraysize`: cursor fetch size for `stream_results` / `fetchmany` workloads.
+| Option | Default | Effect | Guide |
+| --- | --- | --- | --- |
+| `duckdb_arrow` | `False` | SELECT results are Arrow tables (`result.arrow`, `result.all()`) or bounded batch readers (`result.batches()`). Requires `pyarrow`. | [Arrow results](olap#arrow-results) |
+| `duckdb_copy_threshold` | `10000` | Row count at which an `executemany` INSERT loads through a registered Arrow table (pandas as a fallback) and one `INSERT ... SELECT`. `0` disables it. | [Ordinary and bulk inserts](performance#ordinary-and-bulk-inserts) |
+| `insertmanyvalues_page_size` | `1000` | SQLAlchemy's batch size for multi-row VALUES inserts below the copy threshold. | |
+| `duckdb_arraysize` (or `arraysize`) | `1` | Rows `fetchmany()` returns without a size, for `stream_results` workloads. | [Streaming reads](olap#streaming-reads) |
+| `duckdb_retry_on_transient` | `False` | Retries an idempotent statement once after a transient error. | [Transient retry](motherduck#transient-retry-opt-in) |
+| `duckdb_retry_count` | `0` | Number of retries after a transient error. | [Transient retry](motherduck#transient-retry-opt-in) |
+| `duckdb_retry_backoff` | none | Seconds to wait before each retry. | [Transient retry](motherduck#transient-retry-opt-in) |
+| `duckdb_insertmanyvalues_page_size` | | Deprecated alias for `insertmanyvalues_page_size`. | |
+
+`exact_decimal_division=True` is an engine argument, not an execution option.
+Pass it to `create_engine()`. See [Decimal division](#decimal-division).
 
 Arrow results consume the cursor; fetch rows or Arrow, not both. Reading
 `.arrow` after fetching rows raises `InvalidRequestError`.

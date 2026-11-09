@@ -142,7 +142,23 @@ Use `URL` or `MotherDuckURL` when building connection URLs in Python. See [conne
 | DuckDB | 1.3.0 to 1.5.x (2.0 is not supported yet) |
 | DuckDB for MotherDuck | The range MotherDuck accepts, currently 1.4.1 to 1.5.6 ([details](https://leonardovida.github.io/duckdb-sqlalchemy/motherduck.html#duckdb-versions)) |
 
-Hosted CI tests the latest SQLAlchemy and DuckDB 1.x releases on Python 3.10–3.14, the minimum supported versions (Python 3.10, SQLAlchemy 2.0.0, DuckDB 1.3.0), SQLAlchemy 2.0 on Python 3.13 and 3.14, SQLAlchemy's upstream dialect suite on 2.0 and 2.1, Windows/macOS, wheel/sdist installations with optional libraries absent or installed independently, and SQLAlchemy and DuckDB prereleases (informational). CI also records correctness-checked benchmark results. Real MotherDuck checks run separately when service credentials are configured. The full `nox -s tests` matrix (DuckDB 1.3.0–1.5.6 against SQLAlchemy 2.0.0, 2.0.52, and 2.1.1) runs locally. See [test configuration](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/noxfile.py), [CI runs](https://github.com/leonardovida/duckdb-sqlalchemy/actions), and [known caveats](https://leonardovida.github.io/duckdb-sqlalchemy/types-and-caveats.html) for the scope of compatibility checks. MotherDuck connections also require a DuckDB version that MotherDuck accepts. MotherDuck no longer accepts DuckDB 1.3 clients, so install DuckDB 1.4.1 or newer for MotherDuck.
+MotherDuck no longer accepts DuckDB 1.3 clients, so install DuckDB 1.4.1 or newer for MotherDuck.
+
+What is tested:
+
+- **Hosted CI, every change:**
+  - the latest SQLAlchemy and DuckDB 1.x releases on Python 3.10–3.14
+  - the minimum supported versions (Python 3.10, SQLAlchemy 2.0.0, DuckDB 1.3.0)
+  - SQLAlchemy 2.0 on Python 3.13 and 3.14
+  - SQLAlchemy's upstream dialect suite on 2.0 and 2.1
+  - Windows and macOS
+  - wheel and sdist installations, with optional libraries absent or installed independently
+  - SQLAlchemy and DuckDB prereleases (informational)
+  - correctness-checked benchmark results
+- **MotherDuck:** real MotherDuck checks run separately when service credentials are configured.
+- **Local only:** the full `nox -s tests` matrix (DuckDB 1.3.0–1.5.6 against SQLAlchemy 2.0.0, 2.0.52, and 2.1.1).
+
+See the [test configuration](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/noxfile.py), [CI runs](https://github.com/leonardovida/duckdb-sqlalchemy/actions), and [known caveats](https://leonardovida.github.io/duckdb-sqlalchemy/types-and-caveats.html) for the scope of these checks.
 
 ## Migrating from duckdb-engine
 

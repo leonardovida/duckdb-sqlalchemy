@@ -31,7 +31,10 @@ PostgreSQL-compatible. See `ARCHITECTURE.md` for the module map and invariants.
 - Pool defaults: `SingletonThreadPool` for `:memory:` and `duckdb://`,
   `QueuePool` for files and named `:memory:name` databases, `NullPool` for
   MotherDuck (`md:`/`motherduck:`).
-- Bulk inserts over `duckdb_copy_threshold` (default 10k rows) register an Arrow table (pandas fallback) and run `INSERT ... SELECT`.
+- A plain `:memory:` database is private to its thread: `SingletonThreadPool`
+  opens one connection per thread and each gets its own database.
+- Bulk inserts over `duckdb_copy_threshold` (default 10k rows) register an Arrow table (pandas fallback) and run `INSERT ... SELECT`. `_bulk_insert.py` declines batches whose values Arrow or pandas would change. `docs/performance.md` lists the cases; update that list when the checks change.
+- Reflection methods share one relation lookup per Inspector through `info_cache` (`_duckdb_relation_rows`).
 - MotherDuck tokens are read from `MOTHERDUCK_TOKEN` (or `motherduck_token`) for MotherDuck databases.
 
 ## Release Notes and Breaking Changes

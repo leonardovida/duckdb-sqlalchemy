@@ -133,6 +133,7 @@ See [olap.md](olap) for `quack_query` and `ATTACH` examples.
 ## Pool defaults
 
 Pooling behavior is described in [configuration.md](configuration)
-(QueuePool for local files, NullPool for MotherDuck, SingletonThreadPool for `:memory:` and empty
-`duckdb://` URLs) and can be
-overridden with `poolclass`.
+(QueuePool for local files and named `:memory:name` databases, NullPool for
+MotherDuck, SingletonThreadPool for `:memory:` and empty `duckdb://` URLs) and
+can be overridden with `poolclass`. A plain `:memory:` database is private to
+the thread that opened it.

@@ -1,40 +1,63 @@
-Project: duckdb-sqlalchemy
-Summary: DuckDB SQLAlchemy dialect for DuckDB and MotherDuck. Supports SQLAlchemy Core and ORM APIs with pooling defaults, type mappings, COPY helpers, and MotherDuck connection helpers.
+# duckdb-sqlalchemy
 
-Key entry points:
-- sqlalchemy.create_engine("duckdb://...")
-- duckdb_sqlalchemy.URL and duckdb_sqlalchemy.MotherDuckURL
-- duckdb_sqlalchemy.create_motherduck_engine and create_engine_from_paths
-- duckdb_sqlalchemy table functions (read_parquet, read_csv, table_function)
-- duckdb_sqlalchemy COPY helpers (copy_from_parquet, copy_from_csv, copy_from_rows, copy_to_parquet)
-- duckdb_sqlalchemy.checkpoint
-- MotherDuck SQL function helpers (md_create_dive, md_update_dive_content, md_list_dives, md_get_guide, prompt_jev, ...)
+> SQLAlchemy dialect for DuckDB and MotherDuck. It supports SQLAlchemy Core and ORM (2.0 and 2.1), reflection, Alembic, pandas and Arrow, COPY helpers, and MotherDuck connection helpers. Install with `pip install duckdb-sqlalchemy`, import `duckdb_sqlalchemy`, and connect with `sqlalchemy.create_engine("duckdb:///...")`.
 
-Behavior notes:
-- Reflection without a schema covers the current database and schema; pass schema="db.schema" for attached databases
-- result.rowcount reports rows changed by INSERT/UPDATE/DELETE/MERGE
-- regexp_match compiles to regexp_matches() (substring match)
-- DuckDB has no SAVEPOINT, no SELECT ... FOR UPDATE, and cannot add UNIQUE, FOREIGN KEY, or CHECK constraints to an existing table
-- Alembic works without an env.py implementation class; duckdb_sqlalchemy registers DuckDBImpl when Alembic is loaded (see alembic.html)
-- STRUCT, MAP, and UNION columns reflect as Struct, Map, and Union
+## Quick facts
 
-Docs (https://leonardovida.github.io/duckdb-sqlalchemy/):
-- getting-started.html
-- overview.html
-- connection-urls.html
-- motherduck.html
-- dives.html
-- configuration.html
-- olap.html
-- pandas-jupyter.html
-- types-and-caveats.html
-- alembic.html
-- migration-from-duckdb-engine.html
-- performance.html
-- adoption.html
-- breaking-changes.html
+- URLs: `duckdb:///:memory:`, `duckdb:///relative/file.duckdb`, `duckdb:////absolute/file.duckdb`, `duckdb:///md:my_db` (MotherDuck). Always three slashes before the database. A host, port, user or password in the URL raises `ArgumentError`.
+- DuckDB settings go in the URL query (`?threads=4`) or `connect_args={"config": {...}}`. The URL wins.
+- MotherDuck reads the token from the `MOTHERDUCK_TOKEN` (or `motherduck_token`) environment variable. Do not put tokens in URLs that are logged.
+- Default pools: `SingletonThreadPool` for `:memory:` (one private database per thread), `QueuePool` for files and named `:memory:name` databases (shared across the process), `NullPool` for MotherDuck. Override with `poolclass=`.
+- Compatibility: Python 3.10+. SQLAlchemy 2.0.0+ (2.0.45+ on Python 3.14, SQLAlchemy 2.1 needs Python 3.11+). DuckDB 1.3.0 to 1.5.x. DuckDB 2.0 is not supported. MotherDuck needs DuckDB 1.4.1 or newer.
+- The package replaces `duckdb-engine`. Do not install both: each registers the `duckdb://` dialect.
 
-Compatibility:
-- Python 3.10+
-- SQLAlchemy 2.0.0+ on Python <3.14; 2.0.45+ on Python 3.14+; SQLAlchemy 2.1 requires Python 3.11+
-- DuckDB 1.3.0 to 1.5.x (2.0 is not supported yet)
+## Public API
+
+- `duckdb_sqlalchemy.URL(database=..., **config)` and `MotherDuckURL(database="md:...", **params)` build URLs.
+- `create_motherduck_engine(database="md:...", ...)` and `create_engine_from_paths([...])` build engines.
+- Table functions: `read_parquet`, `read_csv`, `read_csv_auto`, `table_function(name, *args, columns=...)`.
+- Bulk helpers: `copy_from_parquet`, `copy_from_csv`, `copy_from_rows`, `copy_to_parquet`, `insert_from_arrow`.
+- `checkpoint(connection)` runs CHECKPOINT with the commits it needs.
+- Types in `duckdb_sqlalchemy.datatypes`: `Struct`, `Map`, `Union`, `FixedArray`, `HugeInteger`, `UBigInteger` and other DuckDB integer types.
+- MotherDuck SQL functions: `md_create_dive`, `md_update_dive_content`, `md_list_dives`, `md_get_guide`, `md_create_flight`, `md_run_flight`, `prompt_jev` and related helpers.
+
+## Execution options
+
+- `duckdb_arrow=True`: SELECT results as Arrow (`result.arrow`, `result.batches()`).
+- `duckdb_copy_threshold` (default 10000): row count at which an `executemany` INSERT loads through Arrow. `0` disables it.
+- `duckdb_arraysize`: rows per `fetchmany()` with `stream_results=True`.
+- `duckdb_retry_on_transient`, `duckdb_retry_count`, `duckdb_retry_backoff`: opt-in retries for idempotent statements.
+- `create_engine(..., exact_decimal_division=True)`: exact DECIMAL division.
+
+## Behavior to know before writing code
+
+- DuckDB has no SAVEPOINT, so `begin_nested()` raises. `with_for_update()` is ignored.
+- DuckDB cannot add UNIQUE, FOREIGN KEY or CHECK constraints to an existing table. Alembic batch mode recreates the table.
+- `result.rowcount` reports rows changed by INSERT, UPDATE, DELETE and MERGE. It is -1 with RETURNING and for `executemany`.
+- `regexp_match` compiles to `regexp_matches()`, a substring match.
+- Reflection without a schema covers the current database and schema. Pass `schema="db.schema"` for an attached database.
+- Create a new `Inspector` after DDL. An `Inspector` caches the tables it resolved.
+- Autoincrement integer primary keys use a sequence named `<table>_<column>_seq`, created and dropped with the table.
+- Alembic needs no implementation class in `env.py`. The dialect registers `DuckDBImpl` when Alembic is loaded.
+
+## Docs
+
+- [Getting started](https://leonardovida.github.io/duckdb-sqlalchemy/getting-started.html): install and first queries for local DuckDB and MotherDuck
+- [Overview](https://leonardovida.github.io/duckdb-sqlalchemy/overview.html): what the dialect provides
+- [Connection URLs](https://leonardovida.github.io/duckdb-sqlalchemy/connection-urls.html): URL formats, `URL` and `MotherDuckURL` helpers, escaping, pool overrides
+- [Configuration](https://leonardovida.github.io/duckdb-sqlalchemy/configuration.html): `connect_args`, extensions, filesystems, pool defaults, `checkpoint`
+- [MotherDuck](https://leonardovida.github.io/duckdb-sqlalchemy/motherduck.html): tokens, attach modes, reader pools, multiple writers, transient retry, supported DuckDB versions
+- [MotherDuck Dives](https://leonardovida.github.io/duckdb-sqlalchemy/dives.html): build and deploy Dives from Python
+- [OLAP workflows](https://leonardovida.github.io/duckdb-sqlalchemy/olap.html): table functions, Arrow results, streaming reads, COPY helpers, Parquet export, ATTACH, MotherDuck `md_*` functions
+- [Pandas and Jupyter](https://leonardovida.github.io/duckdb-sqlalchemy/pandas-jupyter.html): DataFrame registration and notebook use
+- [Types and caveats](https://leonardovida.github.io/duckdb-sqlalchemy/types-and-caveats.html): type mapping, execution options, reflection rules, unsupported and adapted statements, numeric precision, autoincrement
+- [Performance and exact values](https://leonardovida.github.io/duckdb-sqlalchemy/performance.html): bulk insert paths and when they fall back, Arrow ingestion, benchmarks
+- [Alembic integration](https://leonardovida.github.io/duckdb-sqlalchemy/alembic.html): migrations and batch mode
+- [Migration from duckdb_engine](https://leonardovida.github.io/duckdb-sqlalchemy/migration-from-duckdb-engine.html): switching packages
+- [Breaking and behavior changes](https://leonardovida.github.io/duckdb-sqlalchemy/breaking-changes.html): every behavior change by version
+
+## Optional
+
+- [Ecosystem adoption](https://leonardovida.github.io/duckdb-sqlalchemy/adoption.html): tools that use the dialect
+- [Changelog](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/CHANGELOG.md): release notes
+- [Examples](https://github.com/leonardovida/duckdb-sqlalchemy/tree/main/examples): runnable scripts

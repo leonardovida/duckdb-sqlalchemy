@@ -8,7 +8,10 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
-- None yet.
+### Maintenance
+
+- The configuration guide states that a plain `:memory:` database is private to the thread that opened it, and recommends a named in-memory database or a file when threads share data. It previously said every connection sees the same database.
+- The documentation lists every execution option in one table, every case in which a large INSERT uses the ordinary insert path, and the `Inspector` cache. The documentation index and `llms.txt` describe each guide.
 
 ## [1.5.6.10](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.9...v1.5.6.10) (2026-11-09)
 
