@@ -10,6 +10,29 @@ preserved from the upstream project for historical context.
 
 - None yet.
 
+## [1.5.6.10](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.9...v1.5.6.10) (2026-11-09)
+
+### Highlights
+
+- Large INSERTs no longer store booleans as `1.0` or `0.0` in text columns that also receive floats. PRLINK
+- Reflection sends fewer catalog queries, which shortens `MetaData.reflect()` on MotherDuck and on databases with many attached catalogs. PRLINK
+
+### Features
+
+- Reflection resolves the tables and views of a schema once per `Inspector` instead of once for each kind of metadata. `MetaData.reflect()` on 20 tables takes 10 statements instead of 24. PRLINK
+- `FixedArray` columns whose items need no conversion, such as `FixedArray(Float, n)` embeddings, are read without converting each item in Python. PRLINK
+
+### Bug Fixes
+
+- An `executemany` INSERT that reached `duckdb_copy_threshold` and stored both `float` and `bool` values in a text column wrote the booleans as `1.0` or `0.0`. Such batches now use the ordinary insert path and store `true` or `false`, as smaller batches do. PRLINK
+
+### Compatibility
+
+- Batches that mix `float` and `bool` values in a non-numeric column may insert more slowly. Existing rows are not rewritten. Applications that wrote such batches with earlier versions should review the stored text values. See [breaking and behavior changes](docs/breaking-changes.md). PRLINK
+- An `Inspector` keeps the tables and views it resolved, so it can still report a table or view that was dropped or replaced while it was in use. Applications should call `Inspector.clear_cache()` or create a new `Inspector` after DDL, as SQLAlchemy already requires for its own cached methods. PRLINK
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.9...v1.5.6.10
+
 ## [1.5.6.9](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.8...v1.5.6.9) (2026-11-09)
 
 ### Highlights

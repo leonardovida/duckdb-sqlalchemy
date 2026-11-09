@@ -2427,10 +2427,25 @@ class Dialect(PGDialect_psycopg2):
         filter_names: Optional[Collection[str]] = None,
         scope: Any = None,
         kind: Any = None,
+        info_cache: Optional[Dict[Any, Any]] = None,
     ) -> List[Dict[str, Any]]:
-        """Select kinds and scopes before resolving names that shadow each other."""
+        """Select kinds and scopes before resolving names that shadow each other.
+
+        Every ``get_multi_*`` method resolves the same relations first, so the
+        rows are kept in the Inspector's ``info_cache`` when one is passed and
+        every requested name resolved. Callers must not modify them.
+        """
         scope = ObjectScope.ANY if scope is None else scope
         kind = ObjectKind.ANY if kind is None else kind
+        cache_key = (
+            "_duckdb_relation_rows",
+            schema,
+            None if filter_names is None else tuple(filter_names),
+            scope,
+            kind,
+        )
+        if info_cache is not None and cache_key in info_cache:
+            return info_cache[cache_key]
         stmt, params = self._duckdb_reflection_stmt(
             _DUCKDB_RELATION_COMMENTS,
             "database_name, schema_name, table_name, comment, temporary, relation_kind",
@@ -2458,9 +2473,18 @@ class Dialect(PGDialect_psycopg2):
             kinds.append("'view'")
         sql += "\nAND relation_kind IN (" + ", ".join(kinds or ["NULL"]) + ")"
         stmt = text(sql)
-        return self._execute_visible_duckdb_relation_rows(
+        rows = self._execute_visible_duckdb_relation_rows(
             connection, stmt, params, schema
         )
+        # A name that did not resolve is looked up again: the table may be
+        # created while the Inspector is still in use, and a cached miss would
+        # then report it as a table without constraints.
+        if info_cache is not None and (
+            filter_names is None
+            or {row["table_name"] for row in rows} >= set(filter_names)
+        ):
+            info_cache[cache_key] = rows
+        return rows
 
     def _duckdb_relations(
         self,
@@ -2469,11 +2493,12 @@ class Dialect(PGDialect_psycopg2):
         filter_names: Optional[Collection[str]] = None,
         scope: Any = None,
         kind: Any = None,
+        info_cache: Optional[Dict[Any, Any]] = None,
     ) -> Dict[str, Tuple[str, str]]:
         return {
             row["table_name"]: (row["database_name"], row["schema_name"])
             for row in self._duckdb_relation_rows(
-                connection, schema, filter_names, scope, kind
+                connection, schema, filter_names, scope, kind, info_cache
             )
         }
 
@@ -3092,7 +3117,12 @@ class Dialect(PGDialect_psycopg2):
     ) -> Iterable[Tuple[Tuple[Optional[str], str], bool]]:
         relations = (
             self._duckdb_relations(
-                connection, schema, table_names, ObjectScope.ANY, ObjectKind.ANY
+                connection,
+                schema,
+                table_names,
+                ObjectScope.ANY,
+                ObjectKind.ANY,
+                kw.get("info_cache"),
             )
             if table_names
             else {}
@@ -3137,7 +3167,9 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
+        tables = self._duckdb_relations(
+            connection, schema, filter_names, scope, kind, kw.get("info_cache")
+        )
         rows = self._duckdb_constraint_rows(connection, "PRIMARY KEY", tables)
         constraints = {
             table_name: {
@@ -3178,7 +3210,9 @@ class Dialect(PGDialect_psycopg2):
         postgresql_ignore_search_path: bool = False,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
+        tables = self._duckdb_relations(
+            connection, schema, filter_names, scope, kind, kw.get("info_cache")
+        )
         rows = self._duckdb_constraint_rows(connection, "FOREIGN KEY", tables)
         referenced = self._referenced_relations(connection, tables, rows)
         # DuckDB foreign keys stay within the resolved child's schema.
@@ -3255,7 +3289,9 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
+        tables = self._duckdb_relations(
+            connection, schema, filter_names, scope, kind, kw.get("info_cache")
+        )
         rows = self._duckdb_constraint_rows(connection, "UNIQUE", tables)
         unique_constraints = {
             table_name: [
@@ -3298,7 +3334,9 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
+        tables = self._duckdb_relations(
+            connection, schema, filter_names, scope, kind, kw.get("info_cache")
+        )
         rows = self._duckdb_constraint_rows(connection, "CHECK", tables)
         check_constraints = {
             table_name: [
@@ -3342,7 +3380,9 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        tables = self._duckdb_relations(connection, schema, filter_names, scope, kind)
+        tables = self._duckdb_relations(
+            connection, schema, filter_names, scope, kind, kw.get("info_cache")
+        )
         stmt, params = self._duckdb_reflection_stmt(
             "duckdb_indexes()",
             (
@@ -3394,7 +3434,9 @@ class Dialect(PGDialect_psycopg2):
         kind: Any = None,
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
-        rows = self._duckdb_relation_rows(connection, schema, filter_names, scope, kind)
+        rows = self._duckdb_relation_rows(
+            connection, schema, filter_names, scope, kind, kw.get("info_cache")
+        )
         return [
             (
                 (self._reflection_schema_key(schema), row["table_name"]),
@@ -3499,7 +3541,7 @@ class Dialect(PGDialect_psycopg2):
         **kw: Any,
     ) -> Iterable[Tuple[Any, Any]]:
         table_names = self._duckdb_relations(
-            connection, schema, filter_names, scope, kind
+            connection, schema, filter_names, scope, kind, kw.get("info_cache")
         )
         return self._iter_reflection_results(schema, table_names, {}, dict)
 
@@ -3853,7 +3895,7 @@ class Dialect(PGDialect_psycopg2):
         **kw: Any,
     ) -> Any:
         relations = self._duckdb_relations(
-            connection, schema, filter_names, scope, kind
+            connection, schema, filter_names, scope, kind, kw.get("info_cache")
         )
         if not relations:
             return iter(())

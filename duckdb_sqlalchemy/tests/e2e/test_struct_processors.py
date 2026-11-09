@@ -232,3 +232,48 @@ def test_struct_array_hooks_accept_integer_ndarrays(
             {"items": expected},
             None,
         ]
+
+
+def test_fixed_arrays_read_as_lists_of_their_item_type(
+    db_path: Path, make_engine: EngineFactory
+) -> None:
+    """Float, integer and decimal items convert the same with and without NULLs."""
+    table = Table(
+        "vectors",
+        MetaData(),
+        Column("id", Integer),
+        Column("floats", FixedArray(Double, 3)),
+        Column("ints", FixedArray(Integer, 2)),
+        Column("amounts", FixedArray(Numeric(6, 2), 2)),
+        Column("as_floats", FixedArray(Numeric(6, 2, asdecimal=False), 2)),
+    )
+    rows = [
+        {
+            "id": 1,
+            "floats": [1.5, 2.5, -3.0],
+            "ints": [1, 2],
+            "amounts": [Decimal("1.50"), Decimal("2.25")],
+            "as_floats": [Decimal("1.50"), Decimal("2.25")],
+        },
+        {
+            "id": 2,
+            "floats": [None, 2.5, None],
+            "ints": [None, 2],
+            "amounts": [None, Decimal("2.25")],
+            "as_floats": [None, Decimal("2.25")],
+        },
+        {"id": 3, "floats": None, "ints": None, "amounts": None, "as_floats": None},
+    ]
+    engine = make_engine(db_path)
+    with engine.begin() as conn:
+        table.create(conn)
+        conn.execute(table.insert(), rows)
+    with engine.connect() as conn:
+        stored = conn.execute(select(table).order_by(table.c.id)).mappings().all()
+    expected = [dict(row) for row in rows]
+    expected[0]["as_floats"] = [1.5, 2.25]
+    expected[1]["as_floats"] = [None, 2.25]
+    assert [dict(row) for row in stored] == expected
+    for row in stored[:2]:
+        assert all(type(row[name]) is list for name in row if name != "id")
+    assert all(type(item) is float for item in stored[0]["as_floats"])

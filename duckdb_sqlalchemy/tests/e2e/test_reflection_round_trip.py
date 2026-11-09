@@ -3,8 +3,9 @@
 from pathlib import Path
 
 import pytest
-from sqlalchemy import MetaData, Table, inspect, select, text
+from sqlalchemy import MetaData, Table, event, inspect, select, text
 from sqlalchemy.engine.reflection import ObjectScope
+from sqlalchemy.exc import NoSuchTableError
 
 from .conftest import EngineFactory
 
@@ -223,3 +224,73 @@ def test_multi_foreign_keys_stay_with_the_selected_schema(
                 inspector.get_multi_foreign_keys(schema=namespace, filter_names=[])
                 == {}
             )
+
+
+def test_reflecting_a_schema_resolves_its_relations_once(
+    make_engine: EngineFactory, db_path: Path
+) -> None:
+    """Each kind of metadata asks which relations exist; one query answers all."""
+    engine = make_engine(db_path)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE parent (id INTEGER PRIMARY KEY, name TEXT)"))
+        conn.execute(
+            text(
+                "CREATE TABLE child (id INTEGER PRIMARY KEY, "
+                "parent_id INTEGER REFERENCES parent (id), qty INTEGER CHECK (qty > 0))"
+            )
+        )
+        conn.execute(text("CREATE INDEX child_qty ON child (qty)"))
+
+    statements = []
+    event.listen(
+        engine,
+        "before_cursor_execute",
+        lambda conn, cursor, statement, *args: statements.append(statement),
+    )
+    metadata = MetaData()
+    metadata.reflect(engine)
+
+    assert set(metadata.tables) == {"parent", "child"}
+    child = metadata.tables["child"]
+    assert [fk.column.table.name for fk in child.foreign_keys] == ["parent"]
+    assert [index.name for index in child.indexes] == ["child_qty"]
+    assert len(child.constraints) == 3  # primary key, foreign key, check
+    relation_lookups = [s for s in statements if "relation_kind" in s]
+    name_resolutions = [s for s in statements if "current_schemas(false)" in s]
+    # One listing of the schema's tables, and one lookup of the tables to reflect.
+    assert len(relation_lookups) <= 2
+    assert len(name_resolutions) <= 2
+
+
+def test_a_new_inspector_sees_tables_created_after_the_previous_one(
+    make_engine: EngineFactory, db_path: Path
+) -> None:
+    engine = make_engine(db_path)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE first (id INTEGER PRIMARY KEY)"))
+        assert set(inspect(conn).get_multi_pk_constraint()) == {(None, "first")}
+        conn.execute(text("CREATE TABLE second (id INTEGER PRIMARY KEY)"))
+        inspector = inspect(conn)
+        assert set(inspector.get_multi_pk_constraint()) == {
+            (None, "first"),
+            (None, "second"),
+        }
+        assert set(inspector.get_multi_columns()) == {(None, "first"), (None, "second")}
+
+
+def test_a_table_created_after_a_failed_lookup_reflects_on_the_same_inspector(
+    make_engine: EngineFactory, db_path: Path
+) -> None:
+    engine = make_engine(db_path)
+    with engine.begin() as conn:
+        inspector = inspect(conn)
+        with pytest.raises(NoSuchTableError):
+            inspector.get_pk_constraint("late")
+        conn.execute(
+            text("CREATE TABLE late (id INTEGER PRIMARY KEY, n INTEGER UNIQUE)")
+        )
+        assert inspector.get_pk_constraint("late")["constrained_columns"] == ["id"]
+        assert [
+            constraint["column_names"]
+            for constraint in inspector.get_unique_constraints("late")
+        ] == [["n"]]
