@@ -10,6 +10,24 @@ preserved from the upstream project for historical context.
 
 - None yet.
 
+## [1.5.6.9](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.8...v1.5.6.9) (2026-11-09)
+
+### Highlights
+
+- The README and the MotherDuck guide state which DuckDB versions MotherDuck accepts. MotherDuck no longer accepts connections from DuckDB 1.3 clients. [#224](https://github.com/leonardovida/duckdb-sqlalchemy/pull/224)
+- The publishing workflow waits for PyPI to list a new release before it verifies the release and creates the GitHub release. [#224](https://github.com/leonardovida/duckdb-sqlalchemy/pull/224)
+
+### Compatibility
+
+- MotherDuck has ended support for DuckDB 1.3 clients and rejects their connections. duckdb-sqlalchemy still supports DuckDB 1.3 for local databases. Applications that connect to MotherDuck should install DuckDB 1.4.1 or newer, up to 1.5.6, for example with `pip install -U "duckdb>=1.4.1,<2"`. The [MotherDuck guide](https://leonardovida.github.io/duckdb-sqlalchemy/motherduck.html#duckdb-versions) links to the supported range for each region. [#224](https://github.com/leonardovida/duckdb-sqlalchemy/pull/224)
+- DuckDB 2.0.0, released on October 21, 2026, is not supported by MotherDuck or by this release. The `duckdb<2` requirement is unchanged. [#224](https://github.com/leonardovida/duckdb-sqlalchemy/pull/224)
+
+### Maintenance
+
+- The publishing workflow retries the installation of a newly published wheel for up to five minutes. The 1.5.6.8 check ran before the PyPI index listed the release, so the GitHub release and tag for 1.5.6.8 were created later by rerunning the failed jobs. [#224](https://github.com/leonardovida/duckdb-sqlalchemy/pull/224)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.8...v1.5.6.9
+
 ## [1.5.6.8](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.7...v1.5.6.8) (2026-11-02)
 
 ### Highlights
