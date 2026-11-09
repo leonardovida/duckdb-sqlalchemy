@@ -92,8 +92,13 @@ engine = create_engine(
 ## Pool defaults and concurrency
 
 - Exact `:memory:` and empty database URLs (`duckdb://`) use `SingletonThreadPool`,
-  so every connection sees the same in-memory database.
-- Named in-memory URLs such as `:memory:analytics` use `QueuePool`.
+  which keeps one connection per thread. Connections in the same thread see the
+  same in-memory database. Each other thread gets its own empty database, so
+  tables created in one thread are missing in another.
+- Named in-memory URLs such as `:memory:analytics` use `QueuePool`, and every
+  connection in the process sees the same database. Use a named in-memory
+  database or a file when several threads share data, for example in a web
+  application or a thread pool.
 - Local file paths also use `QueuePool` so ORM and `Session` workloads can reuse a live DuckDB connection.
 - MotherDuck defaults to `NullPool` to avoid keeping cloud sessions open unless you opt into pooling.
 

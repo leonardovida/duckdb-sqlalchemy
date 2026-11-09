@@ -10,7 +10,7 @@ This project provides a production-ready SQLAlchemy dialect for DuckDB and Mothe
 ## What you get
 
 - SQLAlchemy Core, ORM, Alembic, and reflection support.
-- MotherDuck helpers for attach modes, session hints, and read scaling.
+- MotherDuck helpers for attach modes, session names, and read scaling.
 - Sensible pooling defaults and optional performance tuning.
 - Bulk insert helpers via Arrow or DataFrame registration.
 
