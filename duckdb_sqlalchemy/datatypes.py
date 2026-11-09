@@ -17,6 +17,7 @@ from sqlalchemy import exc, literal, util
 from sqlalchemy.dialects.postgresql import ARRAY as PGARRAY
 from sqlalchemy.dialects.postgresql.base import PGTypeCompiler
 from sqlalchemy.engine import Dialect
+from sqlalchemy.engine import processors as sa_processors
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import operators, sqltypes, type_api
 from sqlalchemy.sql.base import SchemaEventTarget
@@ -491,10 +492,24 @@ class FixedArray(_MemberSchemaEvents, sqltypes.Indexable, TypeEngine):
 
     def result_processor(self, dialect: Dialect, coltype: object) -> Any:
         processor = self.item_type.dialect_impl(dialect).result_processor(dialect, None)
+        if processor is None:
+            # DuckDB returns a tuple. Copy it into a list without visiting
+            # each item in Python, which matters for wide vectors.
+            return lambda value: None if value is None else list(value)
+        if processor is sa_processors.to_float:
+            # SQLAlchemy converts Float items with float(), which changes
+            # nothing for the floats DuckDB returns for FLOAT and DOUBLE
+            # arrays. Items share one SQL type, so the first one tells.
+            def process_floats(value: Any) -> Any:
+                if value is None:
+                    return None
+                if value and type(value[0]) is float:
+                    return list(value)
+                return [processor(item) for item in value]
+
+            return process_floats
         return lambda value: (
-            None
-            if value is None
-            else [processor(item) if processor is not None else item for item in value]
+            None if value is None else [processor(item) for item in value]
         )
 
 

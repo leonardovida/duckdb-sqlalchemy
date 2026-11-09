@@ -19,6 +19,11 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 - None yet.
 
+## [1.5.6.10](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.9...v1.5.6.10) (2026-11-09)
+
+- **Large INSERTs fall back when floats and booleans share a non-numeric column** - An `executemany` INSERT that reaches `duckdb_copy_threshold` now uses the ordinary path when a column that is not numeric, such as `String`, holds both `float` and `bool` values. Such batches previously stored `True` as `1.0` and `False` as `0.0`, where smaller batches store `true` and `false`. These batches may insert more slowly. Existing rows are not rewritten, so review text values written by earlier versions if a batch mixed these values. [#225](https://github.com/leonardovida/duckdb-sqlalchemy/pull/225)
+- **An `Inspector` caches the tables and views it resolved** - The `get_multi_*` methods and the single-table methods built on them reuse the relations found by an earlier call on the same `Inspector`. A table or view that is dropped or replaced while an `Inspector` is in use can still be reported by it. Call `Inspector.clear_cache()` or create a new `Inspector` after DDL, as SQLAlchemy already requires for its own cached methods. A name that did not resolve is looked up again. [#225](https://github.com/leonardovida/duckdb-sqlalchemy/pull/225)
+
 ## [1.5.6.8](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.7...v1.5.6.8) (2026-11-02)
 
 - **`with_for_update()` is ignored** - `select(...).with_for_update()` compiles without a locking clause, as on SQLite, instead of failing with "SELECT locking clause is not supported". DuckDB has no row locks. A transaction that writes a row another open transaction changed fails with a `TransactionException`. Roll back and run the transaction again when that happens. [#222](https://github.com/leonardovida/duckdb-sqlalchemy/pull/222)

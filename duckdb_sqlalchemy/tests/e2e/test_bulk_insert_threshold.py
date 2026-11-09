@@ -164,3 +164,27 @@ def test_pandas_to_sql_above_threshold_round_trips(
     with engine.connect() as conn:
         back = pd.read_sql("SELECT * FROM scores ORDER BY id", conn)
     pd.testing.assert_frame_equal(back, frame, check_dtype=False)
+
+
+def test_bools_and_floats_in_a_text_column_store_like_ordinary_inserts(
+    make_engine: EngineFactory, db_path: Path
+) -> None:
+    """Arrow infers DOUBLE for floats and bools, which would store "1.0"."""
+    engine = make_engine(db_path)
+    metadata = MetaData()
+    bulk = Table("bulk", metadata, Column("id", Integer), Column("label", String))
+    plain = Table("plain", metadata, Column("id", Integer), Column("label", String))
+    rows = [{"id": i, "label": True if i % 2 else 1.5} for i in range(ROWS)]
+
+    with engine.begin() as conn:
+        metadata.create_all(conn)
+        conn.execute(insert(bulk), rows)
+        conn.execution_options(duckdb_copy_threshold=0).execute(insert(plain), rows)
+
+    with engine.connect() as conn:
+        stored = conn.execute(select(bulk.c.label).order_by(bulk.c.id)).scalars().all()
+        expected = (
+            conn.execute(select(plain.c.label).order_by(plain.c.id)).scalars().all()
+        )
+    assert stored == expected
+    assert set(stored) == {"1.5", "true"}

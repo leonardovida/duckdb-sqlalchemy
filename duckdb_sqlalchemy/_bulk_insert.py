@@ -178,12 +178,14 @@ def _changes_values_on_register(
             values = [row[index] for row in rows]
         kinds = set(map(type, values))
         # A column of ints and floats infers as DOUBLE, so a text column
-        # would store "1.0" where the ordinary path stores "1".
+        # would store "1.0" where the ordinary path stores "1". Arrow also
+        # turns a bool next to a float into 1.0, where the ordinary path
+        # stores "true".
         if (
             numeric_columns is not None
             and name not in numeric_columns
-            and any(_is_integer_kind(kind) for kind in kinds)
             and any(_is_float_kind(kind) for kind in kinds)
+            and any(_is_integer_kind(kind) or kind is bool for kind in kinds)
         ):
             return True
         if kinds <= _PLAIN_KINDS:
