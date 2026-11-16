@@ -8,6 +8,10 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+### Features
+
+- `Column(..., duckdb_sequence_name="seq_users")` names the sequence the dialect creates for an autoincrement integer primary key, including one declared with `Identity()`, instead of `<table>_<column>_seq`. A model can therefore use the same sequence name on DuckDB as the `SEQUENCE NAME` of its PostgreSQL identity column. The sequence is created in the table's schema without `IF NOT EXISTS`, so creating the table fails if a sequence of that name exists, rather than adopting one another table may use. It is dropped with the table, and Alembic batch recreates with `copy_from` keep it. Alembic's `op.drop_table` cannot tell which sequence to drop, so a downgrade must drop it with `op.execute`. Inserts without `RETURNING` draw from it. The option raises `CompileError` on any other column.
+
 ### Maintenance
 
 - The configuration guide states that a plain `:memory:` database is private to the thread that opened it, and recommends a named in-memory database or a file when threads share data. It previously said every connection sees the same database.

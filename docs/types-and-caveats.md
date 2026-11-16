@@ -285,7 +285,47 @@ from sqlalchemy import Column, Integer, MetaData, Table
 users = Table("users", MetaData(), Column("id", Integer, primary_key=True))
 ```
 
-Declare an explicit `Sequence` only when you need a custom name or start value:
+A plain `Identity()` on such a key is backed the same way.
+To choose the sequence's name, pass `duckdb_sequence_name` to the column,
+for example to match the `SEQUENCE NAME` of a PostgreSQL identity column that clients
+call `nextval()` on:
+
+```python
+from sqlalchemy import BigInteger, Column, Identity, MetaData, Table
+
+users = Table(
+    "users",
+    MetaData(),
+    Column("id", BigInteger, Identity(), primary_key=True, duckdb_sequence_name="seq_users"),
+)
+```
+
+The sequence is created in the table's schema and dropped with the table.
+Unlike the implicit `<table>_<column>_seq`,
+it is created without `IF NOT EXISTS`,
+so creating the table fails if a sequence of that name already exists,
+rather than adopting one another table may use.
+`duckdb_sequence_name` on a column that is not an autoincrement integer primary key
+raises `CompileError` before anything is created.
+
+DuckDB cannot make a table own a sequence reliably,
+so the dialect drops it when SQLAlchemy drops the table,
+from the column that names it.
+Alembic's `op.drop_table` and a `drop_all` of reflected tables do not know the name,
+so they leave the sequence behind, and creating the table again then fails.
+Drop the sequence in the same migration:
+
+```python
+op.drop_table("users")
+op.execute("DROP SEQUENCE seq_users")
+```
+
+A table reflected from DuckDB has a `nextval('seq_users')` default and no
+`duckdb_sequence_name`,
+so creating it in another database does not create the sequence:
+create the sequence first, or set `duckdb_sequence_name` on the reflected column.
+
+Declare an explicit `Sequence` only when you need a start value:
 
 ```python
 from sqlalchemy import Column, Integer, Sequence, Table, MetaData
