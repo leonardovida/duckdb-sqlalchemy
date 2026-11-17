@@ -192,8 +192,8 @@ def _abandon_partly_read_result(conn: Connection, how: str) -> None:
         gc.collect()
 
 
-# DuckDB 2.0 refuses every call except execute() while a result is unfinished,
-# where DuckDB 1.x discards the result.
+# DuckDB 2.0 refuses register() and running a relation while a result is
+# unfinished. DuckDB 1.x allows them.
 @pytest.mark.parametrize("how", ["closed", "dropped"])
 def test_raw_driver_calls_work_after_an_abandoned_result(
     make_engine: EngineFactory, how: str
@@ -242,3 +242,47 @@ def test_raw_driver_call_keeps_the_rows_of_an_open_result(
         driver.register("people", pa.table({"name": ["Ada"]}))
         assert result.fetchall() == [(1,), (2,), (3,), (4,)]
         assert conn.execute(text("SELECT name FROM people")).scalar() == "Ada"
+
+
+@pytest.mark.parametrize("how", ["closed", "dropped"])
+def test_raw_cursor_calls_work_after_an_abandoned_result(
+    make_engine: EngineFactory, how: str
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        _abandon_partly_read_result(conn, how)
+        cursor = conn.connection.cursor()
+        cursor.register("people", pa.table({"name": ["Ada", "Grace"]}))
+        assert cursor.sql("SELECT count(*) FROM people").fetchall() == [(2,)]
+
+
+def test_raw_cursor_call_keeps_the_rows_of_an_open_result(
+    make_engine: EngineFactory,
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        result = conn.exec_driver_sql("SELECT * FROM range(5000)")
+        assert result.fetchone() == (0,)
+        # More rows than one DuckDB vector, which is all DuckDB 1.x keeps.
+        conn.connection.cursor().register("people", pa.table({"name": ["Ada"]}))
+        assert len(result.fetchall()) == 4999
+
+
+@pytest.mark.parametrize("call", ["sql", "unregister", "from_query"])
+def test_raw_driver_call_keeps_a_raw_driver_result(
+    make_engine: EngineFactory, call: str
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        # A result the dialect abandoned earlier must not mark this one.
+        _abandon_partly_read_result(conn, "closed")
+        driver = conn.connection.driver_connection
+        assert driver is not None
+        raw = driver.execute("SELECT * FROM range(5000)")
+        assert raw.fetchone() == (0,)
+        if call == "unregister":
+            driver.unregister("missing")
+        else:
+            getattr(driver, call)("SELECT 1")
+        assert driver.description[0][0] == "range"
+        assert len(raw.fetchall()) == 4999
