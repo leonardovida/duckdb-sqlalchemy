@@ -28,7 +28,7 @@ def group(title: str) -> Generator[None, None, None]:
         print("::endgroup::", flush=True)
 
 
-@nox.session(py=["3.10", "3.11", "3.12", "3.13", "3.14"])
+@nox.session(py=["3.10", "3.11", "3.12", "3.13", "3.14", "3.15"])
 # Keep the matrix aligned with the active DuckDB and SQLAlchemy release lines we validate.
 @nox.parametrize(
     "duckdb",
@@ -48,16 +48,21 @@ def group(title: str) -> Generator[None, None, None]:
         "1.5.4",
         "1.5.5",
         "1.5.6",
+        "2.0.0",
     ],
 )
 @nox.parametrize("sqlalchemy", ["2.0.0", "2.0.58", "2.1.9"])
 def tests(session: nox.Session, duckdb: str, sqlalchemy: str) -> None:
-    if session.python == "3.14" and sqlalchemy == "2.0.0":
-        session.skip("SQLAlchemy 2.0.0 is not compatible with Python 3.14")
+    if session.python in ("3.14", "3.15") and sqlalchemy == "2.0.0":
+        session.skip("SQLAlchemy 2.0.0 is not compatible with Python 3.14 or newer")
     if session.python == "3.10" and sqlalchemy.startswith("2.1"):
         session.skip("SQLAlchemy 2.1 requires Python 3.11 or newer")
     if session.python == "3.14" and Version(duckdb) < Version("1.4.2"):
         session.skip("DuckDB before 1.4.2 has no Python 3.14 wheels")
+    if session.python == "3.15" and Version(duckdb) < Version("2.0.0"):
+        session.skip("DuckDB 1.x has no Python 3.15 wheels")
+    if session.python == "3.10" and Version(duckdb) >= Version("2.0.0"):
+        session.skip("DuckDB 2.x requires Python 3.11 or newer")
     tests_core(session, duckdb, sqlalchemy)
 
 

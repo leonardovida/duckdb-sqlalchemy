@@ -10,10 +10,15 @@ preserved from the upstream project for historical context.
 
 ### Features
 
-- On DuckDB 2.0, statements executed with `duckdb_arrow=True` run as DuckDB relations, so `result.arrow` and `result.batches()` read Arrow data without the extra copy and the warning that DuckDB 2.0 adds to DB-API results. `result.batches()` streams again instead of reading the whole result before the first batch. DuckDB 1.x is unaffected. DuckDB 2.0 remains outside the supported range of this package until the `duckdb<2` requirement is lifted. [#234](https://github.com/leonardovida/duckdb-sqlalchemy/pull/234)
+- DuckDB 2.0 is supported. The package requires `duckdb>=1.3.0,<3`, and the full test suite runs on DuckDB 1.x and 2.x in hosted CI. DuckDB 2.x requires Python 3.11 or newer, so Python 3.10 environments keep DuckDB 1.x. PRLINK
+- Python 3.15 is supported with DuckDB 2.x. DuckDB 1.x publishes no wheels for Python 3.15. PRLINK
+- The `motherduck` extra installs a DuckDB version that MotherDuck accepts: `pip install "duckdb-sqlalchemy[motherduck]"` requires `duckdb>=1.4.1,<2`. PRLINK
+- On DuckDB 2.0, statements executed with `duckdb_arrow=True` run as DuckDB relations, so `result.arrow` and `result.batches()` read Arrow data without the extra copy and the warning that DuckDB 2.0 adds to DB-API results. `result.batches()` streams again instead of reading the whole result before the first batch. DuckDB 1.x is unaffected. [#234](https://github.com/leonardovida/duckdb-sqlalchemy/pull/234)
 
 ### Compatibility
 
+- A plain installation on Python 3.11 or newer now resolves DuckDB 2.x where it previously resolved DuckDB 1.5.x. MotherDuck does not accept DuckDB 2.x clients and rejects their connections with an error that asks for a downgrade. Applications that connect to MotherDuck should install `duckdb-sqlalchemy[motherduck]` or keep their own `duckdb<2` pin. See the [MotherDuck guide](https://leonardovida.github.io/duckdb-sqlalchemy/motherduck.html#duckdb-versions). PRLINK
+- On DuckDB 2.0, Arrow methods called on a DBAPI cursor without `duckdb_arrow=True`, such as `result.cursor.to_arrow_table()`, emit DuckDB's warning about an extra copy of the rows. Execute the statement with `duckdb_arrow=True` to avoid the copy. PRLINK
 - On DuckDB 2.0, a statement that only reads and is executed with `duckdb_arrow=True` runs when its result is first read. Runtime errors such as a failed conversion are raised by `result.arrow` or `result.batches()` as the SQLAlchemy error that `execute()` raises on DuckDB 1.x, and opt-in transient-error retries do not cover that read. A result that is never read does not run its statement. Fetching rows from such a result reads the whole result into Python rows first, and `fetch_df_chunk()` on its DBAPI cursor raises `NotImplementedError`. See [breaking and behavior changes](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/breaking-changes.md). [#234](https://github.com/leonardovida/duckdb-sqlalchemy/pull/234)
 
 ## [1.5.6.11](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.10...v1.5.6.11) (2026-11-17)

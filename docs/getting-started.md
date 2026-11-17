@@ -13,6 +13,9 @@ This guide is a compact walkthrough for the DuckDB SQLAlchemy dialect. It focuse
 pip install duckdb-sqlalchemy
 ```
 
+For MotherDuck, install `duckdb-sqlalchemy[motherduck]` instead. The extra
+selects a DuckDB version that MotherDuck accepts.
+
 ## Local DuckDB
 
 ```python

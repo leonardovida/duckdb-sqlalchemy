@@ -20,15 +20,21 @@ MotherDuck accepts a range of DuckDB client versions and rejects connections
 from versions outside it. In November 2026 the range is DuckDB 1.4.1 to 1.5.6
 in every region, and us-east-1 also accepts 1.4.0. DuckDB 1.3 is past its end
 of life on MotherDuck, and MotherDuck rejects connections from DuckDB 1.3
-clients with an error that asks them to upgrade. DuckDB 2.0 is not supported
-by MotherDuck or by this package yet.
+clients with an error that asks them to upgrade. MotherDuck does not accept
+DuckDB 2.x clients yet and rejects them with an error that asks them to
+downgrade.
 
-duckdb-sqlalchemy still supports DuckDB 1.3 for local databases. For
-MotherDuck, install a DuckDB version in the supported range:
+duckdb-sqlalchemy supports DuckDB 1.3 and DuckDB 2.x for local databases, and a
+plain `pip install duckdb-sqlalchemy` on Python 3.11 or newer installs DuckDB
+2.x. For MotherDuck, install the `motherduck` extra, which selects a DuckDB
+version in the supported range:
 
 ```bash
-pip install -U "duckdb>=1.4.1,<2" duckdb-sqlalchemy
+pip install -U "duckdb-sqlalchemy[motherduck]"
 ```
+
+The extra requires `duckdb>=1.4.1,<2`. DuckDB 1.x has no wheels for Python
+3.15, so use Python 3.14 or older with MotherDuck.
 
 MotherDuck publishes end-of-support dates in its
 [version lifecycle schedule](https://motherduck.com/docs/troubleshooting/version-lifecycle-schedules/)
