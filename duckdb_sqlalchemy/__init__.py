@@ -959,10 +959,22 @@ class CursorWrapper:
             )
         method = getattr(self.__c, name)
         if name not in _NATIVE_RESULT_FETCH_METHODS:
-            if callable(method) and name not in _RESULT_PRESERVING_CONNECTION_METHODS:
+            if (
+                callable(method)
+                and name not in _RESULT_PRESERVING_CONNECTION_METHODS
+                # begin(), commit() and rollback() stay DuckDB's own.
+                and not hasattr(ConnectionWrapper, name)
+            ):
                 # Every cursor is the same DuckDB connection, so a raw call
                 # here replaces the open result like one on the connection.
-                return getattr(self.__connection_wrapper, name)
+                # Buffer only when it is called: looking the name up, as
+                # hasattr() does, must leave an open result alone.
+                connection_wrapper = self.__connection_wrapper
+
+                def call_through_connection(*args: Any, **kwargs: Any) -> Any:
+                    return getattr(connection_wrapper, name)(*args, **kwargs)
+
+                return call_through_connection
             return method
 
         def fetch_native(*args: Any, **kwargs: Any) -> Any:
