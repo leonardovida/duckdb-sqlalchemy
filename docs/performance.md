@@ -122,6 +122,8 @@ memory as on DuckDB 1.x. This changes when the work happens:
   1.x. Errors found while binding the statement, such as an unknown column, are
   still raised by `execute()`. Opt-in transient-error retries cover `execute()`
   only.
+- A result that is never read does not run its statement. The statement runs
+  exactly once when the result is read, however it is read.
 - Statements that write, including `INSERT ... RETURNING`, run once in
   `execute()`.
 - When another statement, a commit or a rollback runs before the result is

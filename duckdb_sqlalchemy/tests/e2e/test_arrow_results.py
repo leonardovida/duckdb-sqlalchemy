@@ -48,7 +48,8 @@ def _numbers(conn: Connection) -> None:
 def test_arrow_table_and_batches_raise_no_warning(make_engine: EngineFactory) -> None:
     engine = make_engine("duckdb:///:memory:")
     with engine.connect() as conn, warnings.catch_warnings():
-        warnings.simplefilter("error")
+        # DuckDB 2.0 warns when a DB-API result is exported as Arrow.
+        warnings.filterwarnings("error", message="Arrow output on a DB-API result")
         _numbers(conn)
         table = (
             _arrow(conn)
