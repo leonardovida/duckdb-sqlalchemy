@@ -47,6 +47,9 @@ boundaries:
   buffer an unread tuple result before another statement replaces it. Fetch
   failures propagate. An active public Arrow batch reader owns its result until
   exhausted or closed; replacement queries fail before executing.
+- On DuckDB 2.0 a statement executed with `duckdb_arrow=True` runs as a
+  relation, because Arrow output from a DB-API result is copied. DuckDB runs a
+  read-only relation again on every read, so read it exactly once and drop it.
 - Filter reflection object scope/kind before name resolution; never combine
   metadata from relations that shadow one another.
 - Preserve exact values before selecting a bulk data path; decline lossy inference.
