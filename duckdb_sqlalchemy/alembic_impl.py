@@ -108,6 +108,9 @@ class DuckDBImpl(DefaultImpl):
             default = defaults.get(source_names.get(column.name, column.name))
             if default and default.lower().startswith("nextval("):
                 column.server_default = schema.DefaultClause(text(default))
+                # A copy_from column keeps duckdb_sequence_name, which would
+                # now reject the column as not backed by an implicit sequence.
+                column.dialect_options["duckdb"]["sequence_name"] = None
                 preserved = getattr(self, "_preserved_batch_sequences", set())
                 preserved.add(table)
                 self._preserved_batch_sequences = preserved

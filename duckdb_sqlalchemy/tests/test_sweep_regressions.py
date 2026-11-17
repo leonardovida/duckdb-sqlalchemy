@@ -18,8 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine.reflection import ObjectKind, ObjectScope
 
-from duckdb_sqlalchemy import ConnectionWrapper, Dialect, copy_from_rows
-from duckdb_sqlalchemy.__init__ import DuckDBNumeric
+from duckdb_sqlalchemy import ConnectionWrapper, Dialect, DuckDBNumeric, copy_from_rows
 from duckdb_sqlalchemy.alembic_impl import DuckDBImpl
 from duckdb_sqlalchemy.datatypes import Struct
 

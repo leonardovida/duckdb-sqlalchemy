@@ -1098,6 +1098,23 @@ class DuckDBExecutionContext(_PGExecutionContext):
             parameters,
         )
 
+    def get_insert_default(self, column: Any) -> Any:
+        # Without RETURNING, PostgreSQL's context draws the key itself from the
+        # <table>_<column>_seq it expects a SERIAL column to have, so draw it
+        # from the sequence duckdb_sequence_name chose instead.
+        name = _sequence_name_option(column)
+        if name is None or not _column_needs_implicit_sequence(column):
+            return super().get_insert_default(column)
+        preparer = self.identifier_preparer
+        qualified = preparer.quote(name)
+        schema = self.connection.schema_for_object(column.table)
+        if schema:
+            qualified = f"{preparer.quote_schema(schema)}.{qualified}"
+        literal = self.dialect.statement_compiler(
+            self.dialect, None
+        ).render_literal_value(qualified, sqltypes.String())
+        return self._execute_scalar(f"select nextval({literal})", column.type)
+
     def _setup_result_proxy(self) -> Any:
         arraysize = self.execution_options.get("duckdb_arraysize")
         if arraysize is None:
@@ -1325,8 +1342,25 @@ def _column_needs_implicit_sequence(column: Any) -> bool:
     return True
 
 
+def _sequence_name_option(column: Any) -> Optional[str]:
+    """The sequence name a column chose with ``duckdb_sequence_name``, if any."""
+    return column.dialect_options["duckdb"]["sequence_name"]
+
+
+def _implicit_sequence_name(column: Any) -> str:
+    """The unqualified name of the sequence backing an implicit-sequence column.
+
+    ``duckdb_sequence_name`` chooses it. Otherwise it is ``<table>_<column>_seq``,
+    the name PostgreSQL gives a SERIAL column's sequence.
+    """
+    name = _sequence_name_option(column)
+    if name is None:
+        return f"{column.table.name}_{column.name}_seq"
+    return name
+
+
 def _implicit_sequence_ddl_name(preparer: IdentifierPreparer, column: Any) -> str:
-    name = preparer.quote(f"{column.table.name}_{column.name}_seq")
+    name = preparer.quote(_implicit_sequence_name(column))
     # schema_for_object renders a schema_translate_map placeholder when the
     # preparer translates schemas, like the table name in the same DDL
     schema = preparer.schema_for_object(column.table)
@@ -1359,6 +1393,7 @@ def _execute_implicit_sequence_ddl(
     connection: Any,
     statement_prefix: str,
     *,
+    named_statement_prefix: Optional[str] = None,
     include_reflected: bool = False,
 ) -> None:
     if connection.dialect.name != "duckdb":
@@ -1376,9 +1411,13 @@ def _execute_implicit_sequence_ddl(
         if _column_needs_implicit_sequence(column) or (
             include_reflected and _uses_reflected_implicit_sequence(preparer, column)
         ):
-            statement = (
-                f"{statement_prefix} {_implicit_sequence_ddl_name(preparer, column)}"
-            )
+            prefix = statement_prefix
+            if (
+                named_statement_prefix is not None
+                and _sequence_name_option(column) is not None
+            ):
+                prefix = named_statement_prefix
+            statement = f"{prefix} {_implicit_sequence_ddl_name(preparer, column)}"
             if schema_translate_map:
                 statement = preparer._render_schema_translates(
                     statement, schema_translate_map
@@ -1389,17 +1428,39 @@ def _execute_implicit_sequence_ddl(
                 connection.exec_driver_sql(statement)
 
 
+def _check_sequence_name_option(column: Any) -> None:
+    """Reject ``duckdb_sequence_name`` on a column without an implicit sequence."""
+    if _sequence_name_option(
+        column
+    ) is not None and not _column_needs_implicit_sequence(column):
+        raise CompileError(
+            f"duckdb_sequence_name is set on column {column}, but DuckDB "
+            "creates a sequence only for an autoincrement integer "
+            "primary key. Remove duckdb_sequence_name, or declare an "
+            "explicit Sequence."
+        )
+
+
 def _create_implicit_sequences(target: Any, connection: Any, **kw: Any) -> None:
+    if connection.dialect.name != "duckdb":
+        return
+    # Checked before any sequence is created, which a later CompileError from
+    # CREATE TABLE would leave behind outside a transaction.
+    for column in target.columns:
+        _check_sequence_name_option(column)
     temporary = any(
         str(prefix).upper() in {"TEMP", "TEMPORARY"} for prefix in target._prefixes
     )
-    statement = (
-        "CREATE TEMPORARY SEQUENCE IF NOT EXISTS"
-        if temporary
-        else "CREATE SEQUENCE IF NOT EXISTS"
-    )
+    statement = "CREATE TEMPORARY SEQUENCE" if temporary else "CREATE SEQUENCE"
+    # A sequence named with duckdb_sequence_name is created without IF NOT
+    # EXISTS, so creating the table fails, as on PostgreSQL, rather than adopt a
+    # sequence another table may use and then drop it with this one.
     _execute_implicit_sequence_ddl(
-        target, connection, statement, include_reflected=True
+        target,
+        connection,
+        f"{statement} IF NOT EXISTS",
+        named_statement_prefix=statement,
+        include_reflected=True,
     )
 
 
@@ -1430,6 +1491,7 @@ class DuckDBDDLCompiler(PGDDLCompiler):
         )
 
     def get_column_specification(self, column: Any, **kwargs: Any) -> str:
+        _check_sequence_name_option(column)
         if not _column_needs_implicit_sequence(column):
             # PostgreSQL renders SERIAL for reflected sequence-backed keys,
             # even when a server default is present. DuckDB has no SERIAL.
@@ -1755,6 +1817,13 @@ class Dialect(PGDialect_psycopg2):
     driver = "duckdb_sqlalchemy"
     type_compiler_cls = DuckDBTypeCompiler
     supports_identity_columns = False
+    # duckdb_sequence_name names the sequence the dialect creates for an
+    # autoincrement integer primary key instead of <table>_<column>_seq. A Column
+    # option, as Identity accepts no dialect options before SQLAlchemy 2.1.
+    construct_arguments = [
+        *PGDialect.construct_arguments,
+        (sa_schema.Column, {"sequence_name": None}),
+    ]
     _has_events = False
     supports_statement_cache = True
     # COMMENT ON exists in every supported DuckDB; initialize() re-checks, and
