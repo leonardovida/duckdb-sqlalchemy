@@ -6,7 +6,27 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
-## Unreleased
+## [2.0.0](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.11...v2.0.0) (2026-11-17)
+
+### Highlights
+
+- DuckDB 2.0 is supported. The package requires `duckdb>=1.3.0,<3`, and a plain installation on Python 3.11 or newer resolves DuckDB 2.x. [#235](https://github.com/leonardovida/duckdb-sqlalchemy/pull/235)
+- MotherDuck does not accept DuckDB 2.x clients. The new `motherduck` extra installs a DuckDB version that MotherDuck accepts. [#235](https://github.com/leonardovida/duckdb-sqlalchemy/pull/235)
+- On DuckDB 2.0, `duckdb_arrow=True` results are read as Arrow without the extra copy of the rows that DuckDB 2.0 adds to DB-API results, and `result.batches()` streams. [#234](https://github.com/leonardovida/duckdb-sqlalchemy/pull/234)
+
+### Upgrading from 1.5.6.11
+
+The version number follows the supported DuckDB line, which is now 2.0. Constraints that stay below 2, such as `duckdb-sqlalchemy<2` or `duckdb-sqlalchemy~=1.5.6`, do not select this release. The dialect API has no removals, and DuckDB 1.3.0 and newer remain supported.
+
+1. Change the constraint so that it allows 2.0.0, for example `duckdb-sqlalchemy>=2.0.0,<3`.
+2. Decide which DuckDB line the application uses.
+   - Applications that connect to MotherDuck should depend on `duckdb-sqlalchemy[motherduck]`, which requires `duckdb>=1.4.1,<2`, or keep their own `duckdb<2` pin.
+   - Applications that should stay on DuckDB 1.x for another reason should pin `duckdb<2`.
+   - Other applications on Python 3.11 or newer receive DuckDB 2.x.
+3. Upgrade with `pip install -U duckdb-sqlalchemy` or update the lock file, and review the resolved `duckdb` version before deploying.
+4. Review the changes below when the application runs on DuckDB 2.x.
+   - Read the [DuckDB 2.0 notes](https://leonardovida.github.io/duckdb-sqlalchemy/types-and-caveats.html#duckdb-20) for the behavior of DuckDB 2.0 itself. A database file created by DuckDB 2.0 does not open in DuckDB 1.x, so a return to DuckDB 1.x requires an export of such a file.
+   - Read the [Compatibility](#compatibility) items on `duckdb_arrow=True` results and on Arrow methods of a DBAPI cursor.
 
 ### Features
 
@@ -19,7 +39,14 @@ preserved from the upstream project for historical context.
 
 - A plain installation on Python 3.11 or newer now resolves DuckDB 2.x where it previously resolved DuckDB 1.5.x. MotherDuck does not accept DuckDB 2.x clients and rejects their connections with an error that asks for a downgrade. Applications that connect to MotherDuck should install `duckdb-sqlalchemy[motherduck]` or keep their own `duckdb<2` pin. See the [MotherDuck guide](https://leonardovida.github.io/duckdb-sqlalchemy/motherduck.html#duckdb-versions). [#235](https://github.com/leonardovida/duckdb-sqlalchemy/pull/235)
 - On DuckDB 2.0, Arrow methods called on a DBAPI cursor without `duckdb_arrow=True`, such as `result.cursor.to_arrow_table()`, emit DuckDB's warning about an extra copy of the rows. Execute the statement with `duckdb_arrow=True` to avoid the copy. [#235](https://github.com/leonardovida/duckdb-sqlalchemy/pull/235)
-- On DuckDB 2.0, a statement that only reads and is executed with `duckdb_arrow=True` runs when its result is first read. Runtime errors such as a failed conversion are raised by `result.arrow` or `result.batches()` as the SQLAlchemy error that `execute()` raises on DuckDB 1.x, and opt-in transient-error retries do not cover that read. A result that is never read does not run its statement. Fetching rows from such a result reads the whole result into Python rows first, and `fetch_df_chunk()` on its DBAPI cursor raises `NotImplementedError`. See [breaking and behavior changes](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/breaking-changes.md). [#234](https://github.com/leonardovida/duckdb-sqlalchemy/pull/234)
+- On DuckDB 2.0, a statement that only reads and is executed with `duckdb_arrow=True` runs when its result is first read. Runtime errors such as a failed conversion are raised by `result.arrow` or `result.batches()` as the SQLAlchemy error that `execute()` raises on DuckDB 1.x, and opt-in transient-error retries do not cover that read. A result that is never read does not run its statement. Fetching rows from such a result reads the whole result into Python rows first, and `fetch_df_chunk()` on its DBAPI cursor raises `NotImplementedError`. Applications should set `duckdb_arrow` on the statements that are read as Arrow and not on the whole engine when other results are large. See [breaking and behavior changes](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/breaking-changes.md). [#234](https://github.com/leonardovida/duckdb-sqlalchemy/pull/234)
+
+### Maintenance
+
+- Hosted CI runs every test job on the latest DuckDB 1.x and 2.x, and the `nox` matrix adds DuckDB 2.0.0 and Python 3.15. The weekly MotherDuck workflow installs the `motherduck` extra. [#235](https://github.com/leonardovida/duckdb-sqlalchemy/pull/235)
+- The documentation describes the supported DuckDB range, the `motherduck` extra and the behavior of DuckDB 2.0 that applications can notice. [#235](https://github.com/leonardovida/duckdb-sqlalchemy/pull/235)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.11...v2.0.0
 
 ## [1.5.6.11](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.10...v1.5.6.11) (2026-11-17)
 
