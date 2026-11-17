@@ -268,6 +268,35 @@ def test_raw_cursor_call_keeps_the_rows_of_an_open_result(
         assert len(result.fetchall()) == 4999
 
 
+def test_looking_up_a_raw_cursor_method_leaves_the_open_result_alone(
+    make_engine: EngineFactory,
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        result = conn.exec_driver_sql("SELECT * FROM range(5000)")
+        assert hasattr(result.cursor, "register")
+        # Still DuckDB's own result: a buffered one cannot be read as Arrow.
+        fetch_table = getattr(result.cursor, "to_arrow_table", None)
+        table = fetch_table() if fetch_table else result.cursor.fetch_arrow_table()
+        assert table.num_rows == 5000
+
+
+def test_raw_cursor_transaction_calls_stay_duckdb_calls_in_autocommit(
+    make_engine: EngineFactory,
+) -> None:
+    engine = make_engine("duckdb:///:memory:", isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        conn.exec_driver_sql("CREATE TABLE t (i INTEGER)")
+        cursor = conn.connection.cursor()
+        # DuckDB returns the connection, so calls chain.
+        cursor.begin().execute("INSERT INTO t VALUES (1)")
+        cursor.rollback()
+        assert conn.exec_driver_sql("SELECT count(*) FROM t").scalar() == 0
+        cursor.begin().execute("INSERT INTO t VALUES (2)")
+        cursor.commit()
+        assert conn.exec_driver_sql("SELECT count(*) FROM t").scalar() == 1
+
+
 @pytest.mark.parametrize("call", ["sql", "unregister", "from_query"])
 def test_raw_driver_call_keeps_a_raw_driver_result(
     make_engine: EngineFactory, call: str

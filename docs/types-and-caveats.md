@@ -306,7 +306,10 @@ it is created without `IF NOT EXISTS`,
 so creating the table fails if a sequence of that name already exists,
 rather than adopting one another table may use.
 `duckdb_sequence_name` on a column that is not an autoincrement integer primary key
-raises `CompileError` before anything is created.
+raises `CompileError` before anything is created for that table.
+The name is a plain sequence name, not a qualified one:
+`"app.seq_users"` creates a sequence whose name contains a dot.
+To place the sequence in a schema, set `schema` on the table.
 
 DuckDB cannot make a table own a sequence reliably,
 so the dialect drops it when SQLAlchemy drops the table,
@@ -322,8 +325,15 @@ op.execute("DROP SEQUENCE seq_users")
 
 A table reflected from DuckDB has a `nextval('seq_users')` default and no
 `duckdb_sequence_name`,
-so creating it in another database does not create the sequence:
-create the sequence first, or set `duckdb_sequence_name` on the reflected column.
+so creating it in another database does not create the sequence.
+Create the sequence first, or set `duckdb_sequence_name` on the reflected column
+and remove its reflected default:
+
+```python
+column = reflected_table.c.id
+column.server_default = None
+column.dialect_options["duckdb"]["sequence_name"] = "seq_users"
+```
 
 Declare an explicit `Sequence` only when you need a start value:
 

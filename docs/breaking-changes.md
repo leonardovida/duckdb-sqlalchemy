@@ -17,7 +17,7 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
-- **Raw calls on a DBAPI cursor count as transaction work** - A call that can run SQL on a DBAPI cursor, such as `connection.connection.cursor().register(...)`, `sql()` or `read_parquet()`, now buffers an open SQLAlchemy result and counts as a statement in the current transaction, as calls on `connection.driver_connection` do since 1.5.6.5. The open result previously lost rows on DuckDB 1.x. A later transient-error retry in that transaction is declined and raises the original error. `commit()`, `rollback()` and `begin()` on a DBAPI cursor go through the dialect's transaction handling. No migration is needed.
+- **Raw calls on a DBAPI cursor count as transaction work** - A call that can run SQL on a DBAPI cursor, such as `connection.connection.cursor().register(...)`, `sql()` or `read_parquet()`, now buffers an open SQLAlchemy result and counts as a statement in the current transaction, as calls on `connection.driver_connection` do since 1.5.6.5. The open result previously lost rows on DuckDB 1.x. A later transient-error retry in that transaction is declined and raises the original error. `commit()`, `rollback()` and `begin()` on a DBAPI cursor are unchanged. No migration is needed.
 
 ## [1.5.6.10](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.9...v1.5.6.10) (2026-11-09)
 

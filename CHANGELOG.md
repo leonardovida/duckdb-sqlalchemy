@@ -19,7 +19,7 @@ preserved from the upstream project for historical context.
 
 ### Compatibility
 
-- Raw calls on a DBAPI cursor that can run SQL, such as `register()`, `sql()` or `read_parquet()`, now count as a statement in the current transaction, as calls on `connection.driver_connection` already do. A later transient-error retry in that transaction is declined and raises the original error. `commit()`, `rollback()` and `begin()` called on a DBAPI cursor go through the dialect's transaction handling. No change is required. See [breaking and behavior changes](docs/breaking-changes.md).
+- Raw calls on a DBAPI cursor that can run SQL, such as `register()`, `sql()` or `read_parquet()`, now count as a statement in the current transaction, as calls on `connection.driver_connection` already do. A later transient-error retry in that transaction is declined and raises the original error. `commit()`, `rollback()` and `begin()` on a DBAPI cursor are unchanged. No change is required. See [breaking and behavior changes](docs/breaking-changes.md).
 
 ### Maintenance
 
