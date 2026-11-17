@@ -558,6 +558,19 @@ class ConnectionWrapper:
         # batch reader still owns the result.
         self._close_raw_reader()
 
+    def _discard_native_result(self) -> None:
+        """Drop what is left of the result DuckDB holds for this connection.
+
+        Call it after ``_buffer_pending_result``, when no cursor needs those
+        rows any more. A result can still be unfinished then: its cursor was
+        closed, or dropped without being closed, after reading only part of
+        it. ``execute()`` replaces such a result, but DuckDB 2.0 refuses every
+        other call (``register()``, ``sql()``, ``table()``, ...) until it is
+        finished. An empty statement discards it the way the next statement
+        would, without ``abort()``, which can fail an open transaction.
+        """
+        self.__c.execute("")
+
     def begin(self) -> None:
         if not self.autocommit:
             self._begin()
@@ -612,6 +625,7 @@ class ConnectionWrapper:
 
         def call_native(*args: Any, **kwargs: Any) -> Any:
             self._buffer_pending_result()
+            self._discard_native_result()
             self._count_statement()
             return attribute(*args, **kwargs)
 
@@ -863,6 +877,9 @@ class CursorWrapper:
             self._clear_result()
         elif norm.startswith("register"):
             view_name, df = _parse_register_params(parameters)
+            # register() is not execute(): DuckDB 2.0 refuses it while a
+            # closed, partly read result is unfinished.
+            self._clear_result()
             self.__c.register(view_name, df)
             self._clear_result()
             return
