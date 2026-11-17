@@ -1877,7 +1877,8 @@ class Dialect(PGDialect_psycopg2):
     # duckdb binds and returns decimal.Decimal without going through float
     supports_native_decimal = True
     execution_ctx_cls = DuckDBExecutionContext
-    div_is_floordiv = False  # TODO: tweak this to be based on DuckDB version
+    # `/` is float division in every supported DuckDB version.
+    div_is_floordiv = False
     inspector = DuckDBInspector
     insertmanyvalues_page_size = 1000
     use_insertmanyvalues = True
