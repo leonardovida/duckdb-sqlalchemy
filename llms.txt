@@ -8,7 +8,7 @@
 - DuckDB settings go in the URL query (`?threads=4`) or `connect_args={"config": {...}}`. The URL wins.
 - MotherDuck reads the token from the `MOTHERDUCK_TOKEN` (or `motherduck_token`) environment variable. Do not put tokens in URLs that are logged.
 - Default pools: `SingletonThreadPool` for `:memory:` (one private database per thread), `QueuePool` for files and named `:memory:name` databases (shared across the process), `NullPool` for MotherDuck. Override with `poolclass=`.
-- Compatibility: Python 3.10+. SQLAlchemy 2.0.0+ (2.0.45+ on Python 3.14, SQLAlchemy 2.1 needs Python 3.11+). DuckDB 1.3.0 to 1.5.x. DuckDB 2.0 is not supported. MotherDuck needs DuckDB 1.4.1 or newer.
+- Compatibility: Python 3.10 to 3.15. SQLAlchemy 2.0.0+ (2.0.45+ on Python 3.14 and newer, SQLAlchemy 2.1 needs Python 3.11+). DuckDB 1.3.0 to 2.0.x (DuckDB 2.x needs Python 3.11+, Python 3.15 needs DuckDB 2.x). MotherDuck accepts DuckDB 1.4.1 to 1.5.6 only: install `duckdb-sqlalchemy[motherduck]`.
 - The package replaces `duckdb-engine`. Do not install both: each registers the `duckdb://` dialect.
 
 ## Public API

@@ -48,8 +48,10 @@ preference for end-to-end tests in `duckdb_sqlalchemy/tests/e2e/`, are in
 
 ## Supported Versions
 
-`noxfile.py` is the source of truth. It tests Python 3.10-3.14, SQLAlchemy
-2.0.0 / 2.0.58 / 2.1.9, and DuckDB 1.3.0-1.5.x. Hosted CI runs the latest
-SQLAlchemy and DuckDB on each Python version, SQLAlchemy 2.0 on Python 3.13 and
-3.14, the minimum versions, DuckDB 2.0.0 above the dependency cap, and
-informational prerelease jobs.
+`noxfile.py` is the source of truth. It tests Python 3.10-3.15, SQLAlchemy
+2.0.0 / 2.0.58 / 2.1.9, and DuckDB 1.3.0-2.0.x. DuckDB 2.x needs Python 3.11 or
+newer, and DuckDB 1.x has no Python 3.15 wheels. Hosted CI runs the latest
+SQLAlchemy with the latest DuckDB 1.x and 2.x on each Python version that has
+wheels, SQLAlchemy 2.0 on Python 3.13 and 3.14, the minimum versions, and
+informational prerelease jobs. MotherDuck accepts only DuckDB 1.x, which the
+`motherduck` extra pins.

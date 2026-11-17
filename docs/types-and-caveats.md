@@ -357,3 +357,23 @@ with MotherDuck or file-backed connections. Prefer `spawn` or `forkserver`, and
 initialize engines/connections in the child process.
 
 DuckDB canonicalizes `CHAR(n)` and `VARCHAR(n)` to unbounded `VARCHAR`; reflected string lengths are therefore `None`. It generates constraint names and supports table/column comments, but does not support constraint comments or identity columns. Use sequences for generated integer keys. A plain `Identity()` falls back to a sequence because SQLAlchemy ignores unsupported identity syntax; identity options raise `CompileError` so their requested behavior cannot silently change.
+
+## DuckDB 2.0
+
+DuckDB 2.0 is supported for local databases on Python 3.11 and newer.
+
+- MotherDuck does not accept DuckDB 2.x clients yet. Install
+  `duckdb-sqlalchemy[motherduck]` for MotherDuck, as described in the
+  [MotherDuck guide](motherduck.md#duckdb-versions).
+- Statements executed with `duckdb_arrow=True` run as DuckDB relations. See
+  [Arrow results on DuckDB 2.0](performance.md#arrow-results-on-duckdb-20) for
+  what that changes.
+- Arrow methods called on a DBAPI cursor without `duckdb_arrow=True`, such as
+  `result.cursor.to_arrow_table()`, emit a DuckDB `UserWarning` about an extra
+  copy of the rows.
+- `begin_nested()` raises, as on DuckDB 1.x. DuckDB has no `SAVEPOINT`.
+- DuckDB 2.0 can print a `nanobind: leaked ...` report to standard error when
+  the interpreter exits, for example after an Arrow table or DataFrame was
+  registered in a process that imported `sqlalchemy.orm`. The report comes from
+  DuckDB's Python binding while the interpreter shuts down. It does not indicate
+  lost data or an open connection, and the exit status is unaffected.
