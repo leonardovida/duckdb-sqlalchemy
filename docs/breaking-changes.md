@@ -17,7 +17,7 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
-- None yet.
+- **`duckdb_arrow` results run as relations on DuckDB 2.0** - On DuckDB 2.0 a statement executed with `duckdb_arrow=True` runs as a DuckDB relation, which avoids the copy and the warning DuckDB 2.0 adds to Arrow output from DB-API results. A statement that only reads then runs when its result is first read, so runtime errors are raised by `result.arrow` or `result.batches()` and not by `execute()`, and opt-in transient-error retries do not cover that read. Fetching rows from such a result reads all of it into Python rows first, and `fetch_df_chunk()` on its DBAPI cursor raises `NotImplementedError`. Set `duckdb_arrow` on the statements read as Arrow, not on the whole engine, when other results are large. DuckDB 1.x is unaffected.
 
 ## [1.5.6.11](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.10...v1.5.6.11) (2026-11-17)
 

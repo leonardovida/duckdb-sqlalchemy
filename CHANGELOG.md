@@ -8,7 +8,13 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
-- None yet.
+### Features
+
+- On DuckDB 2.0, statements executed with `duckdb_arrow=True` run as DuckDB relations, so `result.arrow` and `result.batches()` read Arrow data without the extra copy and the warning that DuckDB 2.0 adds to DB-API results. `result.batches()` streams again: a 20 million row read peaked at about 140 MB instead of 930 MB. DuckDB 1.x is unaffected. DuckDB 2.0 remains outside the supported range of this package until the `duckdb<2` requirement is lifted.
+
+### Compatibility
+
+- On DuckDB 2.0, a statement that only reads and is executed with `duckdb_arrow=True` runs when its result is first read. Runtime errors such as a failed conversion are raised by `result.arrow` or `result.batches()` as the SQLAlchemy error that `execute()` raises on DuckDB 1.x, and opt-in transient-error retries do not cover that read. Fetching rows from such a result reads the whole result into Python rows first, and `fetch_df_chunk()` on its DBAPI cursor raises `NotImplementedError`. See [breaking and behavior changes](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/breaking-changes.md).
 
 ## [1.5.6.11](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.10...v1.5.6.11) (2026-11-17)
 

@@ -108,6 +108,33 @@ consumed reader must be consumed or closed before another statement runs on
 the same connection. Attempts to fetch rows from that active result raise
 `InvalidRequestError`. A separate connection can run independent work.
 
+### Arrow results on DuckDB 2.0
+
+DuckDB 2.0 copies every row of a DB-API result to export it as Arrow, builds
+that copy before the first batch of a reader, and warns about it. With
+`duckdb_arrow=True` the dialect therefore runs the statement as a DuckDB
+relation on DuckDB 2.0, so `result.arrow` and `result.batches()` use as much
+memory as on DuckDB 1.x. This changes when the work happens:
+
+- A statement that only reads runs when its result is first read, not when it
+  is executed. A conversion or other runtime error is raised by `result.arrow`
+  or `result.batches()`, as the SQLAlchemy error `execute()` raises on DuckDB
+  1.x. Errors found while binding the statement, such as an unknown column, are
+  still raised by `execute()`. Opt-in transient-error retries cover `execute()`
+  only.
+- Statements that write, including `INSERT ... RETURNING`, run once in
+  `execute()`.
+- When another statement, a commit or a rollback runs before the result is
+  read, the result is read first into Python rows, as for any other result.
+- Fetching rows from such a result instead of Arrow reads the whole result
+  into Python rows first. Set `duckdb_arrow` on the statements that are read
+  as Arrow, not on the whole engine, when other results are large.
+- `fetch_df_chunk()` on the DBAPI cursor is not available for these results.
+  Use `df()`, `to_arrow_table()` or `to_arrow_reader()`.
+
+Raw Arrow calls on a DBAPI cursor without the option, such as
+`result.cursor.to_arrow_table()`, keep DuckDB's copy and its warning.
+
 Ordinary tuple results are buffered when another statement runs before they
 are exhausted. That preserves their rows but can use substantial memory.
 Fetch failures propagate instead of turning into empty successful results.

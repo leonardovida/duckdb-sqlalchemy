@@ -1,5 +1,6 @@
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
+import duckdb
 from sqlalchemy.exc import InvalidRequestError
 
 
@@ -70,6 +71,30 @@ class DuckDBArrowResult:
         self._result = result
         self._arrow = None
 
+    def _read(self, cursor: Any, fetch: Callable[..., Any], *args: Any) -> Any:
+        """Call a native Arrow fetch of the cursor.
+
+        A statement that ran as a relation executes on this read, so a DuckDB
+        error is raised here instead of by ``execute()``. Report it as the
+        SQLAlchemy error ``execute()`` would have raised.
+        """
+        try:
+            return fetch(*args)
+        except duckdb.Error as exc:
+            connection = getattr(self._result, "connection", None)
+            handle = getattr(connection, "_handle_dbapi_exception", None)
+            if handle is None or not getattr(cursor, "_relation_read", False):
+                raise
+            context = getattr(self._result, "context", None)
+            handle(
+                exc,
+                getattr(context, "statement", None),
+                getattr(context, "parameters", None),
+                cursor,
+                context,
+            )
+            raise
+
     def _available_cursor(self) -> Any:
         cursor = getattr(self._result, "cursor", None)
         if cursor is None:
@@ -92,7 +117,7 @@ class DuckDBArrowResult:
             fetch_arrow_table = getattr(cursor, "fetch_arrow_table", None)
         if fetch_arrow_table is None:
             raise NotImplementedError("Arrow results are not available on this cursor")
-        self._arrow = fetch_arrow_table()
+        self._arrow = self._read(cursor, fetch_arrow_table)
         self._result.close()
         return self._arrow
 
@@ -123,7 +148,9 @@ class DuckDBArrowResult:
             raise NotImplementedError(
                 "Arrow batch reads are not available on this cursor"
             )
-        reader = DuckDBArrowBatchReader(fetch_reader(batch_size), cursor)
+        reader = DuckDBArrowBatchReader(
+            self._read(cursor, fetch_reader, batch_size), cursor
+        )
         cursor._native_reader_active = True
         cursor._native_reader = reader
         reader._result = self._result
