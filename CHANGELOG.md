@@ -8,26 +8,53 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+- None yet.
+
+## [1.5.6.11](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.10...v1.5.6.11) (2026-11-17)
+
+### Highlights
+
+- A column can name the sequence behind its autoincrement primary key with `duckdb_sequence_name`, so a model shared with PostgreSQL keeps one sequence name on both databases. [#229](https://github.com/leonardovida/duckdb-sqlalchemy/pull/229)
+- A raw call on a DBAPI cursor no longer cuts short a SQLAlchemy result that is still being read on the same connection. [#230](https://github.com/leonardovida/duckdb-sqlalchemy/pull/230)
+- The dialect handles results that were closed or dropped before they were fully read on DuckDB 2.0. The package still requires `duckdb<2`. [#230](https://github.com/leonardovida/duckdb-sqlalchemy/pull/230)
+
+### Upgrading from 1.5.6.10
+
+1.5.6.11 is a maintenance release on the 1.5.6 line, so constraints such as `duckdb-sqlalchemy~=1.5.6.10` select it. Dependency requirements are unchanged.
+
+1. Upgrade with `pip install -U duckdb-sqlalchemy` or update the lock file.
+2. Review the Compatibility item below if the application calls methods on a DBAPI cursor directly. See [breaking and behavior changes](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/breaking-changes.md) for the full entry.
+
 ### Features
 
-- `Column(..., duckdb_sequence_name="seq_users")` names the sequence the dialect creates for an autoincrement integer primary key, including one declared with `Identity()`, instead of `<table>_<column>_seq`. A model can therefore use the same sequence name on DuckDB as the `SEQUENCE NAME` of its PostgreSQL identity column. The sequence is created in the table's schema without `IF NOT EXISTS`, so creating the table fails if a sequence of that name exists, rather than adopting one another table may use. It is dropped with the table, and Alembic batch recreates with `copy_from` keep it. Alembic's `op.drop_table` cannot tell which sequence to drop, so a downgrade must drop it with `op.execute`. Inserts without `RETURNING` draw from it. The option raises `CompileError` on any other column. [#229](https://github.com/leonardovida/duckdb-sqlalchemy/pull/229)
+- `Column(..., duckdb_sequence_name="seq_users")` names the sequence the dialect creates for an autoincrement integer primary key, including one declared with `Identity()`, instead of `<table>_<column>_seq`. A model can therefore use the same sequence name on DuckDB as the `SEQUENCE NAME` of its PostgreSQL identity column. [#229](https://github.com/leonardovida/duckdb-sqlalchemy/pull/229)
+  - The sequence is created in the schema of the table and dropped with the table. Inserts without `RETURNING` draw from it.
+  - It is created without `IF NOT EXISTS`, so creating the table fails if a sequence of that name exists, instead of adopting one that another table may use.
+  - The name is a plain sequence name. A dotted value such as `app.seq_users` is not split into a schema and a name.
+  - Alembic batch recreates with `copy_from` keep it. Alembic's `op.drop_table` cannot tell which sequence to drop, so a downgrade must drop it with `op.execute`.
+  - The option raises `CompileError` on a column that is not an autoincrement integer primary key.
+  - The [types and caveats guide](https://leonardovida.github.io/duckdb-sqlalchemy/types-and-caveats.html) describes the option, including its use on reflected tables. [#232](https://github.com/leonardovida/duckdb-sqlalchemy/pull/232)
 
 ### Bug Fixes
 
-- On DuckDB 2.0, `exec_driver_sql("register", ...)`, a large `executemany` INSERT, `insert_from_arrow` and `register()` or `sql()` calls on `connection.driver_connection` failed with "connection has an unfinished result" when an earlier result on the same connection had been closed or dropped after only part of it was read. The dialect now discards a result that no cursor can read any more before these calls. DuckDB 2.0 remains outside the supported range of this package until the `duckdb<2` requirement is lifted.
-- A raw call on a DBAPI cursor, such as `connection.connection.cursor().register(...)`, no longer cuts short a SQLAlchemy result that is still being read on the same connection. On DuckDB 1.x the open result silently lost every row after its current 2048-row vector, and on DuckDB 2.0 the call failed. The unread rows are now buffered first, as they already are for calls on `connection.driver_connection`.
+- A raw call on a DBAPI cursor, such as `connection.connection.cursor().register(...)`, no longer cuts short a SQLAlchemy result that is still being read on the same connection. On DuckDB 1.x the open result silently lost every row after its current 2048-row vector. The unread rows are now buffered first, as they already are for calls on `connection.driver_connection`. [#230](https://github.com/leonardovida/duckdb-sqlalchemy/pull/230) [#232](https://github.com/leonardovida/duckdb-sqlalchemy/pull/232)
+- On DuckDB 2.0, `exec_driver_sql("register", ...)`, a large `executemany` INSERT, `insert_from_arrow` and `register()` or `sql()` calls on `connection.driver_connection` failed with "connection has an unfinished result" when an earlier result on the same connection had been closed or dropped after only part of it was read. The dialect now discards a result that no cursor can read any more before these calls. DuckDB 2.0 remains outside the supported range of this package until the `duckdb<2` requirement is lifted. [#230](https://github.com/leonardovida/duckdb-sqlalchemy/pull/230)
 
 ### Compatibility
 
-- Raw calls on a DBAPI cursor that can run SQL, such as `register()`, `sql()` or `read_parquet()`, now count as a statement in the current transaction, as calls on `connection.driver_connection` already do. A later transient-error retry in that transaction is declined and raises the original error. `commit()`, `rollback()` and `begin()` on a DBAPI cursor are unchanged. No change is required. See [breaking and behavior changes](docs/breaking-changes.md).
+- Raw calls on a DBAPI cursor that can run SQL, such as `register()`, `sql()` or `read_parquet()`, now count as a statement in the current transaction, as calls on `connection.driver_connection` already do. A later transient-error retry in that transaction is declined and raises the original error. `commit()`, `rollback()` and `begin()` on a DBAPI cursor are unchanged. No change is required. See [breaking and behavior changes](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/docs/breaking-changes.md). [#230](https://github.com/leonardovida/duckdb-sqlalchemy/pull/230) [#232](https://github.com/leonardovida/duckdb-sqlalchemy/pull/232)
+- The `duckdb>=1.3.0,<2` requirement is unchanged, so DuckDB 2.0 is still not installed with this release. [#228](https://github.com/leonardovida/duckdb-sqlalchemy/issues/228)
 
 ### Maintenance
 
-- The configuration guide states that a plain `:memory:` database is private to the thread that opened it, and recommends a named in-memory database or a file when threads share data. It previously said every connection sees the same database.
-- The documentation lists every execution option in one table, every case in which a large INSERT uses the ordinary insert path, and the `Inspector` cache. The documentation index and `llms.txt` describe each guide.
-- The weekly MotherDuck integration workflow fails when the `MOTHERDUCK_TOKEN` secret is not configured. It previously passed without running any test. It installs a DuckDB version that MotherDuck accepts unless `MOTHERDUCK_DUCKDB_VERSION` selects one.
-- The `nox` test matrix uses SQLAlchemy 2.0.58 and 2.1.9 in place of 2.0.52 and 2.1.1.
-- The benchmark job adds a table of timings and peak memory against the baseline commit to its run summary. The table is informational and does not fail the job.
+- Hosted CI runs the full test suite on DuckDB 2.0.0 in a required job, in addition to the supported DuckDB 1.x versions. [#230](https://github.com/leonardovida/duckdb-sqlalchemy/pull/230)
+- The weekly MotherDuck integration workflow fails when the `MOTHERDUCK_TOKEN` secret is not configured. It previously passed without running any test. It installs a DuckDB version that MotherDuck accepts unless `MOTHERDUCK_DUCKDB_VERSION` selects one. [#231](https://github.com/leonardovida/duckdb-sqlalchemy/pull/231)
+- The `nox` test matrix uses SQLAlchemy 2.0.58 and 2.1.9 in place of 2.0.52 and 2.1.1. [#231](https://github.com/leonardovida/duckdb-sqlalchemy/pull/231)
+- The benchmark job adds a table of timings and peak memory against the baseline commit to its run summary. The table is informational and does not fail the job. [#231](https://github.com/leonardovida/duckdb-sqlalchemy/pull/231)
+- The configuration guide states that a plain `:memory:` database is private to the thread that opened it, and recommends a named in-memory database or a file when threads share data. It previously said every connection sees the same database. [#226](https://github.com/leonardovida/duckdb-sqlalchemy/pull/226)
+- The documentation lists every execution option in one table, every case in which a large INSERT uses the ordinary insert path, and the `Inspector` cache. The documentation index and `llms.txt` describe each guide. [#226](https://github.com/leonardovida/duckdb-sqlalchemy/pull/226)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.10...v1.5.6.11
 
 ## [1.5.6.10](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.9...v1.5.6.10) (2026-11-09)
 
