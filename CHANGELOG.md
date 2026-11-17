@@ -10,7 +10,16 @@ preserved from the upstream project for historical context.
 
 ### Features
 
-- `Column(..., duckdb_sequence_name="seq_users")` names the sequence the dialect creates for an autoincrement integer primary key, including one declared with `Identity()`, instead of `<table>_<column>_seq`. A model can therefore use the same sequence name on DuckDB as the `SEQUENCE NAME` of its PostgreSQL identity column. The sequence is created in the table's schema without `IF NOT EXISTS`, so creating the table fails if a sequence of that name exists, rather than adopting one another table may use. It is dropped with the table, and Alembic batch recreates with `copy_from` keep it. Alembic's `op.drop_table` cannot tell which sequence to drop, so a downgrade must drop it with `op.execute`. Inserts without `RETURNING` draw from it. The option raises `CompileError` on any other column.
+- `Column(..., duckdb_sequence_name="seq_users")` names the sequence the dialect creates for an autoincrement integer primary key, including one declared with `Identity()`, instead of `<table>_<column>_seq`. A model can therefore use the same sequence name on DuckDB as the `SEQUENCE NAME` of its PostgreSQL identity column. The sequence is created in the table's schema without `IF NOT EXISTS`, so creating the table fails if a sequence of that name exists, rather than adopting one another table may use. It is dropped with the table, and Alembic batch recreates with `copy_from` keep it. Alembic's `op.drop_table` cannot tell which sequence to drop, so a downgrade must drop it with `op.execute`. Inserts without `RETURNING` draw from it. The option raises `CompileError` on any other column. [#229](https://github.com/leonardovida/duckdb-sqlalchemy/pull/229)
+
+### Bug Fixes
+
+- On DuckDB 2.0, `exec_driver_sql("register", ...)`, a large `executemany` INSERT, `insert_from_arrow` and `register()` or `sql()` calls on `connection.driver_connection` failed with "connection has an unfinished result" when an earlier result on the same connection had been closed or dropped after only part of it was read. The dialect now discards a result that no cursor can read any more before these calls. DuckDB 2.0 remains outside the supported range of this package until the `duckdb<2` requirement is lifted.
+- A raw call on a DBAPI cursor, such as `connection.connection.cursor().register(...)`, no longer cuts short a SQLAlchemy result that is still being read on the same connection. On DuckDB 1.x the open result silently lost every row after its current 2048-row vector, and on DuckDB 2.0 the call failed. The unread rows are now buffered first, as they already are for calls on `connection.driver_connection`.
+
+### Compatibility
+
+- Raw calls on a DBAPI cursor that can run SQL, such as `register()`, `sql()` or `read_parquet()`, now count as a statement in the current transaction, as calls on `connection.driver_connection` already do. A later transient-error retry in that transaction is declined and raises the original error. `commit()`, `rollback()` and `begin()` called on a DBAPI cursor go through the dialect's transaction handling. No change is required. See [breaking and behavior changes](docs/breaking-changes.md).
 
 ### Maintenance
 

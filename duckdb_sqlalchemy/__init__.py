@@ -514,6 +514,9 @@ class ConnectionWrapper:
         self._raw_reader: Optional["weakref.ReferenceType[Any]"] = None
         # Statements run since begin(); None outside a transaction begun here.
         self._transaction_statements: Optional[int] = None
+        # True while DuckDB may still hold a result whose cursor was closed, or
+        # dropped without being closed, before reading all of it.
+        self._abandoned_result = False
 
     def cursor(self) -> "CursorWrapper":
         return CursorWrapper(self.__c, self)
@@ -553,10 +556,30 @@ class ConnectionWrapper:
         pending = self._pending_cursor() if self._pending_cursor is not None else None
         if pending is not None and pending is not requester:
             pending._buffer_result()
+        elif pending is None and self._pending_cursor is not None:
+            # The cursor was dropped without being closed.
+            self._abandoned_result = True
         self._pending_cursor = None
         # After buffering, which refuses to continue while a duckdb_arrow
         # batch reader still owns the result.
         self._close_raw_reader()
+
+    def _discard_abandoned_result(self) -> None:
+        """Drop the rest of a result that no cursor can read any more.
+
+        A result stays unfinished when its cursor was closed, or dropped
+        without being closed, after reading only part of it. ``execute()``
+        replaces such a result, but DuckDB 2.0 refuses ``register()`` and
+        running a relation until it is finished, and DuckDB 1.x cuts it short.
+        An empty statement discards it the way the next statement would,
+        without ``abort()``, which can fail an open transaction.
+
+        Call it after ``_buffer_pending_result``. Results the dialect does not
+        track, such as one from ``driver_connection.execute()``, are left alone.
+        """
+        if self._abandoned_result:
+            self._abandoned_result = False
+            self.__c.execute("")
 
     def begin(self) -> None:
         if not self.autocommit:
@@ -590,6 +613,9 @@ class ConnectionWrapper:
         try:
             if pending is not None:
                 pending.close()
+            elif self._pending_cursor is not None:
+                # The cursor was dropped without being closed.
+                self._abandoned_result = True
         finally:
             self._pending_cursor = None
             self._transaction_statements = None
@@ -612,6 +638,7 @@ class ConnectionWrapper:
 
         def call_native(*args: Any, **kwargs: Any) -> Any:
             self._buffer_pending_result()
+            self._discard_abandoned_result()
             self._count_statement()
             return attribute(*args, **kwargs)
 
@@ -718,6 +745,8 @@ class CursorWrapper:
                 "Consume or close the Arrow batch reader before executing another statement"
             )
         self.__connection_wrapper._buffer_pending_result(self)
+        # The statement about to run replaces whatever result is left.
+        self.__connection_wrapper._abandoned_result = False
         self._buffered_rows = None
         self._buffered_description = None
         self._dml_rowcount = None
@@ -811,10 +840,12 @@ class CursorWrapper:
         self._buffered_description = description
         self._buffered_rowcount = rowcount
 
-    def _result_consumed(self) -> None:
+    def _result_consumed(self, *, abandoned: bool = False) -> None:
         pending = self.__connection_wrapper._pending_cursor
         if pending is not None and pending() is self:
             self.__connection_wrapper._set_pending_cursor(None)
+            if abandoned:
+                self.__connection_wrapper._abandoned_result = True
 
     def executemany(
         self,
@@ -863,6 +894,9 @@ class CursorWrapper:
             self._clear_result()
         elif norm.startswith("register"):
             view_name, df = _parse_register_params(parameters)
+            # register() is not execute(): DuckDB 2.0 refuses it while an
+            # earlier result is unfinished.
+            self._clear_result()
             self.__c.register(view_name, df)
             self._clear_result()
             return
@@ -887,7 +921,8 @@ class CursorWrapper:
             self._native_reader.close()
         # Preserve an exhausted result so an old cursor cannot read a new query.
         self._store_buffered_result([], self.description, self.rowcount)
-        self._result_consumed()
+        # Still pending means DuckDB may hold rows this cursor never read.
+        self._result_consumed(abandoned=True)
 
     @property
     def description(self) -> Any:
@@ -924,6 +959,10 @@ class CursorWrapper:
             )
         method = getattr(self.__c, name)
         if name not in _NATIVE_RESULT_FETCH_METHODS:
+            if callable(method) and name not in _RESULT_PRESERVING_CONNECTION_METHODS:
+                # Every cursor is the same DuckDB connection, so a raw call
+                # here replaces the open result like one on the connection.
+                return getattr(self.__connection_wrapper, name)
             return method
 
         def fetch_native(*args: Any, **kwargs: Any) -> Any:

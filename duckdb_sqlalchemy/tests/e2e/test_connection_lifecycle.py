@@ -1,12 +1,13 @@
 """Connection and result lifecycle edge cases against real databases."""
 
+import gc
 from pathlib import Path
 
-import duckdb
 import pytest
-from packaging.version import Version
 from sqlalchemy import Column, Integer, MetaData, Table, event, exc, insert, text
 from sqlalchemy.engine import Connection
+
+from duckdb_sqlalchemy import insert_from_arrow
 
 from .conftest import EngineFactory
 
@@ -142,11 +143,6 @@ def test_write_conflict_does_not_invalidate_the_connection(
         assert second.execute(text("SELECT count(*) FROM job_timeouts")).scalar() == 0
 
 
-@pytest.mark.xfail(
-    Version(duckdb.__version__) >= Version("2.0.0.dev0"),
-    reason="DuckDB 2.0 rejects new statements while a closed result is unfinished",
-    strict=True,
-)
 def test_register_returns_no_rows(make_engine: EngineFactory) -> None:
     engine = make_engine("duckdb:///:memory:")
     with engine.connect() as conn:
@@ -183,3 +179,110 @@ def test_raw_commit_keeps_later_writes_in_a_transaction(
         conn.execute(text("INSERT INTO t VALUES (2)"))
         conn.rollback()
         assert conn.execute(text("SELECT list(i) FROM t")).scalar() == [1]
+
+
+def _abandon_partly_read_result(conn: Connection, how: str) -> None:
+    """Leave an unfinished DuckDB result behind without a cursor to buffer it."""
+    result = conn.exec_driver_sql("SELECT * FROM range(5000)")
+    assert result.fetchone() == (0,)
+    if how == "closed":
+        result.close()
+    else:
+        del result
+        gc.collect()
+
+
+# DuckDB 2.0 refuses register() and running a relation while a result is
+# unfinished. DuckDB 1.x allows them.
+@pytest.mark.parametrize("how", ["closed", "dropped"])
+def test_raw_driver_calls_work_after_an_abandoned_result(
+    make_engine: EngineFactory, how: str
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        _abandon_partly_read_result(conn, how)
+        driver = conn.connection.driver_connection
+        assert driver is not None
+        assert driver.sql("SELECT 42").fetchall() == [(42,)]
+
+        _abandon_partly_read_result(conn, how)
+        driver.register("people", pa.table({"name": ["Ada", "Grace"]}))
+        assert conn.execute(text("SELECT count(*) FROM people")).scalar() == 2
+
+
+@pytest.mark.parametrize("how", ["closed", "dropped"])
+def test_bulk_paths_work_after_an_abandoned_result(
+    make_engine: EngineFactory, how: str
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    table = Table("t", MetaData(), Column("i", Integer))
+    with engine.begin() as conn:
+        table.create(conn)
+
+        _abandon_partly_read_result(conn, how)
+        conn.execution_options(duckdb_copy_threshold=10).execute(
+            insert(table), [{"i": n} for n in range(20)]
+        )
+
+        _abandon_partly_read_result(conn, how)
+        insert_from_arrow(conn, table, pa.table({"i": [100, 101]}))
+
+        assert conn.execute(text("SELECT count(*), max(i) FROM t")).one() == (22, 101)
+
+
+def test_raw_driver_call_keeps_the_rows_of_an_open_result(
+    make_engine: EngineFactory,
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        result = conn.exec_driver_sql("SELECT * FROM range(5)")
+        assert result.fetchone() == (0,)
+        driver = conn.connection.driver_connection
+        assert driver is not None
+        driver.register("people", pa.table({"name": ["Ada"]}))
+        assert result.fetchall() == [(1,), (2,), (3,), (4,)]
+        assert conn.execute(text("SELECT name FROM people")).scalar() == "Ada"
+
+
+@pytest.mark.parametrize("how", ["closed", "dropped"])
+def test_raw_cursor_calls_work_after_an_abandoned_result(
+    make_engine: EngineFactory, how: str
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        _abandon_partly_read_result(conn, how)
+        cursor = conn.connection.cursor()
+        cursor.register("people", pa.table({"name": ["Ada", "Grace"]}))
+        assert cursor.sql("SELECT count(*) FROM people").fetchall() == [(2,)]
+
+
+def test_raw_cursor_call_keeps_the_rows_of_an_open_result(
+    make_engine: EngineFactory,
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        result = conn.exec_driver_sql("SELECT * FROM range(5000)")
+        assert result.fetchone() == (0,)
+        # More rows than one DuckDB vector, which is all DuckDB 1.x keeps.
+        conn.connection.cursor().register("people", pa.table({"name": ["Ada"]}))
+        assert len(result.fetchall()) == 4999
+
+
+@pytest.mark.parametrize("call", ["sql", "unregister", "from_query"])
+def test_raw_driver_call_keeps_a_raw_driver_result(
+    make_engine: EngineFactory, call: str
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        # A result the dialect abandoned earlier must not mark this one.
+        _abandon_partly_read_result(conn, "closed")
+        driver = conn.connection.driver_connection
+        assert driver is not None
+        raw = driver.execute("SELECT * FROM range(5000)")
+        assert raw.fetchone() == (0,)
+        if call == "unregister":
+            driver.unregister("missing")
+        else:
+            getattr(driver, call)("SELECT 1")
+        assert driver.description[0][0] == "range"
+        assert len(raw.fetchall()) == 4999
