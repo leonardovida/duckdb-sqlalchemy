@@ -279,6 +279,14 @@ jobs:
       - run: python benchmarks/run.py --baseline --cases startup native_insert core_insert bulk_insert pandas_insert tuple_read arrow_read reflection --rows 10000 --repeats 2 --output baseline.json
       - run: python -m pip install -e ".[dev]"
       - run: python benchmarks/run.py --rows 10000 --repeats 2 --output benchmark.json
+      - name: Summarize timings against the baseline commit
+        # Informational: shared runners are too noisy to gate on timings.
+        run: |
+          {
+            echo "### Benchmarks against the baseline commit"
+            echo
+            python benchmarks/compare.py baseline.json benchmark.json
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         with:
           name: benchmark-results

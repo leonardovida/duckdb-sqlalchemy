@@ -62,7 +62,6 @@ def apply_config(
 
 
 def _build_literal_processors(dialect: Dialect) -> Dict[type, Any]:
-    # TODO: does sqlalchemy have something that could do this for us?
     return {
         typ: type_engine.literal_processor(dialect=dialect)
         for typ, type_engine in TYPES.items()

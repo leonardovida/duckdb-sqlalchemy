@@ -25,6 +25,9 @@ preserved from the upstream project for historical context.
 
 - The configuration guide states that a plain `:memory:` database is private to the thread that opened it, and recommends a named in-memory database or a file when threads share data. It previously said every connection sees the same database.
 - The documentation lists every execution option in one table, every case in which a large INSERT uses the ordinary insert path, and the `Inspector` cache. The documentation index and `llms.txt` describe each guide.
+- The weekly MotherDuck integration workflow fails when the `MOTHERDUCK_TOKEN` secret is not configured. It previously passed without running any test. It installs a DuckDB version that MotherDuck accepts unless `MOTHERDUCK_DUCKDB_VERSION` selects one.
+- The `nox` test matrix uses SQLAlchemy 2.0.58 and 2.1.9 in place of 2.0.52 and 2.1.1.
+- The benchmark job adds a table of timings and peak memory against the baseline commit to its run summary. The table is informational and does not fail the job.
 
 ## [1.5.6.10](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.9...v1.5.6.10) (2026-11-09)
 

@@ -153,10 +153,11 @@ What is tested:
   - SQLAlchemy's upstream dialect suite on 2.0 and 2.1
   - Windows and macOS
   - wheel and sdist installations, with optional libraries absent or installed independently
+  - DuckDB 2.0.0, which is above the supported range, to keep the dialect ready for it
   - SQLAlchemy and DuckDB prereleases (informational)
   - correctness-checked benchmark results
-- **MotherDuck:** real MotherDuck checks run separately when service credentials are configured.
-- **Local only:** the full `nox -s tests` matrix (DuckDB 1.3.0–1.5.6 against SQLAlchemy 2.0.0, 2.0.52, and 2.1.1).
+- **MotherDuck:** real MotherDuck checks run weekly in a separate workflow, which fails when service credentials are not configured.
+- **Local only:** the full `nox -s tests` matrix (DuckDB 1.3.0–1.5.6 against SQLAlchemy 2.0.0, 2.0.58, and 2.1.9).
 
 See the [test configuration](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/noxfile.py), [CI runs](https://github.com/leonardovida/duckdb-sqlalchemy/actions), and [known caveats](https://leonardovida.github.io/duckdb-sqlalchemy/types-and-caveats.html) for the scope of these checks.
 
