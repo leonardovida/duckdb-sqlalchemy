@@ -8,6 +8,26 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+## [2.0.0.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v2.0.0.1...v2.0.0.2) (2026-11-25)
+
+### Highlights
+
+- MotherDuck connection parameters such as `connection_timeout="2 minutes"` reach MotherDuck unchanged. Values with spaces previously failed to connect or were applied with a `+` in place of the space. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- Large `executemany()` INSERTs store the same values as smaller batches in more cases. `Decimal` values are no longer rounded when a batch falls back to pandas, and integers in text LIST items and STRUCT fields are no longer stored as `1.0`. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- Alembic autogenerate no longer proposes dropping every table with `include_schemas=True`, and no longer reports changes on every run for nested types and expression indexes. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+
+### Upgrading from 2.0.0.1
+
+This is a patch release of the 2.0 line. Constraints such as `duckdb-sqlalchemy>=2.0.0,<3` or `duckdb-sqlalchemy~=2.0.0` select it, and constraints below 2 do not. Runtime requirements are unchanged, and MotherDuck applications should continue to install `duckdb-sqlalchemy[motherduck]`.
+
+1. Upgrade with `pip install -U duckdb-sqlalchemy` or update the lock file.
+2. Review the [Compatibility](#compatibility) items when the application:
+   - builds MotherDuck database strings with `append_query_to_database()` or passes percent-encoded values to the MotherDuck engine helpers
+   - sends raw `ROLLBACK`, `ABORT`, `END` or `COMMIT TRANSACTION` statements through `exec_driver_sql()` or `text()`
+   - reads the Arrow result of a multi-row `INSERT ... RETURNING` with `duckdb_arrow=True`
+   - reflects constraints again with the same `Inspector` after changing them
+3. Run `alembic revision --autogenerate` once and review the result. Comparisons that previously reported unchanged nested types or expression indexes no longer do.
+
 ### Bug Fixes
 
 - MotherDuck connection parameters that contain spaces or other special characters reached MotherDuck changed. `connection_timeout="2 minutes"` was sent as `2+minutes` and the connection failed, and `dbinstance_inactivity_ttl="1 hour"` was applied as `1+hour`. The dialect percent-encoded these values, and MotherDuck reads them literally. Values are now written to the `md:` database string unchanged. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
@@ -38,6 +58,8 @@ preserved from the upstream project for historical context.
 - Large INSERTs with LIST or STRUCT columns without a floating-point field skip a precision scan that only applies to floating-point fields. Inserting 200,000 rows with such a column takes 8 to 31 percent less time. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
 - Reflecting 200 tables one at a time runs 1,598 statements instead of 2,198, and `MetaData.reflect()` runs 9 instead of 12. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
 - The configuration guide states that the default pool for `:memory:` keeps connections for five threads and that `pool_size` raises the limit. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v2.0.0.1...v2.0.0.2
 
 ## [2.0.0.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v2.0.0...v2.0.0.1) (2026-11-25)
 
