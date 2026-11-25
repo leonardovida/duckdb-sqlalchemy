@@ -72,7 +72,13 @@ def test_arrow_table_and_batches_raise_no_warning(make_engine: EngineFactory) ->
 def test_batches_stream_instead_of_reading_the_whole_result(
     make_engine: EngineFactory,
 ) -> None:
-    engine = make_engine("duckdb:///:memory:", isolation_level="AUTOCOMMIT")
+    # With several threads DuckDB can scan the failing rows before it hands
+    # out the first batch, so one thread keeps the test deterministic.
+    engine = make_engine(
+        "duckdb:///:memory:",
+        isolation_level="AUTOCOMMIT",
+        connect_args={"config": {"threads": 1}},
+    )
     with engine.connect() as conn:
         reader = _arrow(conn).execute(text(FAILS_LATE)).batches(1000)
         # A result read in full before the first batch would fail here.
