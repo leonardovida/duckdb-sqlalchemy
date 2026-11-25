@@ -17,6 +17,8 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
+## [2.0.0.2](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v2.0.0.1...v2.0.0.2) (2026-11-25)
+
 - **MotherDuck parameter values are written literally** - The dialect writes `md:` parameter values such as `connection_timeout="2 minutes"` without percent-encoding, because MotherDuck reads them literally. `append_query_to_database()` changes the same way and writes Booleans as `true` and `false`. A key or value that contains `&` or `#`, or a key that contains `=`, raises `ValueError`. Write such values in plain form. Percent-escapes in a SQLAlchemy URL string are still decoded by SQLAlchemy before the dialect sees them. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
 - **The pandas bulk fallback analyzes every row** - The bulk INSERT raises `pandas_analyze_sample` on its connection to the batch size and restores it afterwards. After a failed INSERT inside a transaction, the larger value stays on that connection. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
 - **Large INSERTs fall back when numbers mix inside text LIST or STRUCT fields** - A batch whose LIST items or STRUCT fields mix integers or Booleans with floats uses the ordinary path unless all members of the column are numeric. Text fields previously stored `1` and `True` as `1.0`. Such batches insert more slowly. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
