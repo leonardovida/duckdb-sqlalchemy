@@ -2786,34 +2786,47 @@ class Dialect(PGDialect_psycopg2):
         connection: "Connection",
         constraint_type: str,
         tables: Mapping[str, Tuple[str, str]],
+        info_cache: Optional[Dict[Any, Any]] = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
         """duckdb_constraints() rows of ``tables``, grouped by table name.
 
         Rows are matched on the database and schema of each table, so a table
         that shadows another of the same name (a temp table, or a table in an
         attached database) does not pick up the other table's constraints.
+        One query reads the rows of every reflected constraint type, and the
+        Inspector's ``info_cache`` keeps them for the other types' calls.
+        Callers must not modify the rows.
         """
-        stmt, params = self._duckdb_reflection_stmt(
-            "duckdb_constraints()",
-            (
-                "database_name, schema_name, table_name, constraint_name, "
-                "constraint_column_names, expression, referenced_table, "
-                "referenced_column_names"
-            ),
-            schema=None,
-            filter_names=list(tables),
-            suffix=(
-                "AND constraint_type = :constraint_type\n"
-                "ORDER BY table_name, constraint_index"
-            ),
+        cache_key = ("_duckdb_constraint_rows", tuple(sorted(tables.items())))
+        by_type: Optional[Dict[str, Dict[str, List[Dict[str, Any]]]]] = (
+            None if info_cache is None else info_cache.get(cache_key)
         )
-        params["constraint_type"] = constraint_type
-        constraints: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for row in self._rows_for_reflected_relations(
-            connection.execute(stmt, params).mappings(), tables
-        ):
-            constraints[row["table_name"]].append(dict(row))
-        return constraints
+        if by_type is None:
+            stmt, params = self._duckdb_reflection_stmt(
+                "duckdb_constraints()",
+                (
+                    "database_name, schema_name, table_name, constraint_type, "
+                    "constraint_name, constraint_column_names, expression, "
+                    "referenced_table, referenced_column_names"
+                ),
+                schema=None,
+                filter_names=list(tables),
+                suffix=(
+                    "AND constraint_type IN "
+                    "('PRIMARY KEY', 'FOREIGN KEY', 'UNIQUE', 'CHECK')\n"
+                    "ORDER BY table_name, constraint_index"
+                ),
+            )
+            by_type = defaultdict(lambda: defaultdict(list))
+            for row in self._rows_for_reflected_relations(
+                connection.execute(stmt, params).mappings(), tables
+            ):
+                reflected = dict(row)
+                kind = reflected.pop("constraint_type")
+                by_type[kind][reflected["table_name"]].append(reflected)
+            if info_cache is not None:
+                info_cache[cache_key] = by_type
+        return dict(by_type.get(constraint_type, {}))
 
     def _referenced_relations(
         self,
@@ -3409,7 +3422,9 @@ class Dialect(PGDialect_psycopg2):
         tables = self._duckdb_relations(
             connection, schema, filter_names, scope, kind, kw.get("info_cache")
         )
-        rows = self._duckdb_constraint_rows(connection, "PRIMARY KEY", tables)
+        rows = self._duckdb_constraint_rows(
+            connection, "PRIMARY KEY", tables, kw.get("info_cache")
+        )
         constraints = {
             table_name: {
                 "name": row["constraint_name"],
@@ -3452,7 +3467,9 @@ class Dialect(PGDialect_psycopg2):
         tables = self._duckdb_relations(
             connection, schema, filter_names, scope, kind, kw.get("info_cache")
         )
-        rows = self._duckdb_constraint_rows(connection, "FOREIGN KEY", tables)
+        rows = self._duckdb_constraint_rows(
+            connection, "FOREIGN KEY", tables, kw.get("info_cache")
+        )
         referenced = self._referenced_relations(connection, tables, rows)
         # DuckDB foreign keys stay within the resolved child's schema.
         referred_schemas: Dict[str, Optional[str]] = {}
@@ -3531,7 +3548,9 @@ class Dialect(PGDialect_psycopg2):
         tables = self._duckdb_relations(
             connection, schema, filter_names, scope, kind, kw.get("info_cache")
         )
-        rows = self._duckdb_constraint_rows(connection, "UNIQUE", tables)
+        rows = self._duckdb_constraint_rows(
+            connection, "UNIQUE", tables, kw.get("info_cache")
+        )
         unique_constraints = {
             table_name: [
                 {
@@ -3576,7 +3595,9 @@ class Dialect(PGDialect_psycopg2):
         tables = self._duckdb_relations(
             connection, schema, filter_names, scope, kind, kw.get("info_cache")
         )
-        rows = self._duckdb_constraint_rows(connection, "CHECK", tables)
+        rows = self._duckdb_constraint_rows(
+            connection, "CHECK", tables, kw.get("info_cache")
+        )
         check_constraints = {
             table_name: [
                 {

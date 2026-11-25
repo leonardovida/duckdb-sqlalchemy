@@ -8,8 +8,10 @@ no implementation class.
 """
 
 import re
-from typing import Any, Collection, Dict, List, Optional, Tuple
+from typing import Any, Collection, Dict, List, Optional, Set, Tuple
 
+import alembic.util
+from alembic.autogenerate.compare import comparators as _comparators
 from alembic.autogenerate.render import _repr_type
 from alembic.ddl import impl as _alembic_impl
 from alembic.ddl.base import (
@@ -18,7 +20,9 @@ from alembic.ddl.base import (
     format_column_name,
     format_table_name,
 )
-from alembic.ddl.impl import DefaultImpl
+from alembic.ddl.impl import ComparisonResult, DefaultImpl
+from alembic.util.sqla_compat import is_expression_index
+from packaging.version import Version
 from sqlalchemy import inspect, schema, text
 from sqlalchemy import types as sqltypes
 from sqlalchemy.ext.compiler import compiles
@@ -28,6 +32,7 @@ from . import (
     _implicit_sequence_ddl_name,
     _strip_enclosing_parentheses,
 )
+from ._supports import duckdb_version
 from .datatypes import (
     DuckDBInteger,
     FixedArray,
@@ -43,6 +48,9 @@ from .datatypes import (
 __all__ = ["DuckDBImpl"]
 
 _previous_impl = _alembic_impl._impls.get("duckdb")
+
+# DuckDB 1.x rejects ALTER TABLE ... ADD COLUMN with NOT NULL.
+_ADDS_NOT_NULL_COLUMNS = duckdb_version >= Version("2.0.0.dev0")
 
 
 def _float_width(ddl: str) -> int:
@@ -72,6 +80,11 @@ class DuckDBImpl(DefaultImpl):
 
     def prep_table_for_batch(self, batch_impl: Any, table: Any) -> None:
         new_table = batch_impl.new_table
+        # DuckDB computes generated columns and rejects values for them, so
+        # the copy into the new table leaves them out.
+        for name, column in batch_impl.columns.items():
+            if column.computed is not None and name in batch_impl.column_transfers:
+                batch_impl.column_transfers[name].pop("expr", None)
         # Alembic builds the new table without the table comment.
         if new_table.comment is None:
             comment = table.comment
@@ -143,11 +156,34 @@ class DuckDBImpl(DefaultImpl):
         if indexes is None:
             return super().drop_column(table_name, column, schema=schema, **kw)
         with self._recreate(table_name, schema) as batch:
-            # Like PostgreSQL's DROP COLUMN, drop the column's own indexes.
+            # Like PostgreSQL's DROP COLUMN, drop the column's own indexes,
+            # including expression indexes that use it.
             for index in indexes:
-                if column.name in (index.get("column_names") or ()):
+                if _index_uses_column(index, column.name):
                     batch.drop_index(index["name"])
             batch.drop_column(column.name)
+
+    def add_column(
+        self, table_name: str, column: Any, schema: Optional[str] = None, **kw: Any
+    ) -> None:
+        # DuckDB 1.x rejects ADD COLUMN ... NOT NULL, and DuckDB 2.x rejects it
+        # on a table that has an index. Recreate the table there instead.
+        if (
+            column.nullable is False
+            and not self.as_sql
+            and (
+                not _ADDS_NOT_NULL_COLUMNS
+                or self._indexes_blocking_alter(table_name, schema) is not None
+            )
+        ):
+            added = column._copy()
+            # Alembic creates the column's indexes and constraints afterwards.
+            added.index = None
+            added.unique = None
+            with self._recreate(table_name, schema) as batch:
+                batch.add_column(added)
+            return
+        super().add_column(table_name, column, schema=schema, **kw)
 
     def alter_column(self, table_name: str, column_name: str, **kw: Any) -> None:
         schema = kw.get("schema")
@@ -239,7 +275,7 @@ class DuckDBImpl(DefaultImpl):
 
     def compare_type(self, inspector_column: Any, metadata_column: Any) -> bool:
         # Alembic compares type classes, so a STRUCT that gained a field
-        # looks unchanged. Compare the DDL of nested types instead.
+        # looks unchanged. Compare nested types member by member instead.
         inspector_type = inspector_column.type
         metadata_type = metadata_column.type
         if (
@@ -247,13 +283,7 @@ class DuckDBImpl(DefaultImpl):
             or isinstance(metadata_type, FixedArray)
             or (_is_nested(inspector_type) and _is_nested(metadata_type))
         ):
-            # DuckDB reports an ENUM inside a nested type by its labels.
-            compiler = self.dialect.type_compiler_instance
-            inspector_ddl = compiler.process(inspector_type, duckdb_inline_enum=True)
-            metadata_ddl = compiler.process(metadata_type, duckdb_inline_enum=True)
-            return _normalize_sql_expression(inspector_ddl) != (
-                _normalize_sql_expression(metadata_ddl)
-            )
+            return self._nested_type_differs(inspector_type, metadata_type)
         if isinstance(inspector_type, sqltypes.Enum) and isinstance(
             metadata_type, sqltypes.Enum
         ):
@@ -281,6 +311,84 @@ class DuckDBImpl(DefaultImpl):
                 compiler.process(metadata_type)
             )
         return super().compare_type(inspector_column, metadata_column)
+
+    def _nested_type_differs(self, inspector_type: Any, metadata_type: Any) -> bool:
+        """Compare STRUCT, UNION, MAP and array members with compare_type.
+
+        Members then follow the rules for top-level columns: VARCHAR lengths,
+        integer aliases, float widths and ENUM labels.
+        """
+        inspector_type = _unwrap_type(inspector_type)
+        metadata_type = _unwrap_type(metadata_type)
+        for kind in (Struct, Union, Map, FixedArray, sqltypes.ARRAY):
+            if isinstance(inspector_type, kind) != isinstance(metadata_type, kind):
+                return True
+        if isinstance(inspector_type, (Struct, Union)):
+            inspector_fields = list(inspector_type._fields or ())
+            metadata_fields = list(metadata_type._fields or ())
+            return [name for name, _ in inspector_fields] != [
+                name for name, _ in metadata_fields
+            ] or any(
+                self._nested_type_differs(inspector_member, metadata_member)
+                for (_, inspector_member), (_, metadata_member) in zip(
+                    inspector_fields, metadata_fields
+                )
+            )
+        if isinstance(inspector_type, Map):
+            return self._nested_type_differs(
+                inspector_type.key_type, metadata_type.key_type
+            ) or self._nested_type_differs(
+                inspector_type.value_type, metadata_type.value_type
+            )
+        if isinstance(inspector_type, FixedArray):
+            return inspector_type.size != metadata_type.size or (
+                self._nested_type_differs(
+                    inspector_type.item_type, metadata_type.item_type
+                )
+            )
+        if isinstance(inspector_type, sqltypes.ARRAY):
+            return (inspector_type.dimensions or 1) != (
+                metadata_type.dimensions or 1
+            ) or self._nested_type_differs(
+                inspector_type.item_type, metadata_type.item_type
+            )
+        return self.compare_type(
+            schema.Column("member", inspector_type),
+            schema.Column("member", metadata_type),
+        )
+
+    def compare_indexes(self, metadata_index: Any, reflected_index: Any) -> Any:
+        # The generic comparison only compares column names, so every
+        # expression index looked changed. Compare the expressions' SQL.
+        if not (
+            is_expression_index(metadata_index) or is_expression_index(reflected_index)
+        ):
+            return super().compare_indexes(metadata_index, reflected_index)
+        changes = []
+        unique = self._compare_index_unique(metadata_index, reflected_index)
+        if unique:
+            changes.append(unique)
+        metadata_sql = [self._index_element_sql(e) for e in metadata_index.expressions]
+        reflected_sql = [
+            self._index_element_sql(e) for e in reflected_index.expressions
+        ]
+        if metadata_sql != reflected_sql:
+            changes.append(f"expressions {reflected_sql} to {metadata_sql}")
+        if changes:
+            return ComparisonResult.Different(changes)
+        return ComparisonResult.Equal()
+
+    def _index_element_sql(self, element: Any) -> str:
+        if isinstance(element, str):
+            sql = element
+        else:
+            sql = str(
+                element.compile(
+                    dialect=self.dialect,
+                    compile_kwargs={"literal_binds": True, "include_table": False},
+                )
+            )
+        return _normalize_index_sql(sql)
 
     def correct_for_autogen_constraints(
         self,
@@ -388,6 +496,18 @@ def _is_varchar(type_obj: Any) -> bool:
     )
 
 
+def _unwrap_type(type_obj: Any) -> Any:
+    """The nested type a TypeDecorator wraps. Scalar decorators such as
+    ``Interval`` stay, as they compile to their own DDL."""
+    type_obj = sqltypes.to_instance(type_obj)
+    while isinstance(type_obj, sqltypes.TypeDecorator):
+        impl = sqltypes.to_instance(type_obj.impl_instance)
+        if not isinstance(impl, (Struct, Union, Map, FixedArray, sqltypes.ARRAY)):
+            break
+        type_obj = impl
+    return type_obj
+
+
 def _is_nested(type_obj: Any) -> bool:
     if isinstance(type_obj, sqltypes.ARRAY):
         # A LIST of a named ENUM reflects with an unnamed ENUM item.
@@ -410,6 +530,98 @@ def _contains_duckdb_type(type_obj: Any) -> bool:
 
 def _column_names(columns: Collection[Any]) -> Tuple[str, ...]:
     return tuple(column.name for column in columns)
+
+
+# A string literal, a quoted identifier, or a bare word.
+_SQL_TOKEN_RE = re.compile(r"""'(?:[^']|'')*'|"((?:[^"]|"")*)"|([A-Za-z_][\w$]*)""")
+
+
+def _normalize_index_sql(value: str) -> str:
+    """Index expression SQL without case, spacing, identifier quotes or outer
+    parentheses, keeping string literals. DuckDB reports ``lower(email)`` as
+    ``(lower(email))``.
+    """
+    value = _strip_enclosing_parentheses(value)
+    parts = re.split(r"""('(?:[^']|'')*'|"(?:[^"]|"")*")""", value)
+    return "".join(
+        part
+        if part.startswith("'")
+        else part[1:-1].replace('""', '"').lower()
+        if part.startswith('"')
+        else re.sub(r"\s+", "", part.lower())
+        for part in parts
+    )
+
+
+def _index_uses_column(index: Dict[str, Any], column_name: str) -> bool:
+    """Whether a reflected index covers ``column_name`` or uses it in an expression."""
+    if column_name in (index.get("column_names") or ()):
+        return True
+    target = column_name.lower()
+    for expression in index.get("expressions") or ():
+        for match in _SQL_TOKEN_RE.finditer(expression):
+            quoted, bare = match.groups()
+            if quoted is not None:
+                name = quoted.replace('""', '"')
+            elif bare is not None and not expression[match.end() :].lstrip().startswith(
+                "("
+            ):
+                name = bare
+            else:
+                continue  # a string literal or a function name
+            if name.lower() == target:
+                return True
+    return False
+
+
+def _discard_duplicate_schemas(autogen_context: Any, schemas: Set[Any]) -> None:
+    """Remove the schemas that ``include_schemas=True`` would compare twice.
+
+    ``get_schema_names()`` names schemas ``database.schema``. Alembic replaces
+    only the bare default schema name with ``None``, so it compared the current
+    schema both as ``None`` and as ``db.main`` and proposed dropping every
+    table in it. The ``system`` and ``temp`` catalogs hold no user tables.
+    """
+    connection = autogen_context.connection
+    if connection is None:
+        return
+    preparer = connection.dialect.identifier_preparer
+    database, current_schema = connection.execute(
+        text("SELECT current_database(), current_schema()")
+    ).one()
+    current = (database.lower(), current_schema.lower())
+    for name in [name for name in schemas if name is not None]:
+        try:
+            database_name, schema_name = preparer._separate(name)
+        except ValueError:
+            continue
+        if database_name is None or schema_name is None:
+            continue
+        if database_name.lower() in ("system", "temp") or (
+            (database_name.lower(), schema_name.lower()) == current
+        ):
+            schemas.discard(name)
+
+
+if hasattr(alembic.util, "DispatchPriority"):
+    # Alembic 1.18+ runs a dialect's comparators before the default ones.
+    @_comparators.dispatch_for(
+        "schema", qualifier="duckdb", priority=alembic.util.DispatchPriority.FIRST
+    )
+    def _compare_duckdb_schemas(
+        autogen_context: Any, upgrade_ops: Any, schemas: Set[Any]
+    ) -> Any:
+        _discard_duplicate_schemas(autogen_context, schemas)
+        return alembic.util.PriorityDispatchResult.CONTINUE
+
+else:  # pragma: no cover - depends on the Alembic version
+    # Earlier versions run a dialect's comparators instead of the default ones.
+    @_comparators.dispatch_for("schema", qualifier="duckdb")
+    def _compare_duckdb_schemas(
+        autogen_context: Any, upgrade_ops: Any, schemas: Set[Any]
+    ) -> Any:
+        _discard_duplicate_schemas(autogen_context, schemas)
+        _comparators.dispatch("schema")(autogen_context, upgrade_ops, schemas)
 
 
 if _previous_impl is not None:
