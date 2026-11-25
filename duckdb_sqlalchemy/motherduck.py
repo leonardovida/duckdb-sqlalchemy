@@ -7,6 +7,7 @@ from typing import (
     Any,
     Collection,
     Dict,
+    List,
     Mapping,
     Optional,
     Sequence,
@@ -14,7 +15,7 @@ from typing import (
     Type,
     Union,
 )
-from urllib.parse import parse_qs, parse_qsl, urlencode
+from urllib.parse import parse_qs
 
 import sqlalchemy
 from sqlalchemy import create_engine
@@ -22,7 +23,7 @@ from sqlalchemy.engine import URL as SAURL
 from sqlalchemy.engine.url import make_url as sa_make_url
 from sqlalchemy.pool import Pool, QueuePool
 
-from ._query import merge_query_mappings
+from ._query import merge_query_mappings, stringify_query_value
 
 DBINSTANCE_INACTIVITY_TTL_KEY = "dbinstance_inactivity_ttl"
 MOTHERDUCK_DBINSTANCE_INACTIVITY_TTL_KEY = "motherduck_dbinstance_inactivity_ttl"
@@ -291,11 +292,47 @@ def is_motherduck_database(database: Optional[str]) -> bool:
     return database.lower().startswith(MOTHERDUCK_DATABASE_PREFIXES)
 
 
+def _parse_database_query(query_string: str) -> List[Tuple[str, str]]:
+    # The MotherDuck extension splits its query string on "&" and the first
+    # "=" and does not percent-decode, so neither does the dialect.
+    pairs = []
+    for segment in query_string.split("&"):
+        if segment:
+            key, _, value = segment.partition("=")
+            pairs.append((key, value))
+    return pairs
+
+
+def _query_pairs(query: Mapping[str, Any]) -> List[Tuple[str, str]]:
+    pairs = []
+    for key, value in query.items():
+        values = value if isinstance(value, (list, tuple)) else (value,)
+        for item in values:
+            text = stringify_query_value(item)
+            if any(char in part for part in (key, text) for char in "&#") or (
+                "=" in key
+            ):
+                # The value is left out of the message because path
+                # parameters include short-lived tokens.
+                raise ValueError(
+                    f"The MotherDuck parameter {key!r} cannot be written to the "
+                    "database string: MotherDuck reads parameter values "
+                    "literally up to the next '&' or '#', so keys and values "
+                    "must not contain '&' or '#', and keys must not contain '='."
+                )
+            pairs.append((key, text))
+    return pairs
+
+
+def _format_database_query(pairs: Sequence[Tuple[str, str]]) -> str:
+    return "&".join(f"{key}={value}" for key, value in pairs)
+
+
 def _database_query_keys(database: Optional[str]) -> Collection[str]:
     if not database or "?" not in database:
         return ()
     _, _, query_string = database.partition("?")
-    return {key for key, _ in parse_qsl(query_string, keep_blank_values=True)}
+    return {key for key, _ in _parse_database_query(query_string)}
 
 
 def has_explicit_motherduck_credential(
@@ -312,20 +349,28 @@ def has_explicit_motherduck_credential(
 def append_query_to_database(
     database: Optional[str], query: Dict[str, Any]
 ) -> Optional[str]:
+    """Add ``query`` to the query string of an ``md:`` database string.
+
+    Keys in ``query`` replace the same keys already in ``database``. Values
+    are written as they are, without percent-encoding, because MotherDuck
+    reads them literally. A value that contains ``&`` or ``#`` raises
+    ``ValueError``.
+    """
     if not query:
         return database
+    added = _query_pairs(query)
     if database is None:
-        return f"?{urlencode(query, doseq=True)}"
+        return f"?{_format_database_query(added)}"
     base, separator, existing = database.partition("?")
     if not separator:
-        return f"{database}?{urlencode(query, doseq=True)}"
-    merged: Dict[str, Any] = {
-        key: values
-        for key, values in parse_qs(existing, keep_blank_values=True).items()
-        if key not in query
-    }
-    merged.update(query)
-    return f"{base}?{urlencode(merged, doseq=True)}"
+        return f"{database}?{_format_database_query(added)}"
+    # Group repeated keys at their first position, as parse_qs does.
+    grouped: Dict[str, List[str]] = {}
+    for key, value in _parse_database_query(existing):
+        if key not in query:
+            grouped.setdefault(key, []).append(value)
+    pairs = [(key, value) for key, values in grouped.items() for value in values]
+    return f"{base}?{_format_database_query(pairs + added)}"
 
 
 def _database_with_path_query(
@@ -346,10 +391,8 @@ def _database_with_path_query(
     # The database string is DuckDB's instance cache key, so equal parameters
     # must give an equal string whatever order they were passed in.
     base, _, query_string = database.partition("?")
-    pairs = sorted(
-        parse_qsl(query_string, keep_blank_values=True), key=lambda pair: pair[0]
-    )
-    return f"{base}?{urlencode(pairs)}"
+    pairs = sorted(_parse_database_query(query_string), key=lambda pair: pair[0])
+    return f"{base}?{_format_database_query(pairs)}"
 
 
 def split_database_and_url_config(
@@ -541,18 +584,32 @@ def _move_credentials_to_config(
 
 
 def _normalize_path_item(path: Union[str, SAURL]) -> SAURL:
+    if isinstance(path, str) and path.startswith("duckdb://"):
+        path = sa_make_url(path)
     if isinstance(path, SAURL):
-        return path
-    if path.startswith("duckdb://"):
-        return sa_make_url(path)
+        # Move a query string embedded in the database into the URL query,
+        # so the engine label can drop credentials from it. Keys already in
+        # the URL query win.
+        database, separator, query_string = (path.database or "").partition("?")
+        if not separator:
+            return path
+        return path.set(
+            database=database,
+            query={**_parse_path_query(query_string), **dict(path.query)},
+        )
     database, separator, query_string = path.partition("?")
     if not separator:
         return SAURL.create("duckdb", database=path)
-    query: Dict[str, Any] = {
+    return SAURL.create(
+        "duckdb", database=database, query=_parse_path_query(query_string)
+    )
+
+
+def _parse_path_query(query_string: str) -> Dict[str, Any]:
+    return {
         key: values[0] if len(values) == 1 else tuple(values)
         for key, values in parse_qs(query_string, keep_blank_values=True).items()
     }
-    return SAURL.create("duckdb", database=database, query=query)
 
 
 def _merge_connect_args(
@@ -595,20 +652,22 @@ def create_engine_from_paths(
 
     from . import Dialect  # avoid import cycle
 
-    dialect = Dialect()
     connect_params = []
     for url in urls:
-        _, params = dialect.create_connect_args(url)
+        _, params = Dialect().create_connect_args(url)
         connect_params.append(_merge_connect_args(params, connect_args or {}))
 
     params_cycle = cycle(connect_params)
 
     def creator() -> Any:
         params = _copy_connect_params(next(params_cycle))
-        return dialect.connect(**params)
+        # The engine's dialect has the DBAPI's numeric_dollar paramstyle. A
+        # bare Dialect() renders SET values for pyformat and doubles '%'.
+        return engine.dialect.connect(**params)
 
     _default_to_queue_pool(engine_kwargs)
     # The creator connects, so the engine URL only labels the engine. Keep
     # credentials out of it.
     label = urls[0].difference_update_query(MOTHERDUCK_CREDENTIAL_KEYS)
-    return create_engine(label, creator=creator, **engine_kwargs)
+    engine = create_engine(label, creator=creator, **engine_kwargs)
+    return engine

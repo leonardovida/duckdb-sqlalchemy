@@ -8,7 +8,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque
-from functools import lru_cache
+from functools import lru_cache, partial
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from threading import Lock
@@ -74,6 +74,7 @@ from ._bulk_insert import has_bulk_insert_data_library as _has_bulk_insert_data_
 from ._bulk_insert import (
     infer_bulk_insert_column_keys as _infer_bulk_insert_column_keys,
 )
+from ._bulk_insert import pandas_rows_to_analyze as _pandas_rows_to_analyze
 from ._checkpoint import checkpoint
 from ._pool import (
     _default_pool_class_for_database,
@@ -303,26 +304,6 @@ _DUCKDB_CONNECTION_EXCEPTIONS: Tuple[type, ...] = tuple(
     for cls in (getattr(duckdb, "ConnectionException", None),)
     if isinstance(cls, type)
 )
-_DUCKDB_IO_EXCEPTIONS: Tuple[type, ...] = tuple(
-    cls
-    for cls in (
-        getattr(duckdb, "IOException", None),
-        getattr(duckdb, "HTTPException", None),
-    )
-    if isinstance(cls, type)
-)
-# OperationalError subclasses raised on a connection that is still usable.
-# Their messages quote table names and values, which can contain words such as
-# "timeout", so they never count as disconnects.
-_DUCKDB_LIVE_CONNECTION_EXCEPTIONS: Tuple[type, ...] = _DUCKDB_IO_EXCEPTIONS + tuple(
-    cls
-    for cls in (
-        getattr(duckdb, "TransactionException", None),
-        getattr(duckdb, "SerializationException", None),
-        getattr(duckdb, "OutOfMemoryException", None),
-    )
-    if isinstance(cls, type)
-)
 
 
 class DBAPI:
@@ -415,6 +396,11 @@ _NATIVE_RESULT_FETCH_METHODS = frozenset(
         "to_arrow_reader",
         "torch",
     }
+)
+# The cursor calls among them that return an Arrow table or batch reader.
+_ARROW_TABLE_FETCH_METHODS = frozenset({"fetch_arrow_table", "to_arrow_table"})
+_ARROW_READER_FETCH_METHODS = frozenset(
+    {"fetch_arrow_reader", "fetch_record_batch", "to_arrow_reader"}
 )
 
 # DuckDB 2.0 copies every row of a DB-API result to export it as Arrow, and
@@ -630,6 +616,26 @@ class ConnectionWrapper:
             self._close_raw_reader()
             self.__c.rollback()
 
+    def _end_transaction(self, *, commit: bool) -> None:
+        """Run a raw COMMIT or ROLLBACK statement, as psycopg2 does.
+
+        SQLAlchemy still has its transaction open afterwards, so the next
+        DuckDB transaction begins right away and later writes stay in it.
+        Without an open transaction (AUTOCOMMIT, for example) either
+        statement does nothing, as the DuckDB ``commit()`` method does.
+        """
+        in_transaction = self._transaction_statements is not None
+        if commit:
+            self.commit()
+        else:
+            try:
+                self.rollback()
+            except duckdb.TransactionException as exc:
+                if not _is_no_active_transaction_rollback(exc):
+                    raise
+        if in_transaction:
+            self._begin()
+
     def _count_statement(self) -> None:
         if self._transaction_statements is not None:
             self._transaction_statements += 1
@@ -642,8 +648,9 @@ class ConnectionWrapper:
             or not callable(attribute)
         ):
             return attribute
-        self._buffer_pending_result()
 
+        # Buffer only when the method is called: looking the name up, as
+        # hasattr() does, must leave an open result alone.
         def call_native(*args: Any, **kwargs: Any) -> Any:
             self._buffer_pending_result()
             self._discard_abandoned_result()
@@ -686,6 +693,21 @@ _BEGIN_TRANSACTION_ISOLATION_RE = re.compile(
     r"^begin\s+(?:transaction\s+)?isolation\s+level\s+"
     r"(?:serializable|repeatable\s+read|read\s+committed|read\s+uncommitted)$"
 )
+# Raw statements that end the transaction, with PostgreSQL's optional WORK or
+# TRANSACTION keyword: COMMIT, END, ROLLBACK and ABORT.
+_COMMIT_STATEMENT_RE = re.compile(r"(?:commit|end)(?:\s+(?:work|transaction))?\s*")
+_ROLLBACK_STATEMENT_RE = re.compile(
+    r"(?:rollback|abort)(?:\s+(?:work|transaction))?\s*"
+)
+_NO_ACTIVE_TRANSACTION_ROLLBACK = (
+    "TransactionContext Error: cannot rollback - no transaction is active"
+)
+
+
+def _is_no_active_transaction_rollback(exc: BaseException) -> bool:
+    return bool(exc.args) and exc.args[0] == _NO_ACTIVE_TRANSACTION_ROLLBACK
+
+
 _DML_ROWCOUNT_PREFIXES = ("insert", "update", "delete", "merge")
 
 
@@ -753,6 +775,11 @@ class CursorWrapper:
         # True once this cursor's result was read from a relation. Errors a
         # DB-API execute() would have raised then surface on that read.
         self._relation_read = False
+        # Set by the execution context for a multi-row INSERT ... RETURNING
+        # executed with duckdb_arrow=True. Each batch runs as a relation, and
+        # its rows and its Arrow table are both read from that relation and
+        # collected here as (rows, table) pairs.
+        self._returning_arrow_batches: Optional[List[Tuple[List[Any], Any]]] = None
 
     def _clear_result(self) -> None:
         self.__c.execute("")
@@ -815,6 +842,12 @@ class CursorWrapper:
         relation, description = self._take_relation()
         try:
             rows = relation.fetchall()
+            if self._returning_arrow_batches is not None:
+                # INSERT ... RETURNING ran when the relation was created, and
+                # DuckDB keeps its rows, so this second read runs nothing.
+                self._returning_arrow_batches.append(
+                    (rows, _relation_arrow_table(relation))
+                )
         except BaseException as exc:
             self._store_buffered_result([], description, -1)
             self._buffer_error = exc
@@ -904,13 +937,13 @@ class CursorWrapper:
     ) -> None:
         self._before_execute()
         norm = statement.strip().lower().rstrip(";")
-        if norm == "commit":  # this is largely for ipython-sql
-            in_transaction = (
-                self.__connection_wrapper._transaction_statements is not None
-            )
-            self.__connection_wrapper.commit()
-            if in_transaction:
-                self.__connection_wrapper._begin()
+        # A raw COMMIT or ROLLBACK (ipython-sql sends COMMIT) ends DuckDB's
+        # transaction behind SQLAlchemy's back; keep the two in step.
+        if _COMMIT_STATEMENT_RE.fullmatch(norm):
+            self.__connection_wrapper._end_transaction(commit=True)
+            return
+        elif _ROLLBACK_STATEMENT_RE.fullmatch(norm):
+            self.__connection_wrapper._end_transaction(commit=False)
             return
         elif _BEGIN_TRANSACTION_ISOLATION_RE.fullmatch(norm):
             self.__connection_wrapper._begin()
@@ -988,8 +1021,34 @@ class CursorWrapper:
             return -1
         return self.__c.rowcount
 
+    def _dml_count_arrow(self, *args: Any, reader: bool, **kwargs: Any) -> Any:
+        """Return the buffered "Count" row of a DML statement as Arrow.
+
+        ``_capture_dml_rowcount`` reads that row into Python to set
+        ``rowcount``. DuckDB reports it as one BIGINT column, so the Arrow
+        table matches what DuckDB itself would have exported.
+        """
+        import pyarrow as pa
+
+        assert self._buffered_rows is not None
+        counts = [row[0] for row in self._buffered_rows]
+        self._buffered_rows.clear()
+        self._rows_fetched = True
+        name = self._buffered_description[0][0]
+        table = pa.table({name: pa.array(counts, type=pa.int64())})
+        if not reader:
+            return table
+        batch_size = args[0] if args else next(iter(kwargs.values()), None)
+        return pa.RecordBatchReader.from_batches(
+            table.schema, table.to_batches(max_chunksize=batch_size)
+        )
+
     def __getattr__(self, name: str) -> Any:
         if self._buffered_rows is not None and name in _NATIVE_RESULT_FETCH_METHODS:
+            if self._is_dml_count and name in _ARROW_TABLE_FETCH_METHODS:
+                return partial(self._dml_count_arrow, reader=False)
+            if self._is_dml_count and name in _ARROW_READER_FETCH_METHODS:
+                return partial(self._dml_count_arrow, reader=True)
             raise NotImplementedError(
                 f"{name}() is unavailable: another statement ran on this connection "
                 "before the result was consumed, so its remaining rows were "
@@ -1206,9 +1265,20 @@ class DuckDBExecutionContext(_PGExecutionContext):
         super().pre_exec()
         cursor = getattr(self, "cursor", None)
         if isinstance(cursor, CursorWrapper):
-            cursor._relation_requested = _ARROW_NEEDS_RELATION and bool(
-                self.execution_options.get("duckdb_arrow")
+            arrow = bool(self.execution_options.get("duckdb_arrow"))
+            # SQLAlchemy reads each batch of a multi-row INSERT ... RETURNING
+            # as Python rows. Running the batches as relations lets the Arrow
+            # result come from DuckDB too, with its column types, on every
+            # DuckDB version.
+            returning_batches = (
+                arrow
+                and self.execute_style is ExecuteStyle.INSERTMANYVALUES
+                and bool(getattr(self.compiled, "effective_returning", None))
             )
+            cursor._relation_requested = (
+                _ARROW_NEEDS_RELATION and arrow
+            ) or returning_batches
+            cursor._returning_arrow_batches = [] if returning_batches else None
 
     @classmethod
     def _init_compiled(
@@ -1309,7 +1379,14 @@ class DuckDBExecutionContext(_PGExecutionContext):
             returning_rows = getattr(self, "_insertmanyvalues_rows", None)
             if returning_rows is not None:
                 self._rowcount = len(returning_rows)
-                if self.execution_options.get("duckdb_arrow"):
+                batches = getattr(cursor, "_returning_arrow_batches", None)
+                if self.execution_options.get("duckdb_arrow") and batches:
+                    self._duckdb_returning_arrow = _returning_arrow_table(
+                        batches,
+                        returning_rows,
+                        getattr(self, "_num_sentinel_cols", 0),
+                    )
+                elif self.execution_options.get("duckdb_arrow"):
                     self._duckdb_returning_arrow = _rows_to_arrow(
                         returning_rows, cursor.description
                     )
@@ -1345,11 +1422,58 @@ class DuckDBExecutionContext(_PGExecutionContext):
 
 
 def _rows_to_arrow(rows: Sequence[Sequence[Any]], description: Any) -> Any:
+    """Arrow from Python rows, with types inferred from the values.
+
+    Only a fallback: prefer Arrow that DuckDB exports itself, which keeps the
+    column types and holds values such as HUGEINT that do not fit int64.
+    """
     import pyarrow as pa
 
     names = [column[0] for column in description or ()]
     columns = list(zip(*rows)) if rows else [()] * len(names)
     return pa.Table.from_arrays([pa.array(list(c)) for c in columns], names=names)
+
+
+def _relation_arrow_table(relation: Any) -> Any:
+    """Read a relation as an Arrow table, under this DuckDB version's name."""
+    for name in ("to_arrow_table", "fetch_arrow_table", "arrow"):
+        fetch = getattr(relation, name, None)
+        if fetch is not None:
+            table = fetch()
+            return table.read_all() if hasattr(table, "read_all") else table
+    raise NotImplementedError("Arrow results are not available on this relation")
+
+
+def _returning_arrow_table(
+    batches: Sequence[Tuple[Sequence[Any], Any]],
+    rows: Sequence[Any],
+    num_sentinel_cols: int,
+) -> Any:
+    """Join the Arrow tables of RETURNING batches in the order of ``rows``.
+
+    SQLAlchemy may sort each batch into parameter order and keeps the row
+    objects it read, so their positions give the order of the table rows.
+    Sentinel columns it added to RETURNING are dropped, as from the rows.
+    """
+    import pyarrow as pa
+
+    table = pa.concat_tables([batch_table for _, batch_table in batches])
+    position = {
+        id(row): index
+        for index, row in enumerate(
+            row for batch_rows, _ in batches for row in batch_rows
+        )
+    }
+    order = [position.get(id(row)) for row in rows]
+    if (
+        len(order) == table.num_rows
+        and None not in order
+        and order != list(range(len(order)))
+    ):
+        table = table.take(order)
+    if num_sentinel_cols:
+        table = table.select(list(range(table.num_columns - num_sentinel_cols)))
+    return table
 
 
 def _apply_motherduck_defaults(config: Dict[str, Any], database: Optional[str]) -> None:
@@ -2161,10 +2285,7 @@ class Dialect(PGDialect_psycopg2):
         try:
             super().do_rollback(dbapi_connection)
         except DBAPI.TransactionException as e:
-            if (
-                e.args[0]
-                != "TransactionContext Error: cannot rollback - no transaction is active"
-            ):
+            if not _is_no_active_transaction_rollback(e):
                 raise e
 
     def do_begin(self, dbapi_connection: Any) -> None:
@@ -2785,34 +2906,47 @@ class Dialect(PGDialect_psycopg2):
         connection: "Connection",
         constraint_type: str,
         tables: Mapping[str, Tuple[str, str]],
+        info_cache: Optional[Dict[Any, Any]] = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
         """duckdb_constraints() rows of ``tables``, grouped by table name.
 
         Rows are matched on the database and schema of each table, so a table
         that shadows another of the same name (a temp table, or a table in an
         attached database) does not pick up the other table's constraints.
+        One query reads the rows of every reflected constraint type, and the
+        Inspector's ``info_cache`` keeps them for the other types' calls.
+        Callers must not modify the rows.
         """
-        stmt, params = self._duckdb_reflection_stmt(
-            "duckdb_constraints()",
-            (
-                "database_name, schema_name, table_name, constraint_name, "
-                "constraint_column_names, expression, referenced_table, "
-                "referenced_column_names"
-            ),
-            schema=None,
-            filter_names=list(tables),
-            suffix=(
-                "AND constraint_type = :constraint_type\n"
-                "ORDER BY table_name, constraint_index"
-            ),
+        cache_key = ("_duckdb_constraint_rows", tuple(sorted(tables.items())))
+        by_type: Optional[Dict[str, Dict[str, List[Dict[str, Any]]]]] = (
+            None if info_cache is None else info_cache.get(cache_key)
         )
-        params["constraint_type"] = constraint_type
-        constraints: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for row in self._rows_for_reflected_relations(
-            connection.execute(stmt, params).mappings(), tables
-        ):
-            constraints[row["table_name"]].append(dict(row))
-        return constraints
+        if by_type is None:
+            stmt, params = self._duckdb_reflection_stmt(
+                "duckdb_constraints()",
+                (
+                    "database_name, schema_name, table_name, constraint_type, "
+                    "constraint_name, constraint_column_names, expression, "
+                    "referenced_table, referenced_column_names"
+                ),
+                schema=None,
+                filter_names=list(tables),
+                suffix=(
+                    "AND constraint_type IN "
+                    "('PRIMARY KEY', 'FOREIGN KEY', 'UNIQUE', 'CHECK')\n"
+                    "ORDER BY table_name, constraint_index"
+                ),
+            )
+            by_type = defaultdict(lambda: defaultdict(list))
+            for row in self._rows_for_reflected_relations(
+                connection.execute(stmt, params).mappings(), tables
+            ):
+                reflected = dict(row)
+                kind = reflected.pop("constraint_type")
+                by_type[kind][reflected["table_name"]].append(reflected)
+            if info_cache is not None:
+                info_cache[cache_key] = by_type
+        return dict(by_type.get(constraint_type, {}))
 
     def _referenced_relations(
         self,
@@ -3408,7 +3542,9 @@ class Dialect(PGDialect_psycopg2):
         tables = self._duckdb_relations(
             connection, schema, filter_names, scope, kind, kw.get("info_cache")
         )
-        rows = self._duckdb_constraint_rows(connection, "PRIMARY KEY", tables)
+        rows = self._duckdb_constraint_rows(
+            connection, "PRIMARY KEY", tables, kw.get("info_cache")
+        )
         constraints = {
             table_name: {
                 "name": row["constraint_name"],
@@ -3451,7 +3587,9 @@ class Dialect(PGDialect_psycopg2):
         tables = self._duckdb_relations(
             connection, schema, filter_names, scope, kind, kw.get("info_cache")
         )
-        rows = self._duckdb_constraint_rows(connection, "FOREIGN KEY", tables)
+        rows = self._duckdb_constraint_rows(
+            connection, "FOREIGN KEY", tables, kw.get("info_cache")
+        )
         referenced = self._referenced_relations(connection, tables, rows)
         # DuckDB foreign keys stay within the resolved child's schema.
         referred_schemas: Dict[str, Optional[str]] = {}
@@ -3530,7 +3668,9 @@ class Dialect(PGDialect_psycopg2):
         tables = self._duckdb_relations(
             connection, schema, filter_names, scope, kind, kw.get("info_cache")
         )
-        rows = self._duckdb_constraint_rows(connection, "UNIQUE", tables)
+        rows = self._duckdb_constraint_rows(
+            connection, "UNIQUE", tables, kw.get("info_cache")
+        )
         unique_constraints = {
             table_name: [
                 {
@@ -3575,7 +3715,9 @@ class Dialect(PGDialect_psycopg2):
         tables = self._duckdb_relations(
             connection, schema, filter_names, scope, kind, kw.get("info_cache")
         )
-        rows = self._duckdb_constraint_rows(connection, "CHECK", tables)
+        rows = self._duckdb_constraint_rows(
+            connection, "CHECK", tables, kw.get("info_cache")
+        )
         check_constraints = {
             table_name: [
                 {
@@ -3887,28 +4029,51 @@ class Dialect(PGDialect_psycopg2):
                     )
         return column_names
 
+    def _bulk_insert_type_impl(self, type_: Any) -> Any:
+        type_impl = sqltypes.to_instance(type_).dialect_impl(self)
+        while isinstance(type_impl, sqltypes.TypeDecorator):
+            type_impl = type_impl.impl.dialect_impl(self)
+        return type_impl
+
     def _bulk_insert_numeric_columns(
         self, context: Any, column_names: Sequence[str]
     ) -> Set[str]:
         table = context.compiled.statement.table
-        numeric = set()
-        for name in column_names:
-            type_impl = table.c[name].type.dialect_impl(self)
-            while isinstance(type_impl, sqltypes.TypeDecorator):
-                type_impl = type_impl.impl.dialect_impl(self)
+        return {
+            name
+            for name in column_names
             if isinstance(
+                self._bulk_insert_type_impl(table.c[name].type),
+                (sqltypes.Integer, sqltypes.Numeric, sqltypes.Float),
+            )
+        }
+
+    def _has_only_numeric_members(self, type_: Any) -> bool:
+        """Whether a LIST, ARRAY or STRUCT type holds only numeric members."""
+        type_impl = self._bulk_insert_type_impl(type_)
+        if isinstance(type_impl, (sqltypes.ARRAY, FixedArray)):
+            members = [type_impl.item_type]
+        elif isinstance(type_impl, Struct):
+            members = [member for _, member in type_impl._fields or ()]
+        else:
+            return isinstance(
                 type_impl, (sqltypes.Integer, sqltypes.Numeric, sqltypes.Float)
-            ):
-                numeric.add(name)
-        return numeric
+            )
+        return bool(members) and all(map(self._has_only_numeric_members, members))
 
     def _build_bulk_insert_data(
         self, context: Any, parameters: Sequence[Any], column_names: List[str]
     ) -> Any:
+        table = context.compiled.statement.table
+        numeric = self._bulk_insert_numeric_columns(context, column_names)
+        numeric_leaves = {
+            name
+            for name in column_names
+            if name not in numeric
+            and self._has_only_numeric_members(table.c[name].type)
+        }
         return _build_bulk_insert_data(
-            parameters,
-            column_names,
-            self._bulk_insert_numeric_columns(context, column_names),
+            parameters, column_names, numeric, numeric_leaves
         )
 
     def _reaches_copy_threshold(self, context: Any, parameters: Sequence[Any]) -> bool:
@@ -3980,15 +4145,45 @@ class Dialect(PGDialect_psycopg2):
         insert_sql = (
             f"INSERT INTO {target} ({columns}) SELECT {columns} FROM {view_name}"
         )
-        dbapi_conn.register(view_name, data)
+        sample = self._widen_pandas_analyze_sample(dbapi_conn, data)
         try:
+            dbapi_conn.register(view_name, data)
             cursor.execute(insert_sql)
         finally:
             try:
                 dbapi_conn.unregister(view_name)
             except Exception:
                 pass
+            if sample is not None:
+                # Through the connection, not the cursor, so the cursor keeps
+                # the INSERT's row count. After a failed INSERT in an open
+                # transaction DuckDB refuses the SET, and the wider sample
+                # stays on this connection, which only slows later scans.
+                try:
+                    dbapi_conn.execute(f"SET pandas_analyze_sample = {sample}")
+                except Exception:
+                    pass
         return True
+
+    @staticmethod
+    def _widen_pandas_analyze_sample(dbapi_conn: Any, data: Any) -> Optional[int]:
+        """Make DuckDB type a DataFrame from every row, not from a sample.
+
+        Return the previous ``pandas_analyze_sample`` to restore, or None
+        when nothing changed. The setting is per connection.
+        """
+        rows = _pandas_rows_to_analyze(data)
+        if rows is None:
+            return None
+        # fetchall() finishes the result: DuckDB 2.0 refuses register() while
+        # a result is unfinished.
+        previous = dbapi_conn.execute(
+            "SELECT current_setting('pandas_analyze_sample')"
+        ).fetchall()[0][0]
+        if rows <= previous:
+            return None
+        dbapi_conn.execute(f"SET pandas_analyze_sample = {int(rows)}")
+        return int(previous)
 
     def do_executemany(
         self, cursor: Any, statement: Any, parameters: Any, context: Optional[Any] = ...
@@ -4010,13 +4205,14 @@ class Dialect(PGDialect_psycopg2):
         if isinstance(e, duckdb.Error):
             if isinstance(e, _DUCKDB_CONNECTION_EXCEPTIONS):
                 return True
-            # IOException and HTTPException subclass OperationalError but report
-            # file or remote I/O failures (a missing CSV, an S3 timeout) on a
-            # connection that is still usable. Invalidating it would discard
-            # the pooled connection and, for :memory:, the whole database.
-            if not isinstance(e, duckdb.OperationalError) or isinstance(
-                e, _DUCKDB_LIVE_CONNECTION_EXCEPTIONS
-            ):
+            # Every other OperationalError subclass (IOException, HTTPException,
+            # TransactionException, ResourceInUseException on DuckDB 2.0, ...)
+            # reports a failure on a connection that is still usable, in a
+            # message that can quote paths or names such as "socket_events".
+            # Invalidating it would discard the pooled connection and, for
+            # :memory:, the whole database. Only a plain OperationalError is
+            # matched by its message.
+            if type(e) is not duckdb.OperationalError:
                 return False
         message = str(e).lower()
         return any(pattern in message for pattern in DISCONNECT_ERROR_PATTERNS)

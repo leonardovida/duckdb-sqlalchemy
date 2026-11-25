@@ -35,7 +35,10 @@ the ordinary path when:
 - a column type has a bind expression, or is a `Map` or `Union`
 - a column mixes integers above the float precision limit with floats
 - a non-numeric column, such as `String`, mixes integers or booleans with
-  floats, or holds `Decimal` values
+  floats, or holds `Decimal` values. This includes LIST items and STRUCT
+  fields of such a column. A LIST or STRUCT column whose members are all
+  numeric may mix integers and floats, but stays on the ordinary path when it
+  holds `Decimal` values
 - a column, LIST item or STRUCT field mixes `date` with `datetime` values, or
   naive with time-zone-aware datetimes
 - a value is a `timedelta`, a `time` with a time zone, a non-finite `Decimal`,
@@ -82,7 +85,11 @@ to raise on conflicts. Conflict modes do not change transaction ownership.
 
 Structured write statements with RETURNING buffer their returned rows to provide
 an exact affected-row count for ORM version checks. Arrow RETURNING uses a materialized Arrow table; the bounded batch interface
-is intended for SELECT results.
+is intended for SELECT results. A Core `insert()` with several parameter sets
+and `.returning(...)` runs each `insertmanyvalues_page_size` page as a DuckDB
+relation when `duckdb_arrow=True`, on every DuckDB version, and joins the Arrow
+tables DuckDB exports for the pages. Its Arrow result therefore has the same
+column types as a single-row insert and contains only the returned columns.
 
 ## Bounded Arrow reads
 
@@ -151,7 +158,15 @@ typed Arrow ingestion remains available for already-typed SQL values.
 Arrow inference checks original integer precision only in inferred floating
 columns. Integer/string columns avoid the redundant Python safety scan, while
 mixed integers/floats still decline lossy inference. Nested numeric fields are
-checked as well, including the pandas fallback.
+checked as well, including the pandas fallback, and only when the inferred
+Arrow type has a floating field.
+
+When Arrow cannot hold a batch, for example because a value is an integer
+beyond int64, the batch is registered as a pandas DataFrame. DuckDB types a
+DataFrame column of Python objects from a sample of `pandas_analyze_sample`
+rows (1000 by default) and converts the other rows to that type. For the
+bulk INSERT the dialect raises `pandas_analyze_sample` to the batch size, so
+every row is analyzed, and restores the previous value afterwards.
 
 ## Reflection
 

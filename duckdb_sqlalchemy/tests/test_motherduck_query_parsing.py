@@ -1,8 +1,9 @@
 from typing import Any
 
 import pytest
+from sqlalchemy.engine import URL
 
-from duckdb_sqlalchemy import Dialect, MotherDuckURL
+from duckdb_sqlalchemy import Dialect, MotherDuckURL, create_engine_from_paths
 from duckdb_sqlalchemy.motherduck import append_query_to_database
 
 
@@ -68,7 +69,7 @@ def test_append_query_retains_groups_and_moves_replacements_to_end() -> None:
 
     assert database == (
         "md:analytics?threads=2&label=a%2Bb&label=hello+world&label=%E9%9B%AA"
-        "&bare=&empty=&session_name=new&session_name=&cache_buster=x%2By"
+        "&bare=&empty=&session_name=new&session_name=&cache_buster=x+y"
     )
     assert query == {"session_name": ("new", ""), "cache_buster": "x+y"}
 
@@ -88,3 +89,52 @@ def test_append_query_empty_and_missing_query_cases(
     database: str | None, query: dict[str, Any], expected: str | None
 ) -> None:
     assert append_query_to_database(database, query) == expected
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        # MotherDuck reads md: parameters literally, so nothing is encoded.
+        ({"connection_timeout": "2 minutes"}, "md:db?connection_timeout=2 minutes"),
+        ({"user": "a@b.com"}, "md:db?user=a@b.com"),
+        ({"cache_buster": "50%+1"}, "md:db?cache_buster=50%+1"),
+        ({"cache_buster": "a=b"}, "md:db?cache_buster=a=b"),
+    ],
+)
+def test_append_query_writes_values_literally(
+    query: dict[str, Any], expected: str
+) -> None:
+    assert append_query_to_database("md:db", query) == expected
+
+
+@pytest.mark.parametrize(
+    "query",
+    [{"cache_buster": "a&b"}, {"cache_buster": "a#b"}, {"a=b": "1"}],
+)
+def test_append_query_rejects_values_motherduck_cannot_read(
+    query: dict[str, Any],
+) -> None:
+    with pytest.raises(ValueError, match="literally up to the next"):
+        append_query_to_database("md:db", query)
+
+
+def test_connect_args_keep_existing_database_values_literal() -> None:
+    url = MotherDuckURL(
+        database="md:db", dbinstance_inactivity_ttl="1 hour", cache_buster="x+y"
+    )
+
+    assert Dialect().create_connect_args(url)[1]["database"] == (
+        "md:db?cache_buster=x+y&dbinstance_inactivity_ttl=1 hour"
+    )
+
+
+def test_engine_from_paths_keeps_tokens_in_url_objects_out_of_the_label() -> None:
+    path = URL.create(
+        "duckdb", database="md:db?motherduck_token=SECRET&attach_mode=single"
+    )
+    engine = create_engine_from_paths([path])
+    try:
+        assert "SECRET" not in repr(engine)
+        assert engine.url.query == {"attach_mode": "single"}
+    finally:
+        engine.dispose()

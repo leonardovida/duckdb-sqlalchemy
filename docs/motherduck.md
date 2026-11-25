@@ -127,7 +127,13 @@ Parameters that are treated as part of the database string:
 - `cache_buster`
 
 Interval parameters (`connection_timeout`, `dbinstance_inactivity_ttl`) accept
-DuckDB interval strings such as `30s` or `15m`, or a `datetime.timedelta`.
+DuckDB interval strings such as `30s`, `15m` or `2 minutes`, or a
+`datetime.timedelta`.
+
+MotherDuck reads these parameters literally, without decoding `%` escapes or
+`+`, so the dialect writes each value into the database string unchanged. A
+key or value that contains `&` or `#`, or a key that contains `=`, raises
+`ValueError`, because MotherDuck would cut the value there.
 
 For backward compatibility the dialect also accepts `session_hint`,
 `motherduck_session_hint`, `motherduck_session_name`,
@@ -389,7 +395,9 @@ variable, whenever the URL may be logged.
 ### Database string helpers
 
 `append_query_to_database` adds routing params to an `md:` database string.
-Keys you pass replace the same keys already in the string.
+Keys you pass replace the same keys already in the string. Values are written
+as they are, without percent-encoding, because MotherDuck reads them
+literally.
 `validate_motherduck_database_name` raises `ValueError` for names DuckDB cannot
 route, such as names that contain a comma, and does nothing for non-MotherDuck
 databases:

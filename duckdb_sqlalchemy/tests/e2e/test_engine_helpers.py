@@ -1,8 +1,10 @@
 """Engine helpers and type lifecycles exercised against real databases."""
 
+import platform
 from pathlib import Path
 
 import duckdb
+import pytest
 from sqlalchemy import Column, Enum, MetaData, Table, inspect, pool, select, text
 from sqlalchemy.engine import make_url
 
@@ -67,3 +69,27 @@ def test_named_and_inline_enums_create_round_trip_and_drop(
     metadata.drop_all(engine)
     assert inspect(engine).get_enums() == []
     assert inspect(engine).get_table_names() == ["t_copy"]
+
+
+@pytest.mark.skipif(platform.machine() == "aarch64", reason="not supported on aarch64")
+@pytest.mark.remote_data
+def test_engine_from_paths_keeps_percent_signs_in_extension_settings(
+    tmp_path: Path,
+) -> None:
+    """Extension settings are applied with SET, rendered by the engine's dialect.
+    A bare Dialect() used the pyformat paramstyle and doubled '%'."""
+    duckdb.connect().execute("INSTALL httpfs")
+    endpoint = "proxy.example/a%2Fb"
+    engine = create_engine_from_paths(
+        [str(tmp_path / "a.duckdb")],
+        connect_args={
+            "preload_extensions": ["httpfs"],
+            "config": {"s3_endpoint": endpoint},
+        },
+    )
+    try:
+        with engine.connect() as conn:
+            setting = conn.execute(text("SELECT current_setting('s3_endpoint')"))
+            assert setting.scalar_one() == endpoint
+    finally:
+        engine.dispose()

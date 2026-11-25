@@ -188,3 +188,128 @@ def test_bools_and_floats_in_a_text_column_store_like_ordinary_inserts(
         )
     assert stored == expected
     assert set(stored) == {"1.5", "true"}
+
+
+def _store_bulk_and_ordinary(
+    engine: Any, columns: Dict[str, Any], rows: List[Dict[str, Any]]
+) -> List[List[Any]]:
+    """Insert ``rows`` through the fast path and the ordinary path, read both."""
+    metadata = MetaData()
+    tables = [
+        Table(
+            name,
+            metadata,
+            Column("id", Integer),
+            *(Column(column, type_) for column, type_ in columns.items()),
+        )
+        for name in ("bulk", "plain")
+    ]
+    with engine.begin() as conn:
+        metadata.create_all(conn)
+        conn.execute(insert(tables[0]), rows)
+        conn.execution_options(duckdb_copy_threshold=0).execute(insert(tables[1]), rows)
+    with engine.connect() as conn:
+        return [
+            [tuple(row) for row in conn.execute(select(t).order_by(t.c.id))]
+            for t in tables
+        ]
+
+
+def test_pandas_fallback_keeps_decimals_and_large_integers_exact(
+    make_engine: EngineFactory, db_path: Path, register_calls: List[bool]
+) -> None:
+    """An integer beyond int64 sends the batch to pandas, whose object columns
+    DuckDB types from a sample of rows. A Decimal with a wider scale outside
+    the sample was rounded, and a HUGEINT outside it raised."""
+    from ...datatypes import HugeInteger
+
+    rows = [
+        {
+            "id": i,
+            "ref": 10**19 + i,
+            "amount": decimal.Decimal("0.1234") if i == 1 else decimal.Decimal("10.5"),
+            "huge": 2**64 if i == 1 else i,
+        }
+        for i in range(ROWS)
+    ]
+    bulk, plain = _store_bulk_and_ordinary(
+        make_engine(db_path),
+        {"ref": Numeric(38, 0), "amount": Numeric(18, 4), "huge": HugeInteger},
+        rows,
+    )
+    assert bulk == plain
+    assert bulk[1] == (1, 10**19 + 1, decimal.Decimal("0.1234"), 2**64)
+
+
+def test_ints_and_floats_in_nested_text_fields_store_like_ordinary_inserts(
+    make_engine: EngineFactory, db_path: Path
+) -> None:
+    """Arrow infers one type per nested field, which stored 1 and True as "1.0"."""
+    import numpy as np
+
+    from ...datatypes import Struct
+
+    rows = [
+        {
+            "id": i,
+            "tags": [1] if i % 3 == 0 else np.array([1.5]) if i % 3 else [True],
+            "doc": {"a": True if i % 2 else 2.5},
+        }
+        for i in range(ROWS)
+    ]
+    bulk, plain = _store_bulk_and_ordinary(
+        make_engine(db_path),
+        {"tags": sqlalchemy.ARRAY(String), "doc": Struct({"a": String})},
+        rows,
+    )
+    assert bulk == plain
+    assert bulk[0] == (0, ["1"], {"a": "2.5"})
+    assert bulk[1] == (1, ["1.5"], {"a": "true"})
+
+
+def test_small_pandas_batch_loads_through_the_fast_path(
+    make_engine: EngineFactory, db_path: Path, register_calls: List[bool]
+) -> None:
+    """Below pandas_analyze_sample rows the setting is read but not changed.
+    DuckDB 2.0 refused register() after that read until its result was
+    finished."""
+    engine = make_engine(db_path)
+    metadata = MetaData()
+    table = Table(
+        "t",
+        metadata,
+        Column("id", Integer),
+        Column("ref", Numeric(38, 0)),
+        Column("label", String),
+    )
+    rows = [{"id": i, "ref": 10**19 + i, "label": f"r{i}"} for i in range(10)]
+    with engine.begin() as conn:
+        metadata.create_all(conn)
+        conn.execution_options(duckdb_copy_threshold=1).execute(insert(table), rows)
+    with engine.connect() as conn:
+        stored = conn.execute(select(table).order_by(table.c.id)).all()
+        sample = conn.execute(text("SELECT current_setting('pandas_analyze_sample')"))
+        assert sample.scalar_one() == 1000
+    assert register_calls == [True]
+    assert [tuple(row) for row in stored] == [tuple(r.values()) for r in rows]
+
+
+def test_numeric_lists_and_structs_mixing_ints_and_floats_keep_the_fast_path(
+    make_engine: EngineFactory, db_path: Path, register_calls: List[bool]
+) -> None:
+    from ...datatypes import Struct
+
+    rows = [
+        {"id": i, "xs": [i, 0.5] if i % 2 else [i], "point": {"x": i, "y": 0.5}}
+        for i in range(ROWS)
+    ]
+    bulk, plain = _store_bulk_and_ordinary(
+        make_engine(db_path),
+        {
+            "xs": sqlalchemy.ARRAY(sqlalchemy.Float),
+            "point": Struct({"x": sqlalchemy.Float, "y": sqlalchemy.Float}),
+        },
+        rows,
+    )
+    assert register_calls == [True]
+    assert bulk == plain

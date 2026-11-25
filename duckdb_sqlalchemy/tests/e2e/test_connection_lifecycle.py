@@ -3,6 +3,7 @@
 import gc
 from pathlib import Path
 
+import duckdb
 import pytest
 from sqlalchemy import Column, Integer, MetaData, Table, event, exc, insert, text
 from sqlalchemy.engine import Connection
@@ -179,6 +180,106 @@ def test_raw_commit_keeps_later_writes_in_a_transaction(
         conn.execute(text("INSERT INTO t VALUES (2)"))
         conn.rollback()
         assert conn.execute(text("SELECT list(i) FROM t")).scalar() == [1]
+
+
+@pytest.mark.parametrize(
+    "statement", ["COMMIT TRANSACTION", "commit work", "END", "end transaction;"]
+)
+def test_raw_commit_forms_keep_later_writes_in_a_transaction(
+    db_path: Path, make_engine: EngineFactory, statement: str
+) -> None:
+    engine = make_engine(db_path)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE t (i INTEGER)"))
+    with engine.connect() as conn:
+        conn.execute(text("INSERT INTO t VALUES (1)"))
+        conn.exec_driver_sql(statement)
+        conn.execute(text("INSERT INTO t VALUES (2)"))
+        conn.rollback()
+        assert conn.execute(text("SELECT list(i) FROM t")).scalar() == [1]
+
+
+@pytest.mark.parametrize(
+    "statement", ["ROLLBACK", "rollback work", "ABORT", "abort transaction;"]
+)
+def test_raw_rollback_keeps_later_writes_in_a_transaction(
+    db_path: Path, make_engine: EngineFactory, statement: str
+) -> None:
+    engine = make_engine(db_path)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE t (i INTEGER)"))
+    with engine.connect() as conn:
+        conn.execute(text("INSERT INTO t VALUES (1)"))
+        conn.exec_driver_sql(statement)
+        conn.execute(text("INSERT INTO t VALUES (2)"))
+        conn.rollback()
+        assert conn.execute(text("SELECT count(*) FROM t")).scalar() == 0
+        conn.execute(text("INSERT INTO t VALUES (3)"))
+        conn.commit()
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT list(i) FROM t")).scalar() == [3]
+
+
+def test_raw_transaction_statements_with_autocommit(
+    db_path: Path, make_engine: EngineFactory
+) -> None:
+    engine = make_engine(db_path, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE t (i INTEGER)"))
+        # No transaction is open, so there is nothing to end.
+        conn.exec_driver_sql("ROLLBACK")
+        conn.exec_driver_sql("END")
+        conn.exec_driver_sql("BEGIN")
+        conn.execute(text("INSERT INTO t VALUES (1)"))
+        conn.exec_driver_sql("ABORT")
+        conn.exec_driver_sql("BEGIN")
+        conn.execute(text("INSERT INTO t VALUES (2)"))
+        conn.exec_driver_sql("COMMIT WORK")
+        # Back to committing every statement on its own.
+        conn.execute(text("INSERT INTO t VALUES (3)"))
+        conn.rollback()
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT list(i ORDER BY i) FROM t")).scalar() == [2, 3]
+
+
+def test_looking_up_a_driver_method_leaves_an_arrow_reader_open(
+    make_engine: EngineFactory,
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        cursor = conn.exec_driver_sql("SELECT * FROM range(300000)").cursor
+        fetch_reader = getattr(cursor, "to_arrow_reader", None)
+        reader = fetch_reader(1000) if fetch_reader else cursor.fetch_record_batch(1000)
+        assert reader.read_next_batch().num_rows == 1000
+        driver_connection = conn.connection.driver_connection
+        # Looking a method up runs nothing, so the reader keeps its result.
+        assert hasattr(driver_connection, "sql")
+        assert callable(getattr(driver_connection, "execute"))
+        assert sum(batch.num_rows for batch in reader) == 299000
+
+
+@pytest.mark.skipif(
+    not hasattr(duckdb, "ResourceInUseException"),
+    reason="DuckDB 2.0 added ResourceInUseException",
+)
+def test_resource_in_use_error_keeps_the_in_memory_database(
+    tmp_path: Path, make_engine: EngineFactory
+) -> None:
+    # The error quotes this path, which contains a disconnect word.
+    attached = (tmp_path / "websocket_events.duckdb").as_posix()
+    engine = make_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE keep AS SELECT 42 AS answer"))
+        conn.commit()
+        conn.exec_driver_sql(f"ATTACH '{attached}' AS first_alias")
+        conn.commit()
+        with pytest.raises(exc.DBAPIError) as raised:
+            conn.exec_driver_sql(f"ATTACH '{attached}' AS second_alias")
+        assert isinstance(raised.value.orig, duckdb.ResourceInUseException)
+        assert not raised.value.connection_invalidated
+        conn.rollback()
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT answer FROM keep")).scalar() == 42
 
 
 def _abandon_partly_read_result(conn: Connection, how: str) -> None:

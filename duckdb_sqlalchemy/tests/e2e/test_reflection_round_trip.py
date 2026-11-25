@@ -262,6 +262,55 @@ def test_reflecting_a_schema_resolves_its_relations_once(
     assert len(name_resolutions) <= 2
 
 
+def test_reflecting_a_table_reads_its_constraints_once(
+    make_engine: EngineFactory, db_path: Path
+) -> None:
+    """Primary key, foreign keys, unique and check constraints share one query."""
+    engine = make_engine(db_path)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE parent (id INTEGER PRIMARY KEY)"))
+        conn.execute(
+            text(
+                "CREATE TABLE child (id INTEGER PRIMARY KEY, "
+                "parent_id INTEGER REFERENCES parent (id), code VARCHAR UNIQUE, "
+                "qty INTEGER CHECK (qty > 0))"
+            )
+        )
+
+    statements = []
+    event.listen(
+        engine,
+        "before_cursor_execute",
+        lambda conn, cursor, statement, *args: statements.append(statement),
+    )
+    child = Table("child", MetaData(), autoload_with=engine, resolve_fks=False)
+
+    assert list(child.primary_key.columns.keys()) == ["id"]
+    assert [fk.target_fullname for fk in child.foreign_keys] == ["parent.id"]
+    assert sorted(type(c).__name__ for c in child.constraints) == [
+        "CheckConstraint",
+        "ForeignKeyConstraint",
+        "PrimaryKeyConstraint",
+        "UniqueConstraint",
+    ]
+    assert len([s for s in statements if "duckdb_constraints()" in s]) == 1
+
+    # The single-table methods of one Inspector also share the rows.
+    inspector = inspect(engine)
+    statements.clear()
+    assert inspector.get_pk_constraint("child")["constrained_columns"] == ["id"]
+    assert [u["column_names"] for u in inspector.get_unique_constraints("child")] == [
+        ["code"]
+    ]
+    assert [c["sqltext"] for c in inspector.get_check_constraints("child")] == [
+        "qty > 0"
+    ]
+    assert [f["referred_table"] for f in inspector.get_foreign_keys("child")] == [
+        "parent"
+    ]
+    assert len([s for s in statements if "duckdb_constraints()" in s]) == 1
+
+
 def test_a_new_inspector_sees_tables_created_after_the_previous_one(
     make_engine: EngineFactory, db_path: Path
 ) -> None:

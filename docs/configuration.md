@@ -95,6 +95,11 @@ engine = create_engine(
   which keeps one connection per thread. Connections in the same thread see the
   same in-memory database. Each other thread gets its own empty database, so
   tables created in one thread are missing in another.
+- `SingletonThreadPool` keeps connections for five threads by default. When a
+  sixth thread connects, the pool closes the connection of another thread, even
+  one in use, which then fails with `Connection already closed` and loses its
+  in-memory database. Pass `pool_size` to keep more threads, for example
+  `create_engine("duckdb:///:memory:", pool_size=16)` for up to 16 threads.
 - Named in-memory URLs such as `:memory:analytics` use `QueuePool`, and every
   connection in the process sees the same database. Use a named in-memory
   database or a file when several threads share data, for example in a web

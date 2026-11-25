@@ -112,7 +112,10 @@ report the exact number of returned rows, while `text()` statements with
 counted in full when it fits in one `insertmanyvalues_page_size` page (1000
 rows by default) or uses the register fast path (`duckdb_copy_threshold`, 10,000
 rows by default). Between those sizes it runs in pages and `rowcount` reports
-the last page only. `column.regexp_match(pattern)` compiles to
+the last page only. A `text()` INSERT, UPDATE, DELETE or MERGE without
+RETURNING also returns DuckDB's one-row `Count` result, which `result.arrow`
+returns as a BIGINT `Count` column with `duckdb_arrow=True`.
+`column.regexp_match(pattern)` compiles to
 `regexp_matches()`, which matches anywhere in the string; `flags` are passed as
 DuckDB regex options (for example `flags="i"`).
 
@@ -230,6 +233,14 @@ DuckDB does not support these, so the statements SQLAlchemy emits for them fail:
 DuckDB has a single transaction isolation level. The dialect accepts
 `isolation_level="AUTOCOMMIT"` (no `BEGIN` is issued) and the default
 `"READ COMMITTED"`; other levels raise `ArgumentError`.
+
+A raw `COMMIT`, `END`, `ROLLBACK` or `ABORT` statement, with or without `WORK`
+or `TRANSACTION`, sent through `exec_driver_sql()` or `text()` inside a
+SQLAlchemy transaction commits or rolls back and begins the next DuckDB
+transaction, as psycopg2 does. Later statements therefore stay in a
+transaction that `commit()` or `rollback()` ends. With
+`isolation_level="AUTOCOMMIT"` they end a transaction that a raw `BEGIN`
+started, and do nothing when no transaction is active.
 
 ## Numeric precision
 

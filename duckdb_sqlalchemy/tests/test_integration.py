@@ -63,6 +63,34 @@ def test_motherduck() -> None:
     not (os.getenv("MOTHERDUCK_TOKEN") or os.getenv("motherduck_token")),
     reason="Set MOTHERDUCK_TOKEN to run real MotherDuck integration",
 )
+def test_motherduck_path_values_reach_the_extension_unchanged() -> None:
+    from duckdb_sqlalchemy import create_motherduck_engine
+
+    database = os.getenv("MOTHERDUCK_TEST_DATABASE", "")
+    # Spaces were sent as "+", which the extension read literally: the TTL
+    # arrived as "1+hour" and "2+minutes" failed to connect.
+    engine = create_motherduck_engine(
+        database=f"md:{database}",
+        connection_timeout="2 minutes",
+        dbinstance_inactivity_ttl="1 hour",
+    )
+    try:
+        with engine.connect() as connection:
+            assert (
+                connection.exec_driver_sql(
+                    "SELECT current_setting('motherduck_dbinstance_inactivity_ttl')"
+                ).scalar_one()
+                == "1 hour"
+            )
+    finally:
+        engine.dispose()
+
+
+@mark.remote_data
+@mark.skipif(
+    not (os.getenv("MOTHERDUCK_TOKEN") or os.getenv("motherduck_token")),
+    reason="Set MOTHERDUCK_TOKEN to run real MotherDuck integration",
+)
 @mark.skipif(
     Version(duckdb.__version__) < Version("1.5.6"),
     reason="prompt_jev multiple_choice and box need the DuckDB 1.5.6 client",

@@ -8,6 +8,37 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+### Bug Fixes
+
+- MotherDuck connection parameters that contain spaces or other special characters reached MotherDuck changed. `connection_timeout="2 minutes"` was sent as `2+minutes` and the connection failed, and `dbinstance_inactivity_ttl="1 hour"` was applied as `1+hour`. The dialect percent-encoded these values, and MotherDuck reads them literally. Values are now written to the `md:` database string unchanged. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- A large `executemany()` INSERT that fell back to a pandas DataFrame could round `Decimal` values or fail. DuckDB typed each column of Python objects from a sample of 1,000 rows, so a `Decimal` with a wider scale outside the sample was rounded and a HUGEINT value outside it raised "Value out of range". The fallback occurs when Arrow cannot hold a value, such as an integer beyond int64, or when only pandas is installed. DuckDB now analyzes every row of the batch. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- A large INSERT stored `1` and `True` as `1.0` in a LIST item or STRUCT field of a text column when other rows held floats in the same field. These batches now use the ordinary insert path and store the values that smaller batches store. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- `create_engine_from_paths()` doubled every `%` in extension settings applied with `SET`, such as `s3_endpoint`. It also kept a token embedded in the database of a `URL` object in `engine.url`. Settings now keep their values, and the engine URL no longer contains the token. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- A raw `COMMIT TRANSACTION`, `END`, `ROLLBACK` or `ABORT` statement sent through `exec_driver_sql()` or `text()` ended the DuckDB transaction without SQLAlchemy knowing. Later writes committed immediately, and `rollback()` had no effect. These statements, with or without `WORK` or `TRANSACTION`, now end the transaction and begin the next one, as a raw `COMMIT` already did. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- A multi-row `INSERT ... RETURNING` executed with `duckdb_arrow=True` raised `OverflowError` for HUGEINT and large UBIGINT values after the rows were written, and its Arrow column types depended on the number of rows. The Arrow result now uses DuckDB's column types. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- On DuckDB 2.0, an error such as attaching a database file that is already attached could invalidate the connection when the file path contained a word such as "socket" or "timeout". For a `:memory:` database the data was lost. Only a plain `OperationalError` is now checked for disconnect messages. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- Reading the `Count` row of a textual INSERT, UPDATE or DELETE with `duckdb_arrow=True` raised `NotImplementedError`. It is now returned as a BIGINT `Count` column. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- Looking up an attribute of the DBAPI connection, as `hasattr()` does, read the rest of an open result into memory and closed an open Arrow batch reader. The result is now buffered only when a method is called. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- Alembic autogenerate with `include_schemas=True` proposed dropping every table of the current schema, because it compared that schema twice. Each schema is now compared once. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- Alembic autogenerate reported a type change on every run for unchanged `Struct`, `Map`, `Union` and `FixedArray` columns with members such as `String(50)` or `Float(24)`, and dropped and re-created unchanged expression indexes on every run. Both are now compared correctly. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- `op.add_column()` with `nullable=False` failed on DuckDB 1.x, and on DuckDB 2.x for a table with an index. Alembic batch operations failed on tables with generated columns, and `op.drop_column()` failed when the column was used in an expression index. These operations now succeed. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+
+### Compatibility
+
+- `append_query_to_database()` and the MotherDuck engine helpers no longer percent-encode parameter values. A parameter key or value that contains `&` or `#`, or a key that contains `=`, raises `ValueError`, because MotherDuck cannot read it. `append_query_to_database()` writes Boolean values as `true` and `false`. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- The bulk INSERT sets `pandas_analyze_sample` on its connection for the duration of a pandas DataFrame INSERT and restores the previous value. When such an INSERT fails inside a transaction, the larger value stays on that connection, which makes later pandas scans on it slower. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- Batches whose text LIST items or STRUCT fields mix integers or Booleans with floats use the ordinary insert path and insert more slowly. LIST and STRUCT columns whose members are all numeric keep the fast path. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- With `isolation_level="AUTOCOMMIT"`, a raw `ROLLBACK` without an active transaction no longer raises "no transaction is active". It does nothing, as a raw `COMMIT` already did. A transaction started with a raw `BEGIN` is still committed or rolled back. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- The Arrow result of a multi-row `INSERT ... RETURNING` with `duckdb_arrow=True` no longer contains the sentinel column that SQLAlchemy adds for sorting. Its pages run as DuckDB relations on every DuckDB version. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- An `Inspector` reads the primary key, foreign key, unique and check constraints of the reflected tables in one query and caches them. Applications that change constraints and reflect them again with the same `Inspector` should call `Inspector.clear_cache()` or create a new `Inspector`. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- Alembic `op.add_column()` with `nullable=False` recreates the table on DuckDB 1.x, and on DuckDB 2.x for a table with an index, as `op.drop_column()` already does for such tables. Offline (`--sql`) scripts are unchanged. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+
+### Maintenance
+
+- Large INSERTs with LIST or STRUCT columns without a floating-point field skip a precision scan that only applies to floating-point fields. Inserting 200,000 rows with such a column takes 8 to 31 percent less time. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- Reflecting 200 tables one at a time runs 1,598 statements instead of 2,198, and `MetaData.reflect()` runs 9 instead of 12. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+- The configuration guide states that the default pool for `:memory:` keeps connections for five threads and that `pool_size` raises the limit. [#239](https://github.com/leonardovida/duckdb-sqlalchemy/pull/239)
+
 ## [2.0.0.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v2.0.0...v2.0.0.1) (2026-11-25)
 
 ### Highlights

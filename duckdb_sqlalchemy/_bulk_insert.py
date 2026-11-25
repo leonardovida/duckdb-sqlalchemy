@@ -3,10 +3,11 @@ from __future__ import annotations
 import datetime
 import importlib.util
 import math
+from collections.abc import Mapping
 from decimal import Decimal
 from functools import lru_cache
 from numbers import Integral, Real
-from typing import Any, Collection, Iterable, Mapping, Optional, Sequence, cast
+from typing import Any, Collection, Iterable, Optional, Sequence, cast
 
 from ._row_shape import infer_mapping_column_keys, rows_use_mapping_shape
 
@@ -100,6 +101,7 @@ def _column_changes_values_on_register(
     name: str,
     values: Sequence[Any],
     numeric_columns: Optional[Collection[str]],
+    numeric_leaf_columns: Collection[str] = (),
 ) -> bool:
     """Whether registering one column's ``values`` would store different values."""
     aware: dict[tuple[Any, ...], bool] = {}
@@ -109,12 +111,24 @@ def _column_changes_values_on_register(
     struct_keys: dict[tuple[Any, ...], dict[str, str]] = {}
     # One inferred DECIMAL type holds the widest integer part and scale.
     decimals: dict[tuple[Any, ...], tuple[int, int]] = {}
+    # Number kinds per nested field of a non-numeric column. Arrow infers one
+    # type per field, so an int or bool next to a float in a text field is
+    # stored as "1.0", as at the top level.
+    number_kinds: dict[tuple[Any, ...], set[str]] = {}
+
+    def mixes_numbers(path: tuple[Any, ...], kind: str) -> bool:
+        kinds = number_kinds.setdefault(path, set())
+        kinds.add(kind)
+        return len(kinds) > 1
 
     def visit(value: Any, path: tuple[Any, ...], preserve_decimal_text: bool) -> bool:
-        if value is None or isinstance(value, (str, bool, bytes, float)):
+        if value is None or isinstance(value, (str, bytes)):
             return False
-        if isinstance(value, int):
-            return False
+        nested_text = check_nested_numbers and len(path) > 1
+        if isinstance(value, bool) or _is_integer(value):
+            return nested_text and mixes_numbers(path, "int")
+        if isinstance(value, Real):
+            return nested_text and mixes_numbers(path, "float")
         if isinstance(value, datetime.datetime):
             if has_time.setdefault(path, True) is not True:
                 return True
@@ -154,6 +168,9 @@ def _column_changes_values_on_register(
             if dtype.kind == "m":
                 return True
             if dtype.kind != "O":
+                if check_nested_numbers and dtype.kind in "biuf" and value.size:
+                    leaf = (*path, *(None,) * value.ndim)
+                    return mixes_numbers(leaf, "float" if dtype.kind == "f" else "int")
                 return False
         elif dtype is not None:
             return dtype.kind == "m"
@@ -184,6 +201,8 @@ def _column_changes_values_on_register(
         return len(zones) > 1
     path = (index,)
     preserve_decimal_text = numeric_columns is not None and name not in numeric_columns
+    # A LIST or STRUCT whose members are all numeric stores 1 and 1.0 alike.
+    check_nested_numbers = preserve_decimal_text and name not in numeric_leaf_columns
     return any(visit(value, path, preserve_decimal_text) for value in values)
 
 
@@ -191,6 +210,7 @@ def _changes_values_on_register(
     rows: Sequence[Any],
     column_names: Sequence[str],
     numeric_columns: Optional[Collection[str]],
+    numeric_leaf_columns: Collection[str] = (),
 ) -> bool:
     """Whether registering ``rows`` would store different values.
 
@@ -207,7 +227,9 @@ def _changes_values_on_register(
             values = [row.get(name) for row in rows]
         else:
             values = [row[index] for row in rows]
-        if _column_changes_values_on_register(index, name, values, numeric_columns):
+        if _column_changes_values_on_register(
+            index, name, values, numeric_columns, numeric_leaf_columns
+        ):
             return True
     return False
 
@@ -324,9 +346,13 @@ def build_bulk_insert_arrow_table(
         }
         mapping_rows = rows_use_mapping_shape(rows)
         for index, field in enumerate(table.schema):
-            if pa.types.is_nested(field.type) and _has_unsafe_nested_numeric_coercion(
-                row.get(column_names[index]) if mapping_rows else row[index]
-                for row in rows
+            if (
+                pa.types.is_nested(field.type)
+                and _has_floating_field(field.type)
+                and _has_unsafe_nested_numeric_coercion(
+                    row.get(column_names[index]) if mapping_rows else row[index]
+                    for row in rows
+                )
             ):
                 return None
         # Only floating inference can round an integer. Inspect its original
@@ -338,6 +364,18 @@ def build_bulk_insert_arrow_table(
         return table
     except Exception:
         return None
+
+
+def _has_floating_field(arrow_type: Any) -> bool:
+    """Whether a nested Arrow type has a floating field at any depth."""
+    import pyarrow as pa  # type: ignore[import-not-found]
+
+    if pa.types.is_floating(arrow_type):
+        return True
+    return any(
+        _has_floating_field(arrow_type.field(index).type)
+        for index in range(arrow_type.num_fields)
+    )
 
 
 def _has_unsafe_floating_integer(values: Sequence[Any], limit: int) -> bool:
@@ -357,11 +395,14 @@ def build_bulk_insert_data(
     rows: Sequence[Any],
     column_names: Sequence[str],
     numeric_columns: Optional[Collection[str]] = None,
+    numeric_leaf_columns: Collection[str] = (),
 ) -> Any:
     """Arrow table or DataFrame for ``rows``, or None to use the ordinary path.
 
     ``numeric_columns`` names the target columns with a numeric type. When it
-    is given, other columns decline values that mix integers and floats.
+    is given, other columns decline values that mix integers and floats, also
+    inside LIST items and STRUCT fields, except the LIST, ARRAY and STRUCT
+    columns named in ``numeric_leaf_columns``, whose members are all numeric.
     """
     try:
         import pyarrow as pa  # type: ignore[import-not-found]
@@ -369,7 +410,9 @@ def build_bulk_insert_data(
         pa = None
 
     if pa is None or not column_names:
-        if _changes_values_on_register(rows, column_names, numeric_columns):
+        if _changes_values_on_register(
+            rows, column_names, numeric_columns, numeric_leaf_columns
+        ):
             return None
         if pa is not None:
             data = build_bulk_insert_arrow_table(rows, column_names)
@@ -387,7 +430,9 @@ def build_bulk_insert_data(
             values = [row.get(name) for row in rows]
         else:
             values = [row[index] for row in rows]
-        if _column_changes_values_on_register(index, name, values, numeric_columns):
+        if _column_changes_values_on_register(
+            index, name, values, numeric_columns, numeric_leaf_columns
+        ):
             return None
         if not arrow_ok:
             continue
@@ -409,7 +454,8 @@ def build_bulk_insert_data(
                 arrow_ok = False
                 arrays.clear()
                 continue
-        elif pa.types.is_nested(array.type):
+        elif pa.types.is_nested(array.type) and _has_floating_field(array.type):
+            # Only floating inference can round an integer.
             if _has_unsafe_nested_numeric_coercion(values):
                 arrow_ok = False
                 arrays.clear()
@@ -424,3 +470,18 @@ def build_bulk_insert_data(
     # Arrow keeps nullable integer columns as int64; pandas is the fallback for
     # values Arrow cannot infer (UUID objects, integers beyond int64, ...).
     return build_bulk_insert_dataframe(rows, column_names)
+
+
+def pandas_rows_to_analyze(data: Any) -> Optional[int]:
+    """Rows DuckDB must analyze to type ``data``'s object columns exactly.
+
+    DuckDB types a pandas object column from a sample of
+    ``pandas_analyze_sample`` rows and casts every other row to that type,
+    which rounds a Decimal with a wider scale and rejects an integer or STRUCT
+    key the sample did not see. None for Arrow data and for DataFrames
+    without object columns.
+    """
+    dtypes = getattr(data, "dtypes", None)
+    if dtypes is None or not any(dtype.kind == "O" for dtype in dtypes):
+        return None
+    return len(data)
