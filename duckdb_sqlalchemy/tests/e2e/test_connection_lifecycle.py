@@ -181,6 +181,66 @@ def test_raw_commit_keeps_later_writes_in_a_transaction(
         assert conn.execute(text("SELECT list(i) FROM t")).scalar() == [1]
 
 
+@pytest.mark.parametrize(
+    "statement", ["COMMIT TRANSACTION", "commit work", "END", "end transaction;"]
+)
+def test_raw_commit_forms_keep_later_writes_in_a_transaction(
+    db_path: Path, make_engine: EngineFactory, statement: str
+) -> None:
+    engine = make_engine(db_path)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE t (i INTEGER)"))
+    with engine.connect() as conn:
+        conn.execute(text("INSERT INTO t VALUES (1)"))
+        conn.exec_driver_sql(statement)
+        conn.execute(text("INSERT INTO t VALUES (2)"))
+        conn.rollback()
+        assert conn.execute(text("SELECT list(i) FROM t")).scalar() == [1]
+
+
+@pytest.mark.parametrize(
+    "statement", ["ROLLBACK", "rollback work", "ABORT", "abort transaction;"]
+)
+def test_raw_rollback_keeps_later_writes_in_a_transaction(
+    db_path: Path, make_engine: EngineFactory, statement: str
+) -> None:
+    engine = make_engine(db_path)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE t (i INTEGER)"))
+    with engine.connect() as conn:
+        conn.execute(text("INSERT INTO t VALUES (1)"))
+        conn.exec_driver_sql(statement)
+        conn.execute(text("INSERT INTO t VALUES (2)"))
+        conn.rollback()
+        assert conn.execute(text("SELECT count(*) FROM t")).scalar() == 0
+        conn.execute(text("INSERT INTO t VALUES (3)"))
+        conn.commit()
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT list(i) FROM t")).scalar() == [3]
+
+
+def test_raw_transaction_statements_with_autocommit(
+    db_path: Path, make_engine: EngineFactory
+) -> None:
+    engine = make_engine(db_path, isolation_level="AUTOCOMMIT")
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE t (i INTEGER)"))
+        # No transaction is open, so there is nothing to end.
+        conn.exec_driver_sql("ROLLBACK")
+        conn.exec_driver_sql("END")
+        conn.exec_driver_sql("BEGIN")
+        conn.execute(text("INSERT INTO t VALUES (1)"))
+        conn.exec_driver_sql("ABORT")
+        conn.exec_driver_sql("BEGIN")
+        conn.execute(text("INSERT INTO t VALUES (2)"))
+        conn.exec_driver_sql("COMMIT WORK")
+        # Back to committing every statement on its own.
+        conn.execute(text("INSERT INTO t VALUES (3)"))
+        conn.rollback()
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT list(i ORDER BY i) FROM t")).scalar() == [2, 3]
+
+
 def _abandon_partly_read_result(conn: Connection, how: str) -> None:
     """Leave an unfinished DuckDB result behind without a cursor to buffer it."""
     result = conn.exec_driver_sql("SELECT * FROM range(5000)")

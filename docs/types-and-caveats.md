@@ -231,6 +231,13 @@ DuckDB has a single transaction isolation level. The dialect accepts
 `isolation_level="AUTOCOMMIT"` (no `BEGIN` is issued) and the default
 `"READ COMMITTED"`; other levels raise `ArgumentError`.
 
+A raw `COMMIT`, `END`, `ROLLBACK` or `ABORT` statement, with or without `WORK`
+or `TRANSACTION`, sent through `exec_driver_sql()` or `text()` inside a
+SQLAlchemy transaction commits or rolls back and begins the next DuckDB
+transaction, as psycopg2 does. Later statements therefore stay in a
+transaction that `commit()` or `rollback()` ends. When no transaction is open,
+for example with `isolation_level="AUTOCOMMIT"`, these statements do nothing.
+
 ## Numeric precision
 
 `Numeric`/`DECIMAL` values are bound and returned as `decimal.Decimal` without

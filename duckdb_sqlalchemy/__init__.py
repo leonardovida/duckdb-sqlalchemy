@@ -630,6 +630,26 @@ class ConnectionWrapper:
             self._close_raw_reader()
             self.__c.rollback()
 
+    def _end_transaction(self, *, commit: bool) -> None:
+        """Run a raw COMMIT or ROLLBACK statement, as psycopg2 does.
+
+        SQLAlchemy still has its transaction open afterwards, so the next
+        DuckDB transaction begins right away and later writes stay in it.
+        Without an open transaction (AUTOCOMMIT, for example) either
+        statement does nothing, as the DuckDB ``commit()`` method does.
+        """
+        in_transaction = self._transaction_statements is not None
+        if commit:
+            self.commit()
+        else:
+            try:
+                self.rollback()
+            except duckdb.TransactionException as exc:
+                if not _is_no_active_transaction_rollback(exc):
+                    raise
+        if in_transaction:
+            self._begin()
+
     def _count_statement(self) -> None:
         if self._transaction_statements is not None:
             self._transaction_statements += 1
@@ -686,6 +706,21 @@ _BEGIN_TRANSACTION_ISOLATION_RE = re.compile(
     r"^begin\s+(?:transaction\s+)?isolation\s+level\s+"
     r"(?:serializable|repeatable\s+read|read\s+committed|read\s+uncommitted)$"
 )
+# Raw statements that end the transaction, with PostgreSQL's optional WORK or
+# TRANSACTION keyword: COMMIT, END, ROLLBACK and ABORT.
+_COMMIT_STATEMENT_RE = re.compile(r"(?:commit|end)(?:\s+(?:work|transaction))?\s*")
+_ROLLBACK_STATEMENT_RE = re.compile(
+    r"(?:rollback|abort)(?:\s+(?:work|transaction))?\s*"
+)
+_NO_ACTIVE_TRANSACTION_ROLLBACK = (
+    "TransactionContext Error: cannot rollback - no transaction is active"
+)
+
+
+def _is_no_active_transaction_rollback(exc: BaseException) -> bool:
+    return bool(exc.args) and exc.args[0] == _NO_ACTIVE_TRANSACTION_ROLLBACK
+
+
 _DML_ROWCOUNT_PREFIXES = ("insert", "update", "delete", "merge")
 
 
@@ -904,13 +939,13 @@ class CursorWrapper:
     ) -> None:
         self._before_execute()
         norm = statement.strip().lower().rstrip(";")
-        if norm == "commit":  # this is largely for ipython-sql
-            in_transaction = (
-                self.__connection_wrapper._transaction_statements is not None
-            )
-            self.__connection_wrapper.commit()
-            if in_transaction:
-                self.__connection_wrapper._begin()
+        # A raw COMMIT or ROLLBACK (ipython-sql sends COMMIT) ends DuckDB's
+        # transaction behind SQLAlchemy's back; keep the two in step.
+        if _COMMIT_STATEMENT_RE.fullmatch(norm):
+            self.__connection_wrapper._end_transaction(commit=True)
+            return
+        elif _ROLLBACK_STATEMENT_RE.fullmatch(norm):
+            self.__connection_wrapper._end_transaction(commit=False)
             return
         elif _BEGIN_TRANSACTION_ISOLATION_RE.fullmatch(norm):
             self.__connection_wrapper._begin()
@@ -2161,10 +2196,7 @@ class Dialect(PGDialect_psycopg2):
         try:
             super().do_rollback(dbapi_connection)
         except DBAPI.TransactionException as e:
-            if (
-                e.args[0]
-                != "TransactionContext Error: cannot rollback - no transaction is active"
-            ):
+            if not _is_no_active_transaction_rollback(e):
                 raise e
 
     def do_begin(self, dbapi_connection: Any) -> None:
