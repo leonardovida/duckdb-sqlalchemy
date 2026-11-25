@@ -84,7 +84,11 @@ to raise on conflicts. Conflict modes do not change transaction ownership.
 
 Structured write statements with RETURNING buffer their returned rows to provide
 an exact affected-row count for ORM version checks. Arrow RETURNING uses a materialized Arrow table; the bounded batch interface
-is intended for SELECT results.
+is intended for SELECT results. A Core `insert()` with several parameter sets
+and `.returning(...)` runs each `insertmanyvalues_page_size` page as a DuckDB
+relation when `duckdb_arrow=True`, on every DuckDB version, and joins the Arrow
+tables DuckDB exports for the pages. Its Arrow result therefore has the same
+column types as a single-row insert and contains only the returned columns.
 
 ## Bounded Arrow reads
 

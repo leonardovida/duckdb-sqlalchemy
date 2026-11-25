@@ -50,6 +50,10 @@ boundaries:
 - On DuckDB 2.0 a statement executed with `duckdb_arrow=True` runs as a
   relation, because Arrow output from a DB-API result is copied. DuckDB runs a
   read-only relation again on every read, so read it exactly once and drop it.
+- The pages of a multi-row `INSERT ... RETURNING` with `duckdb_arrow=True` run
+  as relations on every DuckDB version. DuckDB runs a writing statement once,
+  when the relation is created, so its rows and its Arrow table are both read
+  from it, and the Arrow result keeps DuckDB's column types.
 - Filter reflection object scope/kind before name resolution; never combine
   metadata from relations that shadow one another.
 - Preserve exact values before selecting a bulk data path; decline lossy inference.
