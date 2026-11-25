@@ -6,6 +6,7 @@ a caller sees on every supported DuckDB version.
 """
 
 import warnings
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -13,6 +14,7 @@ from sqlalchemy import (
     Column,
     Integer,
     MetaData,
+    Sequence,
     String,
     Table,
     exc,
@@ -24,6 +26,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
+
+from duckdb_sqlalchemy.datatypes import HugeInteger, UInt64
 
 from .conftest import EngineFactory
 
@@ -153,6 +157,60 @@ def test_returning_and_dml_counts_with_the_arrow_option(
         assert changed.arrow.to_pylist() == [{"s": "z"}]
         assert _arrow(conn).execute(update(numbers).values(s="q")).rowcount == 11
         assert conn.execute(text("SELECT count(*) FROM numbers")).scalar() == 11
+
+
+def test_multi_row_returning_arrow_has_duckdb_column_types(
+    make_engine: EngineFactory,
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    big = Table(
+        "big",
+        MetaData(),
+        Column("id", Integer, primary_key=True),
+        Column("h", HugeInteger),
+        Column("u", UInt64),
+    )
+    stmt = insert(big).returning(big.c.id, big.c.h, big.c.u)
+    # Powers of two, which DuckDB 1.3 binds exactly although it binds integers
+    # beyond BIGINT as DOUBLE.
+    rows = [{"id": i, "h": 2 ** (100 + i), "u": 2**64 - 1 - i} for i in range(5)]
+    with engine.begin() as conn:
+        big.metadata.create_all(conn)
+        one = _arrow(conn).execute(stmt, rows[:1]).arrow
+        # Two rows per page, so the four rows take two INSERT statements.
+        conn.execution_options(insertmanyvalues_page_size=2)
+        many = conn.execute(stmt, rows[1:]).arrow
+    assert many.schema.equals(one.schema)
+    assert many.column("id").to_pylist() == [1, 2, 3, 4]
+    assert many.column("h").to_pylist() == [
+        Decimal(2 ** (100 + i)) for i in range(1, 5)
+    ]
+    assert many.column("u").to_pylist() == [2**64 - 1 - i for i in range(1, 5)]
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT count(*) FROM big")).scalar() == 5
+
+
+def test_multi_row_returning_arrow_has_only_the_returned_columns(
+    make_engine: EngineFactory,
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    named = Table(
+        "named",
+        MetaData(),
+        Column("id", Integer, Sequence("named_id_seq"), primary_key=True),
+        Column("name", String),
+    )
+    try:
+        stmt = insert(named).returning(named.c.name, sort_by_parameter_order=True)
+    except exc.ArgumentError:
+        pytest.skip("sort_by_parameter_order needs SQLAlchemy 2.0.10")
+    with engine.begin() as conn:
+        named.metadata.create_all(conn)
+        # SQLAlchemy adds the id to RETURNING to sort the rows; it is not a
+        # column of the result.
+        result = _arrow(conn).execute(stmt, [{"name": n} for n in "abc"])
+        assert list(result.keys()) == ["name"]
+        assert result.arrow.to_pylist() == [{"name": n} for n in "abc"]
 
 
 def test_textual_dml_count_row_reads_as_arrow(make_engine: EngineFactory) -> None:

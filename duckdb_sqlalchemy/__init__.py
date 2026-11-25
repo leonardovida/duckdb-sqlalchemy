@@ -774,6 +774,11 @@ class CursorWrapper:
         # True once this cursor's result was read from a relation. Errors a
         # DB-API execute() would have raised then surface on that read.
         self._relation_read = False
+        # Set by the execution context for a multi-row INSERT ... RETURNING
+        # executed with duckdb_arrow=True. Each batch runs as a relation, and
+        # its rows and its Arrow table are both read from that relation and
+        # collected here as (rows, table) pairs.
+        self._returning_arrow_batches: Optional[List[Tuple[List[Any], Any]]] = None
 
     def _clear_result(self) -> None:
         self.__c.execute("")
@@ -836,6 +841,12 @@ class CursorWrapper:
         relation, description = self._take_relation()
         try:
             rows = relation.fetchall()
+            if self._returning_arrow_batches is not None:
+                # INSERT ... RETURNING ran when the relation was created, and
+                # DuckDB keeps its rows, so this second read runs nothing.
+                self._returning_arrow_batches.append(
+                    (rows, _relation_arrow_table(relation))
+                )
         except BaseException as exc:
             self._store_buffered_result([], description, -1)
             self._buffer_error = exc
@@ -1253,9 +1264,20 @@ class DuckDBExecutionContext(_PGExecutionContext):
         super().pre_exec()
         cursor = getattr(self, "cursor", None)
         if isinstance(cursor, CursorWrapper):
-            cursor._relation_requested = _ARROW_NEEDS_RELATION and bool(
-                self.execution_options.get("duckdb_arrow")
+            arrow = bool(self.execution_options.get("duckdb_arrow"))
+            # SQLAlchemy reads each batch of a multi-row INSERT ... RETURNING
+            # as Python rows. Running the batches as relations lets the Arrow
+            # result come from DuckDB too, with its column types, on every
+            # DuckDB version.
+            returning_batches = (
+                arrow
+                and self.execute_style is ExecuteStyle.INSERTMANYVALUES
+                and bool(getattr(self.compiled, "effective_returning", None))
             )
+            cursor._relation_requested = (
+                _ARROW_NEEDS_RELATION and arrow
+            ) or returning_batches
+            cursor._returning_arrow_batches = [] if returning_batches else None
 
     @classmethod
     def _init_compiled(
@@ -1356,7 +1378,14 @@ class DuckDBExecutionContext(_PGExecutionContext):
             returning_rows = getattr(self, "_insertmanyvalues_rows", None)
             if returning_rows is not None:
                 self._rowcount = len(returning_rows)
-                if self.execution_options.get("duckdb_arrow"):
+                batches = getattr(cursor, "_returning_arrow_batches", None)
+                if self.execution_options.get("duckdb_arrow") and batches:
+                    self._duckdb_returning_arrow = _returning_arrow_table(
+                        batches,
+                        returning_rows,
+                        getattr(self, "_num_sentinel_cols", 0),
+                    )
+                elif self.execution_options.get("duckdb_arrow"):
                     self._duckdb_returning_arrow = _rows_to_arrow(
                         returning_rows, cursor.description
                     )
@@ -1392,11 +1421,58 @@ class DuckDBExecutionContext(_PGExecutionContext):
 
 
 def _rows_to_arrow(rows: Sequence[Sequence[Any]], description: Any) -> Any:
+    """Arrow from Python rows, with types inferred from the values.
+
+    Only a fallback: prefer Arrow that DuckDB exports itself, which keeps the
+    column types and holds values such as HUGEINT that do not fit int64.
+    """
     import pyarrow as pa
 
     names = [column[0] for column in description or ()]
     columns = list(zip(*rows)) if rows else [()] * len(names)
     return pa.Table.from_arrays([pa.array(list(c)) for c in columns], names=names)
+
+
+def _relation_arrow_table(relation: Any) -> Any:
+    """Read a relation as an Arrow table, under this DuckDB version's name."""
+    for name in ("to_arrow_table", "fetch_arrow_table", "arrow"):
+        fetch = getattr(relation, name, None)
+        if fetch is not None:
+            table = fetch()
+            return table.read_all() if hasattr(table, "read_all") else table
+    raise NotImplementedError("Arrow results are not available on this relation")
+
+
+def _returning_arrow_table(
+    batches: Sequence[Tuple[Sequence[Any], Any]],
+    rows: Sequence[Any],
+    num_sentinel_cols: int,
+) -> Any:
+    """Join the Arrow tables of RETURNING batches in the order of ``rows``.
+
+    SQLAlchemy may sort each batch into parameter order and keeps the row
+    objects it read, so their positions give the order of the table rows.
+    Sentinel columns it added to RETURNING are dropped, as from the rows.
+    """
+    import pyarrow as pa
+
+    table = pa.concat_tables([batch_table for _, batch_table in batches])
+    position = {
+        id(row): index
+        for index, row in enumerate(
+            row for batch_rows, _ in batches for row in batch_rows
+        )
+    }
+    order = [position.get(id(row)) for row in rows]
+    if (
+        len(order) == table.num_rows
+        and None not in order
+        and order != list(range(len(order)))
+    ):
+        table = table.take(order)
+    if num_sentinel_cols:
+        table = table.select(list(range(table.num_columns - num_sentinel_cols)))
+    return table
 
 
 def _apply_motherduck_defaults(config: Dict[str, Any], database: Optional[str]) -> None:
