@@ -662,8 +662,9 @@ class ConnectionWrapper:
             or not callable(attribute)
         ):
             return attribute
-        self._buffer_pending_result()
 
+        # Buffer only when the method is called: looking the name up, as
+        # hasattr() does, must leave an open result alone.
         def call_native(*args: Any, **kwargs: Any) -> Any:
             self._buffer_pending_result()
             self._discard_abandoned_result()

@@ -241,6 +241,22 @@ def test_raw_transaction_statements_with_autocommit(
         assert conn.execute(text("SELECT list(i ORDER BY i) FROM t")).scalar() == [2, 3]
 
 
+def test_looking_up_a_driver_method_leaves_an_arrow_reader_open(
+    make_engine: EngineFactory,
+) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        cursor = conn.exec_driver_sql("SELECT * FROM range(300000)").cursor
+        fetch_reader = getattr(cursor, "to_arrow_reader", None)
+        reader = fetch_reader(1000) if fetch_reader else cursor.fetch_record_batch(1000)
+        assert reader.read_next_batch().num_rows == 1000
+        driver_connection = conn.connection.driver_connection
+        # Looking a method up runs nothing, so the reader keeps its result.
+        assert hasattr(driver_connection, "sql")
+        assert callable(getattr(driver_connection, "execute"))
+        assert sum(batch.num_rows for batch in reader) == 299000
+
+
 def _abandon_partly_read_result(conn: Connection, how: str) -> None:
     """Leave an unfinished DuckDB result behind without a cursor to buffer it."""
     result = conn.exec_driver_sql("SELECT * FROM range(5000)")
