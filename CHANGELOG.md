@@ -6,6 +6,25 @@ preserved from the upstream project for historical context.
 
 ## Maintained in this fork
 
+## Unreleased
+
+### Bug Fixes
+
+- `DuckDBArrowResult` now supports `close()` and the context manager protocol (`with ... as result:`), closing the underlying result and any active `DuckDBArrowBatchReader` when exiting the block.
+- `Map` columns (`column[key]`) now accept SQL expressions such as columns, `bindparam()`, and SQL functions in addition to Python literals, while keeping bind processing for untyped `bindparam()` keys and result processing for extracted values.
+- Alembic autogenerate (`DuckDBImpl.render_type()`) now renders DuckDB scalar types (`UInt8`–`UInt64`, `HugeInteger`, `VarInt`, `TimestampNs`, `TimeNs`, `Variant`, `Geometry`) and nested `ARRAY` columns containing any DuckDB type with `import duckdb_sqlalchemy.datatypes`.
+- `Dialect.get_table_names()` now excludes internal DuckDB tables (`internal = false`), matching `get_view_names()` and bulk reflection.
+
+### Performance
+
+- `Dialect.get_view_names()` now caches results per `Inspector` using `@cache`.
+- Bulk insert data preparation (`build_bulk_insert_data()`) now extracts each column once to check register safety and build the Arrow array in a single pass, avoiding duplicate Python list allocations and scans.
+- `_process_decimal_bind()` short-circuits immediately for `int` values, reducing per-row Python overhead on integer binds.
+
+### Documentation
+
+- Updated `docs/types-and-caveats.md`, `docs/olap.md`, `docs/alembic.md`, and `llms.txt` to document `FixedArray`, `TimestampNs`, `TimeNs`, `Variant`, `Geometry`, `Map` expression indexing, `DuckDBArrowResult` context managers, `RETURNING` rowcount behavior, nested `Enum` reflection, and DuckDB 2.0 `pragma_storage_info` behavior, and fixed internal documentation links.
+
 ## [2.0.0](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.11...v2.0.0) (2026-11-17)
 
 ### Highlights

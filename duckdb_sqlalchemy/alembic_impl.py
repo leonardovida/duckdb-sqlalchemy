@@ -28,7 +28,17 @@ from . import (
     _implicit_sequence_ddl_name,
     _strip_enclosing_parentheses,
 )
-from .datatypes import DuckDBInteger, FixedArray, Map, Struct, Union
+from .datatypes import (
+    DuckDBInteger,
+    FixedArray,
+    Geometry,
+    Map,
+    Struct,
+    TimeNs,
+    TimestampNs,
+    Union,
+    Variant,
+)
 
 __all__ = ["DuckDBImpl"]
 
@@ -316,8 +326,11 @@ class DuckDBImpl(DefaultImpl):
                 for field, member in type_obj._fields or ()
             )
             return f"{name}({{{fields}}})"
-        if isinstance(type_obj, sqltypes.ARRAY) and isinstance(
-            type_obj.item_type, (Struct, Union, Map, FixedArray)
+        if isinstance(type_obj, _SCALAR_DUCKDB_TYPES):
+            autogen_context.imports.add("import duckdb_sqlalchemy.datatypes")
+            return f"duckdb_sqlalchemy.datatypes.{type(type_obj).__name__}()"
+        if isinstance(type_obj, sqltypes.ARRAY) and _contains_duckdb_type(
+            type_obj.item_type
         ):
             item = _repr_type(type_obj.item_type, autogen_context)
             dimensions = (
@@ -382,6 +395,17 @@ def _is_nested(type_obj: Any) -> bool:
             type_obj.item_type, (Struct, Union, Map, FixedArray, sqltypes.Enum)
         )
     return isinstance(type_obj, (Struct, Union, Map, FixedArray))
+
+
+_SCALAR_DUCKDB_TYPES = (DuckDBInteger, TimestampNs, TimeNs, Variant, Geometry)
+
+
+def _contains_duckdb_type(type_obj: Any) -> bool:
+    if isinstance(type_obj, (FixedArray, Struct, Union, Map, *_SCALAR_DUCKDB_TYPES)):
+        return True
+    return isinstance(type_obj, sqltypes.ARRAY) and _contains_duckdb_type(
+        type_obj.item_type
+    )
 
 
 def _column_names(columns: Collection[Any]) -> Tuple[str, ...]:

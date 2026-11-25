@@ -65,9 +65,10 @@ autogenerate again right after `upgrade head` produces an empty migration.
 `DuckDBImpl` also handles what the generic implementation gets wrong for
 DuckDB:
 
-- `Struct`, `Map`, and `Union` columns, and arrays of them, render as
-  `duckdb_sqlalchemy.datatypes.Struct({...})` in the migration, and the file
-  imports `duckdb_sqlalchemy.datatypes`.
+- `FixedArray`, `Struct`, `Map`, `Union`, DuckDB scalar types (`UInt8`–`UInt64`,
+  `HugeInteger`, `VarInt`, `TimestampNs`, `TimeNs`, `Variant`, `Geometry`), and
+  `ARRAY` columns containing them render using `duckdb_sqlalchemy.datatypes` in
+  the migration, and the file adds `import duckdb_sqlalchemy.datatypes`.
 - With `compare_type=True` (Alembic's default), a nested type whose fields
   changed is reported as a type change.
 - A named unique constraint (`UniqueConstraint("sku", name="uq_items_sku")`)

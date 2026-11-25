@@ -179,6 +179,15 @@ class DuckDBArrowResult:
         self._assert_row_fetch_available()
         return self._result.fetchmany(size)
 
+    def close(self) -> None:
+        self._result.close()
+
+    def __enter__(self) -> "DuckDBArrowResult":
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.close()
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self._result, name)
 

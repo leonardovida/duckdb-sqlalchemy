@@ -4,7 +4,9 @@ import io
 import textwrap
 from pathlib import Path
 
+import duckdb
 import pytest
+from packaging.version import Version
 from sqlalchemy import (
     ARRAY,
     BigInteger,
@@ -24,7 +26,18 @@ from sqlalchemy import (
     text,
 )
 
-from ...datatypes import Map, Struct, UInt8, UInt32, UInt64
+from ...datatypes import (
+    FixedArray,
+    HugeInteger,
+    Map,
+    Struct,
+    TimeNs,
+    TimestampNs,
+    UInt8,
+    UInt32,
+    UInt64,
+    Variant,
+)
 from .conftest import EngineFactory
 
 pytest.importorskip("alembic")
@@ -280,3 +293,58 @@ def test_drop_column_without_indexes_stays_a_plain_alter(
     )
     Operations(context).drop_column("t", "gone")
     assert "ALTER TABLE t DROP COLUMN gone" in buffer.getvalue()
+
+
+def _supports_time_ns() -> bool:
+    try:
+        duckdb.sql("SELECT CAST(NULL AS TIME_NS)")
+    except duckdb.Error:
+        return False
+    return True
+
+
+def test_autogenerate_imports_datatypes_for_scalar_and_nested_array_types(
+    tmp_path: Path, db_path: Path
+) -> None:
+    metadata = MetaData()
+    columns = [
+        Column("id", Integer, primary_key=True),
+        Column("flags", UInt64),
+        Column("big", HugeInteger),
+        Column("ts_ns", TimestampNs),
+        Column("arr_big", ARRAY(HugeInteger)),
+        Column("matrix", ARRAY(FixedArray(Struct({"a": Integer}), 2))),
+        Column("fixed_list", FixedArray(ARRAY(HugeInteger), 2)),
+    ]
+    if _supports_time_ns():
+        columns.append(Column("tm_ns", TimeNs))
+    Table("telemetry", metadata, *columns)
+
+    config = Config(str(tmp_path / "alembic.ini"))
+    config.set_main_option("script_location", str(tmp_path / "migrations"))
+    config.set_main_option("sqlalchemy.url", f"duckdb:///{db_path.as_posix()}")
+    config.attributes["metadata"] = metadata
+
+    command.init(config, str(tmp_path / "migrations"))
+    (tmp_path / "migrations" / "env.py").write_text(ENV_PY)
+    command.revision(config, "create telemetry", autogenerate=True, rev_id="v1")
+
+    script_dir = tmp_path / "migrations" / "versions"
+    script_text = next(script_dir.glob("v1_*.py")).read_text()
+    assert "import duckdb_sqlalchemy.datatypes" in script_text
+
+    command.upgrade(config, "head")
+    command.check(config)
+
+    if Version(duckdb.__version__) >= Version("1.5.0"):
+        from alembic.autogenerate.api import AutogenContext
+        from alembic.autogenerate.render import _repr_type
+        from alembic.migration import MigrationContext
+
+        mc = MigrationContext.configure(
+            dialect_name="duckdb",
+            opts={"sqlalchemy_module_prefix": "sa.", "user_module_prefix": None},
+        )
+        ac = AutogenContext(mc)
+        assert _repr_type(Variant(), ac) == "duckdb_sqlalchemy.datatypes.Variant()"
+        assert "import duckdb_sqlalchemy.datatypes" in ac.imports

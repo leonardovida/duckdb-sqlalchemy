@@ -89,3 +89,17 @@ def test_multi_reflection_selects_scope_and_kind_before_shadowing(
             key: [column["name"] for column in value] for key, value in columns.items()
         } == expected_columns
         assert set(comments) == set(table_options) == set(expected_columns)
+
+
+def test_inspector_caches_view_names_until_cleared(
+    db_path: Path, make_engine: EngineFactory
+) -> None:
+    engine = make_engine(db_path)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("CREATE VIEW v1 AS SELECT 1 AS x")
+        inspector = inspect(conn)
+        assert inspector.get_view_names() == ["v1"]
+        conn.exec_driver_sql("CREATE VIEW v2 AS SELECT 2 AS x")
+        assert inspector.get_view_names() == ["v1"]
+        inspector.clear_cache()
+        assert sorted(inspector.get_view_names()) == ["v1", "v2"]
