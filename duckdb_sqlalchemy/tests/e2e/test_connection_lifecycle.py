@@ -3,6 +3,7 @@
 import gc
 from pathlib import Path
 
+import duckdb
 import pytest
 from sqlalchemy import Column, Integer, MetaData, Table, event, exc, insert, text
 from sqlalchemy.engine import Connection
@@ -255,6 +256,30 @@ def test_looking_up_a_driver_method_leaves_an_arrow_reader_open(
         assert hasattr(driver_connection, "sql")
         assert callable(getattr(driver_connection, "execute"))
         assert sum(batch.num_rows for batch in reader) == 299000
+
+
+@pytest.mark.skipif(
+    not hasattr(duckdb, "ResourceInUseException"),
+    reason="DuckDB 2.0 added ResourceInUseException",
+)
+def test_resource_in_use_error_keeps_the_in_memory_database(
+    tmp_path: Path, make_engine: EngineFactory
+) -> None:
+    # The error quotes this path, which contains a disconnect word.
+    attached = (tmp_path / "websocket_events.duckdb").as_posix()
+    engine = make_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        conn.execute(text("CREATE TABLE keep AS SELECT 42 AS answer"))
+        conn.commit()
+        conn.exec_driver_sql(f"ATTACH '{attached}' AS first_alias")
+        conn.commit()
+        with pytest.raises(exc.DBAPIError) as raised:
+            conn.exec_driver_sql(f"ATTACH '{attached}' AS second_alias")
+        assert isinstance(raised.value.orig, duckdb.ResourceInUseException)
+        assert not raised.value.connection_invalidated
+        conn.rollback()
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT answer FROM keep")).scalar() == 42
 
 
 def _abandon_partly_read_result(conn: Connection, how: str) -> None:

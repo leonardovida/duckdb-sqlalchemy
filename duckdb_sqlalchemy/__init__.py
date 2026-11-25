@@ -303,26 +303,6 @@ _DUCKDB_CONNECTION_EXCEPTIONS: Tuple[type, ...] = tuple(
     for cls in (getattr(duckdb, "ConnectionException", None),)
     if isinstance(cls, type)
 )
-_DUCKDB_IO_EXCEPTIONS: Tuple[type, ...] = tuple(
-    cls
-    for cls in (
-        getattr(duckdb, "IOException", None),
-        getattr(duckdb, "HTTPException", None),
-    )
-    if isinstance(cls, type)
-)
-# OperationalError subclasses raised on a connection that is still usable.
-# Their messages quote table names and values, which can contain words such as
-# "timeout", so they never count as disconnects.
-_DUCKDB_LIVE_CONNECTION_EXCEPTIONS: Tuple[type, ...] = _DUCKDB_IO_EXCEPTIONS + tuple(
-    cls
-    for cls in (
-        getattr(duckdb, "TransactionException", None),
-        getattr(duckdb, "SerializationException", None),
-        getattr(duckdb, "OutOfMemoryException", None),
-    )
-    if isinstance(cls, type)
-)
 
 
 class DBAPI:
@@ -4043,13 +4023,14 @@ class Dialect(PGDialect_psycopg2):
         if isinstance(e, duckdb.Error):
             if isinstance(e, _DUCKDB_CONNECTION_EXCEPTIONS):
                 return True
-            # IOException and HTTPException subclass OperationalError but report
-            # file or remote I/O failures (a missing CSV, an S3 timeout) on a
-            # connection that is still usable. Invalidating it would discard
-            # the pooled connection and, for :memory:, the whole database.
-            if not isinstance(e, duckdb.OperationalError) or isinstance(
-                e, _DUCKDB_LIVE_CONNECTION_EXCEPTIONS
-            ):
+            # Every other OperationalError subclass (IOException, HTTPException,
+            # TransactionException, ResourceInUseException on DuckDB 2.0, ...)
+            # reports a failure on a connection that is still usable, in a
+            # message that can quote paths or names such as "socket_events".
+            # Invalidating it would discard the pooled connection and, for
+            # :memory:, the whole database. Only a plain OperationalError is
+            # matched by its message.
+            if type(e) is not duckdb.OperationalError:
                 return False
         message = str(e).lower()
         return any(pattern in message for pattern in DISCONNECT_ERROR_PATTERNS)

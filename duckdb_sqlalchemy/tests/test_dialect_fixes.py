@@ -105,6 +105,19 @@ def test_is_disconnect_ignores_io_and_http_errors() -> None:
     )
 
 
+def test_is_disconnect_ignores_new_operational_error_subclasses() -> None:
+    # DuckDB 2.0 added ResourceInUseException, whose message quotes a file
+    # path. Stand in for it, and for later additions, on every DuckDB version.
+    class NewOperationalError(duckdb.OperationalError):
+        pass
+
+    error = NewOperationalError(
+        'Resource In Use Error: the database file "/data/socket_events.duckdb" '
+        "is already in use"
+    )
+    assert not Dialect().is_disconnect(error, None, None)
+
+
 def _run_each(conn: Any, statements: Iterable[str]) -> None:
     # DuckDB allows writing to one attached database per transaction.
     for statement in statements:
