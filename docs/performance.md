@@ -36,8 +36,9 @@ the ordinary path when:
 - a column mixes integers above the float precision limit with floats
 - a non-numeric column, such as `String`, mixes integers or booleans with
   floats, or holds `Decimal` values. This includes LIST items and STRUCT
-  fields of such a column, and numeric LIST or STRUCT columns, which are
-  checked the same way
+  fields of such a column. A LIST or STRUCT column whose members are all
+  numeric may mix integers and floats, but stays on the ordinary path when it
+  holds `Decimal` values
 - a column, LIST item or STRUCT field mixes `date` with `datetime` values, or
   naive with time-zone-aware datetimes
 - a value is a `timedelta`, a `time` with a time zone, a non-finite `Decimal`,

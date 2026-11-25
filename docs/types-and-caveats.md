@@ -238,8 +238,9 @@ A raw `COMMIT`, `END`, `ROLLBACK` or `ABORT` statement, with or without `WORK`
 or `TRANSACTION`, sent through `exec_driver_sql()` or `text()` inside a
 SQLAlchemy transaction commits or rolls back and begins the next DuckDB
 transaction, as psycopg2 does. Later statements therefore stay in a
-transaction that `commit()` or `rollback()` ends. When no transaction is open,
-for example with `isolation_level="AUTOCOMMIT"`, these statements do nothing.
+transaction that `commit()` or `rollback()` ends. With
+`isolation_level="AUTOCOMMIT"` they end a transaction that a raw `BEGIN`
+started, and do nothing when no transaction is active.
 
 ## Numeric precision
 

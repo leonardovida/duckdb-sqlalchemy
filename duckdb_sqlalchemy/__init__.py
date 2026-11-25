@@ -4029,28 +4029,51 @@ class Dialect(PGDialect_psycopg2):
                     )
         return column_names
 
+    def _bulk_insert_type_impl(self, type_: Any) -> Any:
+        type_impl = sqltypes.to_instance(type_).dialect_impl(self)
+        while isinstance(type_impl, sqltypes.TypeDecorator):
+            type_impl = type_impl.impl.dialect_impl(self)
+        return type_impl
+
     def _bulk_insert_numeric_columns(
         self, context: Any, column_names: Sequence[str]
     ) -> Set[str]:
         table = context.compiled.statement.table
-        numeric = set()
-        for name in column_names:
-            type_impl = table.c[name].type.dialect_impl(self)
-            while isinstance(type_impl, sqltypes.TypeDecorator):
-                type_impl = type_impl.impl.dialect_impl(self)
+        return {
+            name
+            for name in column_names
             if isinstance(
+                self._bulk_insert_type_impl(table.c[name].type),
+                (sqltypes.Integer, sqltypes.Numeric, sqltypes.Float),
+            )
+        }
+
+    def _has_only_numeric_members(self, type_: Any) -> bool:
+        """Whether a LIST, ARRAY or STRUCT type holds only numeric members."""
+        type_impl = self._bulk_insert_type_impl(type_)
+        if isinstance(type_impl, (sqltypes.ARRAY, FixedArray)):
+            members = [type_impl.item_type]
+        elif isinstance(type_impl, Struct):
+            members = [member for _, member in type_impl._fields or ()]
+        else:
+            return isinstance(
                 type_impl, (sqltypes.Integer, sqltypes.Numeric, sqltypes.Float)
-            ):
-                numeric.add(name)
-        return numeric
+            )
+        return bool(members) and all(map(self._has_only_numeric_members, members))
 
     def _build_bulk_insert_data(
         self, context: Any, parameters: Sequence[Any], column_names: List[str]
     ) -> Any:
+        table = context.compiled.statement.table
+        numeric = self._bulk_insert_numeric_columns(context, column_names)
+        numeric_leaves = {
+            name
+            for name in column_names
+            if name not in numeric
+            and self._has_only_numeric_members(table.c[name].type)
+        }
         return _build_bulk_insert_data(
-            parameters,
-            column_names,
-            self._bulk_insert_numeric_columns(context, column_names),
+            parameters, column_names, numeric, numeric_leaves
         )
 
     def _reaches_copy_threshold(self, context: Any, parameters: Sequence[Any]) -> bool:
@@ -4123,8 +4146,8 @@ class Dialect(PGDialect_psycopg2):
             f"INSERT INTO {target} ({columns}) SELECT {columns} FROM {view_name}"
         )
         sample = self._widen_pandas_analyze_sample(dbapi_conn, data)
-        dbapi_conn.register(view_name, data)
         try:
+            dbapi_conn.register(view_name, data)
             cursor.execute(insert_sql)
         finally:
             try:
@@ -4152,9 +4175,11 @@ class Dialect(PGDialect_psycopg2):
         rows = _pandas_rows_to_analyze(data)
         if rows is None:
             return None
+        # fetchall() finishes the result: DuckDB 2.0 refuses register() while
+        # a result is unfinished.
         previous = dbapi_conn.execute(
             "SELECT current_setting('pandas_analyze_sample')"
-        ).fetchone()[0]
+        ).fetchall()[0][0]
         if rows <= previous:
             return None
         dbapi_conn.execute(f"SET pandas_analyze_sample = {int(rows)}")

@@ -265,3 +265,51 @@ def test_ints_and_floats_in_nested_text_fields_store_like_ordinary_inserts(
     assert bulk == plain
     assert bulk[0] == (0, ["1"], {"a": "2.5"})
     assert bulk[1] == (1, ["1.5"], {"a": "true"})
+
+
+def test_small_pandas_batch_loads_through_the_fast_path(
+    make_engine: EngineFactory, db_path: Path, register_calls: List[bool]
+) -> None:
+    """Below pandas_analyze_sample rows the setting is read but not changed.
+    DuckDB 2.0 refused register() after that read until its result was
+    finished."""
+    engine = make_engine(db_path)
+    metadata = MetaData()
+    table = Table(
+        "t",
+        metadata,
+        Column("id", Integer),
+        Column("ref", Numeric(38, 0)),
+        Column("label", String),
+    )
+    rows = [{"id": i, "ref": 10**19 + i, "label": f"r{i}"} for i in range(10)]
+    with engine.begin() as conn:
+        metadata.create_all(conn)
+        conn.execution_options(duckdb_copy_threshold=1).execute(insert(table), rows)
+    with engine.connect() as conn:
+        stored = conn.execute(select(table).order_by(table.c.id)).all()
+        sample = conn.execute(text("SELECT current_setting('pandas_analyze_sample')"))
+        assert sample.scalar_one() == 1000
+    assert register_calls == [True]
+    assert [tuple(row) for row in stored] == [tuple(r.values()) for r in rows]
+
+
+def test_numeric_lists_and_structs_mixing_ints_and_floats_keep_the_fast_path(
+    make_engine: EngineFactory, db_path: Path, register_calls: List[bool]
+) -> None:
+    from ...datatypes import Struct
+
+    rows = [
+        {"id": i, "xs": [i, 0.5] if i % 2 else [i], "point": {"x": i, "y": 0.5}}
+        for i in range(ROWS)
+    ]
+    bulk, plain = _store_bulk_and_ordinary(
+        make_engine(db_path),
+        {
+            "xs": sqlalchemy.ARRAY(sqlalchemy.Float),
+            "point": Struct({"x": sqlalchemy.Float, "y": sqlalchemy.Float}),
+        },
+        rows,
+    )
+    assert register_calls == [True]
+    assert bulk == plain
