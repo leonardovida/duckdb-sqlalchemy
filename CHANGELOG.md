@@ -8,22 +8,37 @@ preserved from the upstream project for historical context.
 
 ## Unreleased
 
+## [2.0.0.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v2.0.0...v2.0.0.1) (2026-11-25)
+
+### Highlights
+
+- Results executed with `duckdb_arrow=True` can be used in a `with` block, which closes the result on exit. [#237](https://github.com/leonardovida/duckdb-sqlalchemy/pull/237)
+- `Map` columns accept SQL expressions as keys, and Alembic autogenerate writes migrations for DuckDB-specific types that run without manual edits. [#237](https://github.com/leonardovida/duckdb-sqlalchemy/pull/237)
+
+### Upgrading from 2.0.0
+
+This is a patch release of the 2.0 line. Constraints such as `duckdb-sqlalchemy>=2.0.0,<3` or `duckdb-sqlalchemy~=2.0.0` select it, and constraints below 2 do not. Runtime requirements are unchanged, and MotherDuck applications should continue to install `duckdb-sqlalchemy[motherduck]`.
+
+1. Upgrade with `pip install -U duckdb-sqlalchemy` or update the lock file.
+2. Review the [Compatibility](#compatibility) items when the application reads table or view names through a SQLAlchemy `Inspector`.
+
 ### Bug Fixes
 
-- `DuckDBArrowResult` now supports `close()` and the context manager protocol (`with ... as result:`), closing the underlying result and any active `DuckDBArrowBatchReader` when exiting the block.
-- `Map` columns (`column[key]`) now accept SQL expressions such as columns, `bindparam()`, and SQL functions in addition to Python literals, while keeping bind processing for untyped `bindparam()` keys and result processing for extracted values.
-- Alembic autogenerate (`DuckDBImpl.render_type()`) now renders DuckDB scalar types (`UInt8`–`UInt64`, `HugeInteger`, `VarInt`, `TimestampNs`, `TimeNs`, `Variant`, `Geometry`) and nested `ARRAY` columns containing any DuckDB type with `import duckdb_sqlalchemy.datatypes`.
-- `Dialect.get_table_names()` now excludes internal DuckDB tables (`internal = false`), matching `get_view_names()` and bulk reflection.
+- A `with` statement on a result executed with `duckdb_arrow=True` raised `TypeError` because `DuckDBArrowResult` did not support the context manager protocol. `DuckDBArrowResult` now implements `close()`, `__enter__()` and `__exit__()`, and the result is closed when the block exits. [#237](https://github.com/leonardovida/duckdb-sqlalchemy/pull/237)
+- Indexing a `Map` column with a SQL expression, such as `table.c.attrs[table.c.key]`, raised `ArgumentError` because only Python values were accepted as keys. Columns, `bindparam()` and SQL functions are now accepted. An untyped `bindparam()` key uses the declared key type, and the extracted value uses the declared value type. [#237](https://github.com/leonardovida/duckdb-sqlalchemy/pull/237)
+- Alembic autogenerate rendered `duckdb_sqlalchemy.datatypes` types such as `UInt8`, `HugeInteger`, `TimestampNs`, `TimeNs`, `Variant` and `Geometry`, and `ARRAY` columns of them, without adding `import duckdb_sqlalchemy.datatypes`. The generated migration failed with `NameError` until it was edited. The import is now added to the migration. [#237](https://github.com/leonardovida/duckdb-sqlalchemy/pull/237)
 
-### Performance
+### Compatibility
 
-- `Dialect.get_view_names()` now caches results per `Inspector` using `@cache`.
-- Bulk insert data preparation (`build_bulk_insert_data()`) now extracts each column once to check register safety and build the Arrow array in a single pass, avoiding duplicate Python list allocations and scans.
-- `_process_decimal_bind()` short-circuits immediately for `int` values, reducing per-row Python overhead on integer binds.
+- `Inspector.get_table_names()` no longer returns tables that DuckDB marks as internal, which matches `get_view_names()` and bulk reflection. Applications that need such tables should query `duckdb_tables()` directly. [#237](https://github.com/leonardovida/duckdb-sqlalchemy/pull/237)
+- `Inspector.get_view_names()` caches its result for the lifetime of the `Inspector`, as `get_table_names()` already did. Applications that create or drop views and then list them with the same `Inspector` should call `Inspector.clear_cache()` or create a new `Inspector`. [#237](https://github.com/leonardovida/duckdb-sqlalchemy/pull/237)
 
-### Documentation
+### Maintenance
 
-- Updated `docs/types-and-caveats.md`, `docs/olap.md`, `docs/alembic.md`, and `llms.txt` to document `FixedArray`, `TimestampNs`, `TimeNs`, `Variant`, `Geometry`, `Map` expression indexing, `DuckDBArrowResult` context managers, `RETURNING` rowcount behavior, nested `Enum` reflection, and DuckDB 2.0 `pragma_storage_info` behavior, and fixed internal documentation links.
+- Bulk inserts above `duckdb_copy_threshold` read each column once to check it and build its Arrow array, and `int` values bound to integer, numeric and float columns skip the `Decimal` check. Both changes reduce Python overhead per row. [#237](https://github.com/leonardovida/duckdb-sqlalchemy/pull/237)
+- The documentation covers `FixedArray`, `TimestampNs`, `TimeNs`, `Variant`, `Geometry`, `Map` expression keys, closing Arrow results, `RETURNING` row counts, nested `Enum` reflection and `pragma_storage_info` on DuckDB 2.0, and its internal links are fixed. [#237](https://github.com/leonardovida/duckdb-sqlalchemy/pull/237)
+
+**Full diff:** https://github.com/leonardovida/duckdb-sqlalchemy/compare/v2.0.0...v2.0.0.1
 
 ## [2.0.0](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.11...v2.0.0) (2026-11-17)
 
