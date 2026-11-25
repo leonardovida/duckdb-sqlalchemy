@@ -17,11 +17,13 @@ This file lists every breaking or behavior-changing change shipped in `duckdb-sq
 
 ## Unreleased
 
-- **`DuckDBArrowResult` supports context managers** - Results returned under `duckdb_arrow=True` now implement `close()`, `__enter__()`, and `__exit__()`, closing the underlying result and any active `DuckDBArrowBatchReader` on exit from `with conn.execute(...) as result:`.
-- **`Map` columns accept SQL expressions as keys** - `map_col[expr]` now accepts SQL expressions such as columns, `bindparam()`, and functions in addition to Python literals, while applying the declared key bind processor to untyped `bindparam()` keys and the declared value result processor to the result.
-- **Alembic renders all `duckdb_sqlalchemy.datatypes` types with their import** - `DuckDBImpl.render_type()` now emits `duckdb_sqlalchemy.datatypes.<Type>()` and adds `import duckdb_sqlalchemy.datatypes` for DuckDB integer types (`UInt8`–`UInt64`, `HugeInteger`, `VarInt`, ...), `TimestampNs`, `TimeNs`, `Variant`, `Geometry`, and nested `ARRAY` columns containing any DuckDB dialect type.
-- **`Inspector.get_view_names()` is cached** - `Dialect.get_view_names()` now uses SQLAlchemy's `@cache` decorator like `get_table_names()`. Call `Inspector.clear_cache()` or create a new `Inspector` after creating or dropping views.
-- **`Dialect.get_table_names()` filters out internal tables** - `get_table_names()` now includes `internal = false`, matching `get_view_names()` and bulk reflection.
+## [2.0.0.1](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v2.0.0...v2.0.0.1) (2026-11-25)
+
+- **`Inspector.get_view_names()` is cached** - `get_view_names()` now caches its result for the lifetime of the `Inspector`, as `get_table_names()` already did. Applications that create or drop views and then list them with the same `Inspector` should call `Inspector.clear_cache()` or create a new `Inspector`. [#237](https://github.com/leonardovida/duckdb-sqlalchemy/pull/237)
+- **`Inspector.get_table_names()` skips internal tables** - `get_table_names()` no longer returns tables that DuckDB marks as internal, which matches `get_view_names()` and bulk reflection. Query `duckdb_tables()` directly to list them. [#237](https://github.com/leonardovida/duckdb-sqlalchemy/pull/237)
+- **Alembic adds `import duckdb_sqlalchemy.datatypes` to migrations** - Autogenerate renders DuckDB integer types (`UInt8` to `UInt64`, `HugeInteger`, `VarInt` and others), `TimestampNs`, `TimeNs`, `Variant`, `Geometry` and `ARRAY` columns of them as `duckdb_sqlalchemy.datatypes.<Type>()` and adds the import. Earlier migrations that reference these types without the import need it added by hand. [#237](https://github.com/leonardovida/duckdb-sqlalchemy/pull/237)
+- **`Map` columns accept SQL expressions as keys** - `map_col[expr]` accepts columns, `bindparam()` and SQL functions where it raised `ArgumentError`. An untyped `bindparam()` key uses the declared key type, and the extracted value uses the declared value type. [#237](https://github.com/leonardovida/duckdb-sqlalchemy/pull/237)
+- **`DuckDBArrowResult` supports `with`** - Results executed with `duckdb_arrow=True` implement `close()`, `__enter__()` and `__exit__()`, and a `with` block closes the result on exit. [#237](https://github.com/leonardovida/duckdb-sqlalchemy/pull/237)
 
 ## [2.0.0](https://github.com/leonardovida/duckdb-sqlalchemy/compare/v1.5.6.11...v2.0.0) (2026-11-17)
 
