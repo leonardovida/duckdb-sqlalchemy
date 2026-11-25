@@ -155,6 +155,21 @@ def test_returning_and_dml_counts_with_the_arrow_option(
         assert conn.execute(text("SELECT count(*) FROM numbers")).scalar() == 11
 
 
+def test_textual_dml_count_row_reads_as_arrow(make_engine: EngineFactory) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE t (i INTEGER)"))
+        inserted = _arrow(conn).execute(text("INSERT INTO t VALUES (1), (2)"))
+        assert inserted.rowcount == 2
+        table = inserted.arrow
+        assert table.to_pylist() == [{"Count": 2}]
+        assert table.schema.field("Count").type == pa.int64()
+        deleted = conn.execute(text("DELETE FROM t WHERE i = 1"))
+        with deleted.batches() as reader:
+            assert reader.read_all().to_pylist() == [{"Count": 1}]
+        assert conn.execute(text("SELECT list(i) FROM t")).scalar() == [2]
+
+
 def test_unread_arrow_result_does_not_block_the_pooled_connection(
     make_engine: EngineFactory,
 ) -> None:

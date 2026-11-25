@@ -112,7 +112,10 @@ report the exact number of returned rows, while `text()` statements with
 counted in full when it fits in one `insertmanyvalues_page_size` page (1000
 rows by default) or uses the register fast path (`duckdb_copy_threshold`, 10,000
 rows by default). Between those sizes it runs in pages and `rowcount` reports
-the last page only. `column.regexp_match(pattern)` compiles to
+the last page only. A `text()` INSERT, UPDATE, DELETE or MERGE without
+RETURNING also returns DuckDB's one-row `Count` result, which `result.arrow`
+returns as a BIGINT `Count` column with `duckdb_arrow=True`.
+`column.regexp_match(pattern)` compiles to
 `regexp_matches()`, which matches anywhere in the string; `flags` are passed as
 DuckDB regex options (for example `flags="i"`).
 

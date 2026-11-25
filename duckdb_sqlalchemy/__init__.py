@@ -8,7 +8,7 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict, deque
-from functools import lru_cache
+from functools import lru_cache, partial
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from threading import Lock
@@ -395,6 +395,11 @@ _NATIVE_RESULT_FETCH_METHODS = frozenset(
         "to_arrow_reader",
         "torch",
     }
+)
+# The cursor calls among them that return an Arrow table or batch reader.
+_ARROW_TABLE_FETCH_METHODS = frozenset({"fetch_arrow_table", "to_arrow_table"})
+_ARROW_READER_FETCH_METHODS = frozenset(
+    {"fetch_arrow_reader", "fetch_record_batch", "to_arrow_reader"}
 )
 
 # DuckDB 2.0 copies every row of a DB-API result to export it as Arrow, and
@@ -1004,8 +1009,34 @@ class CursorWrapper:
             return -1
         return self.__c.rowcount
 
+    def _dml_count_arrow(self, *args: Any, reader: bool, **kwargs: Any) -> Any:
+        """Return the buffered "Count" row of a DML statement as Arrow.
+
+        ``_capture_dml_rowcount`` reads that row into Python to set
+        ``rowcount``. DuckDB reports it as one BIGINT column, so the Arrow
+        table matches what DuckDB itself would have exported.
+        """
+        import pyarrow as pa
+
+        assert self._buffered_rows is not None
+        counts = [row[0] for row in self._buffered_rows]
+        self._buffered_rows.clear()
+        self._rows_fetched = True
+        name = self._buffered_description[0][0]
+        table = pa.table({name: pa.array(counts, type=pa.int64())})
+        if not reader:
+            return table
+        batch_size = args[0] if args else next(iter(kwargs.values()), None)
+        return pa.RecordBatchReader.from_batches(
+            table.schema, table.to_batches(max_chunksize=batch_size)
+        )
+
     def __getattr__(self, name: str) -> Any:
         if self._buffered_rows is not None and name in _NATIVE_RESULT_FETCH_METHODS:
+            if self._is_dml_count and name in _ARROW_TABLE_FETCH_METHODS:
+                return partial(self._dml_count_arrow, reader=False)
+            if self._is_dml_count and name in _ARROW_READER_FETCH_METHODS:
+                return partial(self._dml_count_arrow, reader=True)
             raise NotImplementedError(
                 f"{name}() is unavailable: another statement ran on this connection "
                 "before the result was consumed, so its remaining rows were "
