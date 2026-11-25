@@ -23,7 +23,7 @@
 
 ## Execution options
 
-- `duckdb_arrow=True`: SELECT results as Arrow (`result.arrow`, `result.batches()`).
+- `duckdb_arrow=True`: SELECT results as Arrow (`result.arrow`, `result.all()`, or streaming `result.batches()`); supports `with ... as result:`.
 - `duckdb_copy_threshold` (default 10000): row count at which an `executemany` INSERT loads through Arrow. `0` disables it.
 - `duckdb_arraysize`: rows per `fetchmany()` with `stream_results=True`.
 - `duckdb_retry_on_transient`, `duckdb_retry_count`, `duckdb_retry_backoff`: opt-in retries for idempotent statements.
@@ -33,11 +33,11 @@
 
 - DuckDB has no SAVEPOINT, so `begin_nested()` raises. `with_for_update()` is ignored.
 - DuckDB cannot add UNIQUE, FOREIGN KEY or CHECK constraints to an existing table. Alembic batch mode recreates the table.
-- `result.rowcount` reports rows changed by INSERT, UPDATE, DELETE and MERGE. It is -1 with RETURNING and for `executemany`.
+- `result.rowcount` reports rows changed by Core INSERT, UPDATE, DELETE and MERGE (including returned row count with `.returning()`). It is -1 for `text()` `RETURNING` and for `executemany`.
 - `regexp_match` compiles to `regexp_matches()`, a substring match.
 - Reflection without a schema covers the current database and schema. Pass `schema="db.schema"` for an attached database.
 - Create a new `Inspector` after DDL. An `Inspector` caches the tables it resolved.
-- Autoincrement integer primary keys use a sequence named `<table>_<column>_seq`, created and dropped with the table.
+- Autoincrement integer primary keys use a sequence named `<table>_<column>_seq`, created and dropped with the table (override with `duckdb_sequence_name`).
 - Alembic needs no implementation class in `env.py`. The dialect registers `DuckDBImpl` when Alembic is loaded.
 
 ## Docs

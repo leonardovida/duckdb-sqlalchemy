@@ -22,6 +22,7 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql import operators, sqltypes, type_api
 from sqlalchemy.sql.base import SchemaEventTarget
 from sqlalchemy.sql.compiler import IdentifierPreparer
+from sqlalchemy.sql.elements import BindParameter, ColumnElement
 from sqlalchemy.sql.type_api import TypeEngine
 from sqlalchemy.types import BigInteger, Integer, SmallInteger, String
 
@@ -36,13 +37,18 @@ SQLA_DOUBLE = getattr(sqltypes, "DOUBLE", None)
 IS_GT_1 = Version(duckdb_version) > Version("1.0.0")
 
 
-def _process_decimal_bind(value: Any) -> Any:
+_Decimal = decimal.Decimal
+
+
+def _process_decimal_bind(value: Any, _decimal: type = _Decimal) -> Any:
     # DuckDB's binder drops a positive exponent (``Decimal("1E+5")`` binds as
     # ``1.00000``), so rewrite such values without an exponent first.
-    if isinstance(value, decimal.Decimal) and value.is_finite():
+    if type(value) is int:
+        return value
+    if isinstance(value, _decimal) and value.is_finite():
         exponent = value.as_tuple().exponent
         if isinstance(exponent, int) and exponent > 0:
-            return decimal.Decimal(format(value, "f"))
+            return _decimal(format(value, "f"))
     return value
 
 
@@ -374,7 +380,16 @@ class Map(sqltypes.Indexable, _MemberSchemaEvents, TypeEngine):
         def _setup_getitem(self, index: Any) -> Any:
             # DuckDB 1.3+ returns the value, or NULL for a missing key.
             map_type = typing.cast(Map, self.type)
-            key = literal(index, map_type.key_type)
+            if isinstance(index, ColumnElement):
+                if isinstance(index, BindParameter) and isinstance(
+                    index.type, sqltypes.NullType
+                ):
+                    key: Any = index._clone()
+                    key.type = map_type.key_type
+                else:
+                    key = index
+            else:
+                key = literal(index, map_type.key_type)
             return operators.getitem, key, map_type.value_type
 
     comparator_factory = Comparator

@@ -208,3 +208,19 @@ def test_engine_wide_arrow_option_keeps_orm_and_reflection_working(
     ]
     Base.metadata.drop_all(engine)
     assert inspect(engine).get_table_names() == []
+
+
+def test_arrow_result_supports_context_manager(make_engine: EngineFactory) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    with engine.connect() as conn:
+        with _arrow(conn).execute(text("SELECT i FROM range(3) r(i)")) as result:
+            assert result.arrow.column("i").to_pylist() == [0, 1, 2]
+
+        with _arrow(conn).execute(text("SELECT i FROM range(50000) r(i)")) as unread:
+            assert unread.returns_rows
+
+        with _arrow(conn).execute(text("SELECT i FROM range(50000) r(i)")) as streaming:
+            reader = streaming.batches(100)
+            assert reader.read_next_batch().num_rows == 100
+        assert reader.closed
+        assert conn.execute(text("SELECT 9")).scalar() == 9

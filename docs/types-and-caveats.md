@@ -13,10 +13,14 @@ Most SQLAlchemy core types map directly to DuckDB. DuckDB-specific helpers live 
 | --- | --- | --- |
 | `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UTinyInteger`, `USmallInteger`, `UInteger`, `UBigInteger` | UTINYINT, USMALLINT, UINTEGER, UBIGINT | Unsigned integers |
 | `TinyInteger` | TINYINT | Signed 1-byte integer |
-| `HugeInteger`, `UHugeInteger`, `VarInt` | HUGEINT, UHUGEINT, VARINT | 128-bit and variable-length integers |
+| `HugeInteger`, `UHugeInteger`, `VarInt` | HUGEINT, UHUGEINT, BIGNUM / VARINT | 128-bit and variable-length integers |
+| `TimestampNs`, `TimeNs` | TIMESTAMP_NS, TIME_NS | Nanosecond-precision timestamps and times |
 | `Struct` | STRUCT | Nested fields via dict of SQLAlchemy types |
 | `Map` | MAP | Key/value mapping |
 | `Union` | UNION | Union types via dict of SQLAlchemy types |
+| `FixedArray` | `TYPE[N]` | Fixed-size array (`FixedArray(item_type, size)`) |
+| `Variant` | VARIANT | Semi-structured variant values (DuckDB 1.5+) |
+| `Geometry` | GEOMETRY | Spatial geometry values |
 
 `Struct` fields and `Map` keys and values run their declared SQLAlchemy Python
 bind and result processors, recursively through nested containers. This includes
@@ -101,9 +105,10 @@ See [performance guidance](performance) for streaming and direct Arrow ingestion
 ## Row counts and regular expressions
 
 `result.rowcount` reports the rows changed by an INSERT, UPDATE, DELETE, or
-MERGE. It is `-1` for statements with a RETURNING clause and when several
-parameter sets run through DuckDB's `executemany()` (batched UPDATE and
-DELETE, and `text()` INSERTs). A Core `insert()` with several parameter sets is
+MERGE. Core `insert()`, `update()`, and `delete()` statements with `.returning(...)`
+report the exact number of returned rows, while `text()` statements with
+`RETURNING` report `-1`, as do statements executed through DuckDB's
+`executemany()` (batched UPDATE and DELETE, and `text()` INSERTs). A Core `insert()` with several parameter sets is
 counted in full when it fits in one `insertmanyvalues_page_size` page (1000
 rows by default) or uses the register fast path (`duckdb_copy_threshold`, 10,000
 rows by default). Between those sizes it runs in pages and `rowcount` reports
@@ -176,9 +181,14 @@ embedding_type = FixedArray(Float(), 384)  # DOUBLE[384]
 DuckDB enforces the size at insertion. `FixedArray` supports SQLAlchemy indexing
 and item bind/result processors. `ARRAY(Float())` remains a variable-length list.
 
-A nested type reflects as `NullType` when one of its members is an ENUM, because
-DuckDB does not report the enum's type name inside a nested type, or when a
-member type is not recognized. Declare those columns in your models.
+Named `Enum` types inside `Struct`, `Map`, `Union`, and `FixedArray` reflect as
+unnamed `Enum` members with their labels because DuckDB does not report the
+enum's type name inside a nested type. A nested type falls back to `NullType`
+only when a member type is not recognized; declare those columns in your models.
+
+`Struct` fields (`column["field"]`) and `Map` keys (`column[key]`) return values
+with their declared types. `Map` indexing accepts both Python literals and SQL
+expressions such as columns, `bindparam()`, and functions.
 
 MAP keys and values honor their declared SQLAlchemy Python bind and result
 processors, including `TypeDecorator` and nested MAP/LIST members. SQL NULL,
@@ -364,9 +374,9 @@ DuckDB 2.0 is supported for local databases on Python 3.11 and newer.
 
 - MotherDuck does not accept DuckDB 2.x clients yet. Install
   `duckdb-sqlalchemy[motherduck]` for MotherDuck, as described in the
-  [MotherDuck guide](motherduck.md#duckdb-versions).
+  [MotherDuck guide](motherduck#duckdb-versions).
 - Statements executed with `duckdb_arrow=True` run as DuckDB relations. See
-  [Arrow results on DuckDB 2.0](performance.md#arrow-results-on-duckdb-20) for
+  [Arrow results on DuckDB 2.0](performance#arrow-results-on-duckdb-20) for
   what that changes.
 - Arrow methods called on a DBAPI cursor without `duckdb_arrow=True`, such as
   `result.cursor.to_arrow_table()`, emit a DuckDB `UserWarning` about an extra

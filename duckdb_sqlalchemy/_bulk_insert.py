@@ -95,21 +95,13 @@ def _decimal_shape(value: Decimal) -> Optional[tuple[int, int]]:
     return max(len(digits) + exponent, 0), max(-exponent, 0)
 
 
-def _changes_values_on_register(
-    rows: Sequence[Any],
-    column_names: Sequence[str],
+def _column_changes_values_on_register(
+    index: int,
+    name: str,
+    values: Sequence[Any],
     numeric_columns: Optional[Collection[str]],
 ) -> bool:
-    """Whether registering ``rows`` would store different values.
-
-    The ordinary insert path binds each Python value on its own. A registered
-    Arrow table or DataFrame infers one type per column (or nested field),
-    which drops TIME offsets, turns intervals into microseconds, shifts naive
-    datetimes mixed with aware ones, merges STRUCT keys that differ only in
-    case, renders integers mixed with floats as floats and truncates
-    datetimes mixed with dates to midnight.
-    """
-    mapping_rows = rows_use_mapping_shape(rows)
+    """Whether registering one column's ``values`` would store different values."""
     aware: dict[tuple[Any, ...], bool] = {}
     # Whether a field holds datetimes (True) or plain dates (False). Arrow
     # infers a field with both as date32 and drops the time of day.
@@ -171,37 +163,51 @@ def _changes_values_on_register(
             )
         return False
 
+    kinds = set(map(type, values))
+    # A column of ints and floats infers as DOUBLE, so a text column
+    # would store "1.0" where the ordinary path stores "1". Arrow also
+    # turns a bool next to a float into 1.0, where the ordinary path
+    # stores "true".
+    if (
+        numeric_columns is not None
+        and name not in numeric_columns
+        and any(_is_float_kind(kind) for kind in kinds)
+        and any(_is_integer_kind(kind) or kind is bool for kind in kinds)
+    ):
+        return True
+    if kinds <= _PLAIN_KINDS:
+        # Arrow rejects integers beyond int64, and the DataFrame builder
+        # checks the HUGEINT range itself.
+        return False
+    if kinds <= _NAIVE_OR_AWARE_KINDS:
+        zones = {value.tzinfo is None for value in values if value is not None}
+        return len(zones) > 1
+    path = (index,)
+    preserve_decimal_text = numeric_columns is not None and name not in numeric_columns
+    return any(visit(value, path, preserve_decimal_text) for value in values)
+
+
+def _changes_values_on_register(
+    rows: Sequence[Any],
+    column_names: Sequence[str],
+    numeric_columns: Optional[Collection[str]],
+) -> bool:
+    """Whether registering ``rows`` would store different values.
+
+    The ordinary insert path binds each Python value on its own. A registered
+    Arrow table or DataFrame infers one type per column (or nested field),
+    which drops TIME offsets, turns intervals into microseconds, shifts naive
+    datetimes mixed with aware ones, merges STRUCT keys that differ only in
+    case, renders integers mixed with floats as floats and truncates
+    datetimes mixed with dates to midnight.
+    """
+    mapping_rows = rows_use_mapping_shape(rows)
     for index, name in enumerate(column_names):
         if mapping_rows:
             values = [row.get(name) for row in rows]
         else:
             values = [row[index] for row in rows]
-        kinds = set(map(type, values))
-        # A column of ints and floats infers as DOUBLE, so a text column
-        # would store "1.0" where the ordinary path stores "1". Arrow also
-        # turns a bool next to a float into 1.0, where the ordinary path
-        # stores "true".
-        if (
-            numeric_columns is not None
-            and name not in numeric_columns
-            and any(_is_float_kind(kind) for kind in kinds)
-            and any(_is_integer_kind(kind) or kind is bool for kind in kinds)
-        ):
-            return True
-        if kinds <= _PLAIN_KINDS:
-            # Arrow rejects integers beyond int64, and the DataFrame builder
-            # checks the HUGEINT range itself.
-            continue
-        if kinds <= _NAIVE_OR_AWARE_KINDS:
-            zones = {value.tzinfo is None for value in values if value is not None}
-            if len(zones) > 1:
-                return True
-            continue
-        path = (index,)
-        preserve_decimal_text = (
-            numeric_columns is not None and name not in numeric_columns
-        )
-        if any(visit(value, path, preserve_decimal_text) for value in values):
+        if _column_changes_values_on_register(index, name, values, numeric_columns):
             return True
     return False
 
@@ -334,6 +340,19 @@ def build_bulk_insert_arrow_table(
         return None
 
 
+def _has_unsafe_floating_integer(values: Sequence[Any], limit: int) -> bool:
+    for value in values:
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            if abs(value) > limit:
+                return True
+        elif isinstance(value, Integral):
+            if abs(int(value)) > limit:
+                return True
+    return False
+
+
 def build_bulk_insert_data(
     rows: Sequence[Any],
     column_names: Sequence[str],
@@ -344,11 +363,64 @@ def build_bulk_insert_data(
     ``numeric_columns`` names the target columns with a numeric type. When it
     is given, other columns decline values that mix integers and floats.
     """
-    if _changes_values_on_register(rows, column_names, numeric_columns):
-        return None
+    try:
+        import pyarrow as pa  # type: ignore[import-not-found]
+    except Exception:
+        pa = None
+
+    if pa is None or not column_names:
+        if _changes_values_on_register(rows, column_names, numeric_columns):
+            return None
+        if pa is not None:
+            data = build_bulk_insert_arrow_table(rows, column_names)
+            if data is not None:
+                return data
+        return build_bulk_insert_dataframe(rows, column_names)
+
+    mapping_rows = rows_use_mapping_shape(rows)
+    arrays: list[Any] = []
+    arrow_ok = True
+    # Extract each column once to validate register safety and build the Arrow
+    # array together, avoiding duplicate passes over ``rows``.
+    for index, name in enumerate(column_names):
+        if mapping_rows:
+            values = [row.get(name) for row in rows]
+        else:
+            values = [row[index] for row in rows]
+        if _column_changes_values_on_register(index, name, values, numeric_columns):
+            return None
+        if not arrow_ok:
+            continue
+        try:
+            array = pa.array(values)
+        except Exception:
+            arrow_ok = False
+            arrays.clear()
+            continue
+        if pa.types.is_floating(array.type):
+            limit = 2 ** (
+                11
+                if pa.types.is_float16(array.type)
+                else 24
+                if pa.types.is_float32(array.type)
+                else 53
+            )
+            if _has_unsafe_floating_integer(values, limit):
+                arrow_ok = False
+                arrays.clear()
+                continue
+        elif pa.types.is_nested(array.type):
+            if _has_unsafe_nested_numeric_coercion(values):
+                arrow_ok = False
+                arrays.clear()
+                continue
+        arrays.append(array)
+
+    if arrow_ok:
+        try:
+            return pa.Table.from_arrays(arrays, names=list(column_names))
+        except Exception:
+            pass
     # Arrow keeps nullable integer columns as int64; pandas is the fallback for
     # values Arrow cannot infer (UUID objects, integers beyond int64, ...).
-    data = build_bulk_insert_arrow_table(rows, column_names)
-    if data is not None:
-        return data
     return build_bulk_insert_dataframe(rows, column_names)

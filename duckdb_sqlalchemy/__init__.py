@@ -194,7 +194,7 @@ else:
 try:
     __version__ = package_version("duckdb-sqlalchemy")
 except PackageNotFoundError:  # pragma: no cover - source tree import fallback
-    __version__ = "1.5.6.8"
+    __version__ = "2.0.0"
 sqlalchemy_version = sqlalchemy.__version__
 SQLALCHEMY_VERSION = Version(sqlalchemy_version)
 SQLALCHEMY_2 = SQLALCHEMY_VERSION >= Version("2.0.0")
@@ -2183,6 +2183,7 @@ class Dialect(PGDialect_psycopg2):
             ),
         )
 
+    @cache  # type: ignore[call-arg]
     def get_view_names(
         self,
         connection: Any,
@@ -2407,7 +2408,8 @@ class Dialect(PGDialect_psycopg2):
         s = """
             SELECT database_name, schema_name, table_name
             FROM duckdb_tables()
-            WHERE schema_name NOT LIKE 'pg\\_%' ESCAPE '\\'
+            WHERE internal = false
+            AND schema_name NOT LIKE 'pg\\_%' ESCAPE '\\'
             """
         sql, params = self._build_query_where(
             schema_name=schema, default_to_current_schema=True

@@ -16,6 +16,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Table,
+    bindparam,
     func,
     insert,
     inspect,
@@ -162,3 +163,52 @@ def test_struct_fields_and_map_keys_return_their_declared_types(
         )
     with pytest.raises(TypeError, match="named by strings"):
         detail[0]
+
+
+def test_map_key_accepts_sql_expressions(make_engine: EngineFactory) -> None:
+    engine = make_engine("duckdb:///:memory:")
+    metadata = MetaData()
+    items = Table(
+        "items",
+        metadata,
+        Column("id", Integer, primary_key=True),
+        Column("wanted_key", String),
+        Column("wanted_status", Enum(Status)),
+        Column("prices", Map(String, Numeric(10, 2))),
+        Column("by_status", Map(Enum(Status), Numeric(10, 2))),
+    )
+    metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(
+            insert(items),
+            [
+                {
+                    "id": 1,
+                    "wanted_key": "USD",
+                    "wanted_status": Status.active,
+                    "prices": {
+                        "usd": decimal.Decimal("12.34"),
+                        "eur": decimal.Decimal("10.00"),
+                    },
+                    "by_status": {
+                        Status.active: decimal.Decimal("42.50"),
+                        Status.closed: decimal.Decimal("0.00"),
+                    },
+                }
+            ],
+        )
+        row = conn.execute(
+            select(
+                items.c.prices[func.lower(items.c.wanted_key)],
+                items.c.prices[bindparam("currency")],
+                items.c.by_status[items.c.wanted_status],
+                items.c.by_status[bindparam("target_status")],
+            ),
+            {"currency": "eur", "target_status": Status.closed},
+        ).one()
+        assert row == (
+            decimal.Decimal("12.34"),
+            decimal.Decimal("10.00"),
+            decimal.Decimal("42.50"),
+            decimal.Decimal("0.00"),
+        )

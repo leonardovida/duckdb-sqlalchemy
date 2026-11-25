@@ -76,9 +76,9 @@ storage = pragma_storage_info("events")
 stmt = select(storage.c.column_name, storage.c.segment_type, storage.c.compression)
 ```
 
-The helper names DuckDB's released columns by default. `include_segment_info=True`
-is passed to DuckDB as a named argument. DuckDB 1.5.x releases reject it with
-"Invalid named parameter"; only DuckDB development builds accept it.
+The helper names DuckDB's released columns by default: on DuckDB 2.0 and newer,
+`segment_info` is omitted unless `include_segment_info=True` is passed. DuckDB
+1.5.x releases reject `include_segment_info=True` with "Invalid named parameter".
 
 ## Quack remote queries
 
@@ -315,22 +315,30 @@ line-by-line `line` result on DuckDB 1.5.5 and newer.
 
 ## Arrow results
 
-For large reads, you can request Arrow tables directly:
+For large reads, you can request Arrow tables or bounded RecordBatch streams directly:
 
 ```python
 from pyarrow import Table as ArrowTable
 from sqlalchemy import select
 
 with engine.connect().execution_options(duckdb_arrow=True) as conn:
-    result = conn.execute(select(parquet.c.event_id, parquet.c.ts))
-    table = result.arrow  # or result.all()
-    assert isinstance(table, ArrowTable)
+    with conn.execute(select(parquet.c.event_id, parquet.c.ts)) as result:
+        table = result.arrow  # or result.all()
+        assert isinstance(table, ArrowTable)
+
+    with conn.execute(select(parquet.c.event_id, parquet.c.ts)) as result:
+        with result.batches(batch_size=65536) as reader:
+            for batch in reader:
+                ...
 ```
 
 Notes:
 
 - Arrow results consume the cursor; fetch rows or Arrow, not both.
 - Requires `pyarrow` in your environment.
+- See [Bounded Arrow reads](performance#bounded-arrow-reads) and
+  [Arrow results on DuckDB 2.0](performance#arrow-results-on-duckdb-20) for
+  streaming ownership and DuckDB 2.0 relation behavior.
 
 ## Streaming reads
 
@@ -449,8 +457,8 @@ expressions remain trusted application code.
 COPY options such as `compression` are passed as keyword arguments. The format
 is always Parquet and cannot be overridden. Paths may be strings or `Path`
 objects and are escaped as SQL literals for compatibility with older DuckDB
-versions. The helper is tested with DuckDB 1.3.0 and 1.5.6 and SQLAlchemy 2.0;
-older DuckDB versions are not verified for this workflow.
+versions. The helper is tested across the supported DuckDB 1.3–2.0 and
+SQLAlchemy 2.0–2.1 matrix; older DuckDB versions are not verified for this workflow.
 
 File writes follow DuckDB COPY semantics: a single-file export replaces an
 existing destination, and rolling back the SQL transaction does not undo the
@@ -503,8 +511,8 @@ no Parquet files, so check the COPY count before scanning the glob.
 Run the self-contained [partitioned Parquet example](https://github.com/leonardovida/duckdb-sqlalchemy/blob/main/examples/partitioned_parquet.py)
 with `uv run python examples/partitioned_parquet.py` from the repository. It
 creates temporary sample data, exports a bound query, and verifies the recovered
-rows and partition directories. This local workflow is verified with DuckDB
-1.3.0 / SQLAlchemy 2.0.0 and DuckDB 1.5.6 / SQLAlchemy 2.0.52.
+rows and partition directories. This local workflow is verified across the
+supported DuckDB 1.3–2.0 and SQLAlchemy 2.0–2.1 matrix.
 
 By default, a second export to a nonempty destination fails. Prefer a distinct
 directory per snapshot. `append=True` adds files; it does not update or
