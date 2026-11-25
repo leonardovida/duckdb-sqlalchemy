@@ -584,18 +584,32 @@ def _move_credentials_to_config(
 
 
 def _normalize_path_item(path: Union[str, SAURL]) -> SAURL:
+    if isinstance(path, str) and path.startswith("duckdb://"):
+        path = sa_make_url(path)
     if isinstance(path, SAURL):
-        return path
-    if path.startswith("duckdb://"):
-        return sa_make_url(path)
+        # Move a query string embedded in the database into the URL query,
+        # so the engine label can drop credentials from it. Keys already in
+        # the URL query win.
+        database, separator, query_string = (path.database or "").partition("?")
+        if not separator:
+            return path
+        return path.set(
+            database=database,
+            query={**_parse_path_query(query_string), **dict(path.query)},
+        )
     database, separator, query_string = path.partition("?")
     if not separator:
         return SAURL.create("duckdb", database=path)
-    query: Dict[str, Any] = {
+    return SAURL.create(
+        "duckdb", database=database, query=_parse_path_query(query_string)
+    )
+
+
+def _parse_path_query(query_string: str) -> Dict[str, Any]:
+    return {
         key: values[0] if len(values) == 1 else tuple(values)
         for key, values in parse_qs(query_string, keep_blank_values=True).items()
     }
-    return SAURL.create("duckdb", database=database, query=query)
 
 
 def _merge_connect_args(
@@ -638,20 +652,22 @@ def create_engine_from_paths(
 
     from . import Dialect  # avoid import cycle
 
-    dialect = Dialect()
     connect_params = []
     for url in urls:
-        _, params = dialect.create_connect_args(url)
+        _, params = Dialect().create_connect_args(url)
         connect_params.append(_merge_connect_args(params, connect_args or {}))
 
     params_cycle = cycle(connect_params)
 
     def creator() -> Any:
         params = _copy_connect_params(next(params_cycle))
-        return dialect.connect(**params)
+        # The engine's dialect has the DBAPI's numeric_dollar paramstyle. A
+        # bare Dialect() renders SET values for pyformat and doubles '%'.
+        return engine.dialect.connect(**params)
 
     _default_to_queue_pool(engine_kwargs)
     # The creator connects, so the engine URL only labels the engine. Keep
     # credentials out of it.
     label = urls[0].difference_update_query(MOTHERDUCK_CREDENTIAL_KEYS)
-    return create_engine(label, creator=creator, **engine_kwargs)
+    engine = create_engine(label, creator=creator, **engine_kwargs)
+    return engine

@@ -1,8 +1,9 @@
 from typing import Any
 
 import pytest
+from sqlalchemy.engine import URL
 
-from duckdb_sqlalchemy import Dialect, MotherDuckURL
+from duckdb_sqlalchemy import Dialect, MotherDuckURL, create_engine_from_paths
 from duckdb_sqlalchemy.motherduck import append_query_to_database
 
 
@@ -125,3 +126,15 @@ def test_connect_args_keep_existing_database_values_literal() -> None:
     assert Dialect().create_connect_args(url)[1]["database"] == (
         "md:db?cache_buster=x+y&dbinstance_inactivity_ttl=1 hour"
     )
+
+
+def test_engine_from_paths_keeps_tokens_in_url_objects_out_of_the_label() -> None:
+    path = URL.create(
+        "duckdb", database="md:db?motherduck_token=SECRET&attach_mode=single"
+    )
+    engine = create_engine_from_paths([path])
+    try:
+        assert "SECRET" not in repr(engine)
+        assert engine.url.query == {"attach_mode": "single"}
+    finally:
+        engine.dispose()

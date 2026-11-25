@@ -74,6 +74,7 @@ from ._bulk_insert import has_bulk_insert_data_library as _has_bulk_insert_data_
 from ._bulk_insert import (
     infer_bulk_insert_column_keys as _infer_bulk_insert_column_keys,
 )
+from ._bulk_insert import pandas_rows_to_analyze as _pandas_rows_to_analyze
 from ._checkpoint import checkpoint
 from ._pool import (
     _default_pool_class_for_database,
@@ -3980,6 +3981,7 @@ class Dialect(PGDialect_psycopg2):
         insert_sql = (
             f"INSERT INTO {target} ({columns}) SELECT {columns} FROM {view_name}"
         )
+        sample = self._widen_pandas_analyze_sample(dbapi_conn, data)
         dbapi_conn.register(view_name, data)
         try:
             cursor.execute(insert_sql)
@@ -3988,7 +3990,34 @@ class Dialect(PGDialect_psycopg2):
                 dbapi_conn.unregister(view_name)
             except Exception:
                 pass
+            if sample is not None:
+                # Through the connection, not the cursor, so the cursor keeps
+                # the INSERT's row count. After a failed INSERT in an open
+                # transaction DuckDB refuses the SET, and the wider sample
+                # stays on this connection, which only slows later scans.
+                try:
+                    dbapi_conn.execute(f"SET pandas_analyze_sample = {sample}")
+                except Exception:
+                    pass
         return True
+
+    @staticmethod
+    def _widen_pandas_analyze_sample(dbapi_conn: Any, data: Any) -> Optional[int]:
+        """Make DuckDB type a DataFrame from every row, not from a sample.
+
+        Return the previous ``pandas_analyze_sample`` to restore, or None
+        when nothing changed. The setting is per connection.
+        """
+        rows = _pandas_rows_to_analyze(data)
+        if rows is None:
+            return None
+        previous = dbapi_conn.execute(
+            "SELECT current_setting('pandas_analyze_sample')"
+        ).fetchone()[0]
+        if rows <= previous:
+            return None
+        dbapi_conn.execute(f"SET pandas_analyze_sample = {int(rows)}")
+        return int(previous)
 
     def do_executemany(
         self, cursor: Any, statement: Any, parameters: Any, context: Optional[Any] = ...
